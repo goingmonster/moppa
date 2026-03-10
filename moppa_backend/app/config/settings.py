@@ -32,12 +32,27 @@ class Settings:
     db_schema: str
     db_user: str
     db_password: str
+    source_db_host: str
+    source_db_port: int
+    source_db_name: str
+    source_db_schema: str
+    source_db_user: str
+    source_db_password: str
+    source_system_name: str
+    source_fetch_limit: int
+    scheduler_enabled: bool
 
     @property
     def database_url(self) -> str:
         user = quote_plus(self.db_user)
         password = quote_plus(self.db_password)
         return f"postgresql://{user}:{password}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+    @property
+    def source_database_url(self) -> str:
+        user = quote_plus(self.source_db_user)
+        password = quote_plus(self.source_db_password)
+        return f"postgresql://{user}:{password}@{self.source_db_host}:{self.source_db_port}/{self.source_db_name}"
 
 
 def env_bool(key: str, default: bool) -> bool:
@@ -70,6 +85,15 @@ def load_settings() -> Settings:
         db_schema=os.getenv("DB_SCHEMA", "public"),
         db_user=os.getenv("DB_USER", "postgres"),
         db_password=os.getenv("DB_PASSWORD", ""),
+        source_db_host=os.getenv("SOURCE_DB_HOST", "127.0.0.1"),
+        source_db_port=env_int("SOURCE_DB_PORT", 5432),
+        source_db_name=os.getenv("SOURCE_DB_NAME", "news_event"),
+        source_db_schema=os.getenv("SOURCE_DB_SCHEMA", "public"),
+        source_db_user=os.getenv("SOURCE_DB_USER", "postgres"),
+        source_db_password=os.getenv("SOURCE_DB_PASSWORD", ""),
+        source_system_name=os.getenv("SOURCE_SYSTEM_NAME", "news_event_crawler"),
+        source_fetch_limit=env_int("SOURCE_FETCH_LIMIT", 200),
+        scheduler_enabled=env_bool("SCHEDULER_ENABLED", True),
     )
 
 

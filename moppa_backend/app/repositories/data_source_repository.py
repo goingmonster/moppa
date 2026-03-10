@@ -21,3 +21,27 @@ class DataSourceRepository:
             {"source_system": source_system},
         ).fetchone()
         return row is not None
+
+    def ensure_source_system(self, source_system: str) -> None:
+        if self.exists_active_source_system(source_system):
+            return
+        _ = self.db.execute(
+            text(
+                """
+                INSERT INTO data_source (
+                    name, source_system, source_type, connection_config,
+                    secret_ref, credibility_level, sync_frequency, is_active, version
+                )
+                VALUES (
+                    :name, :source_system, 'database', '{}'::jsonb,
+                    :secret_ref, 3, INTERVAL '1 hour', TRUE, 'v1.0'
+                )
+                """
+            ),
+            {
+                "name": f"auto-{source_system}",
+                "source_system": source_system,
+                "secret_ref": "env/source-db",
+            },
+        )
+        self.db.commit()

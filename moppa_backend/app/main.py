@@ -5,9 +5,11 @@ from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.questions import router as questions_router
 from app.api.s1_ingest import router as s1_ingest_router
+from app.api.task_configs import router as task_configs_router
 from app.api.tasks import router as tasks_router
 from app.config import settings
 from app.core import register_exception_handlers
+from app.jobs.s1_scheduler import start_s1_scheduler, stop_s1_scheduler
 
 
 def root() -> dict[str, str]:
@@ -26,8 +28,18 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(questions_router)
     app.include_router(s1_ingest_router)
+    app.include_router(task_configs_router)
     app.include_router(tasks_router)
     app.add_api_route("/", root, methods=["GET"], tags=["root"])
+
+    @app.on_event("startup")
+    def on_startup() -> None:
+        start_s1_scheduler()
+
+    @app.on_event("shutdown")
+    def on_shutdown() -> None:
+        stop_s1_scheduler()
+
     register_exception_handlers(app)
 
     return app

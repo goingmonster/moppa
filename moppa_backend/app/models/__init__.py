@@ -23,6 +23,13 @@ from .task_execution_model import (
     TaskExecutionUpdateModel,
     TaskExecutionStatusUpdateModel,
 )
+from .task_config_model import (
+    TaskConfigCreateModel,
+    TaskConfigItemModel,
+    TaskConfigPaginationResponse,
+    TaskConfigPayloadModel,
+    TaskConfigUpdateModel,
+)
 
 __all__ = [
     "EventCreateModel",
@@ -51,4 +58,9 @@ __all__ = [
     "TaskExecutionPaginationResponse",
     "TaskExecutionUpdateModel",
     "TaskExecutionStatusUpdateModel",
+    "TaskConfigPayloadModel",
+    "TaskConfigCreateModel",
+    "TaskConfigUpdateModel",
+    "TaskConfigItemModel",
+    "TaskConfigPaginationResponse",
 ]
