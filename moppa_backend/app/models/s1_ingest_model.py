@@ -25,3 +25,29 @@ class S1TaskResponseModel(BaseModel):
     task_id: str
     status: str
     result: dict[str, object]
+
+
+class S1JobDetailResponseModel(BaseModel):
+    task_id: str
+    task_type: str
+    idempotency_key: str
+    status: str
+    attempt_count: int
+    result: dict[str, object]
+    metrics: dict[str, object]
+    error_message: str | None
+    next_retry_at: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    created_at: datetime
+    trace_id: UUID
+
+
+class S1DryRunRequestModel(BaseModel):
+    event: S1EventInputModel
+
+
+class S1DryRunResponseModel(BaseModel):
+    status: str
+    reasons: list[str]
+    rules_applied_count: int

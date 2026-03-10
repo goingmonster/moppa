@@ -7,7 +7,15 @@ from .event_filter_rule_model import (
 )
 from .event_model import EventCreateModel, EventListItemModel, EventPaginationResponse, EventUpdateModel
 from .question_model import QuestionCreateModel, QuestionListItemModel, QuestionPaginationResponse, QuestionUpdateModel
-from .s1_ingest_model import S1EventInputModel, S1PullNowRequestModel, S1PushRequestModel, S1TaskResponseModel
+from .s1_ingest_model import (
+    S1DryRunRequestModel,
+    S1DryRunResponseModel,
+    S1EventInputModel,
+    S1JobDetailResponseModel,
+    S1PullNowRequestModel,
+    S1PushRequestModel,
+    S1TaskResponseModel,
+)
 from .task_execution_model import (
     TaskExecutionCreateModel,
     TaskExecutionListItemModel,
@@ -30,6 +38,9 @@ __all__ = [
     "QuestionPaginationResponse",
     "QuestionUpdateModel",
     "S1EventInputModel",
+    "S1DryRunRequestModel",
+    "S1DryRunResponseModel",
+    "S1JobDetailResponseModel",
     "S1PushRequestModel",
     "S1PullNowRequestModel",
     "S1TaskResponseModel",

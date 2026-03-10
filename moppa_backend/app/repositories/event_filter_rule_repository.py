@@ -44,6 +44,18 @@ class EventFilterRuleRepository:
         )
         return items, int(total or 0)
 
+    def list_active_rules(self) -> list[EventFilterRuleEntity]:
+        return list(
+            self.db.scalars(
+                select(EventFilterRuleEntity)
+                .where(
+                    EventFilterRuleEntity.deleted_at.is_(None),
+                    EventFilterRuleEntity.status == "active",
+                )
+                .order_by(EventFilterRuleEntity.priority.desc(), EventFilterRuleEntity.created_at.asc())
+            )
+        )
+
     def get_by_id(self, rule_id: str) -> EventFilterRuleEntity | None:
         entity = self.db.get(EventFilterRuleEntity, UUID(rule_id))
         if entity is None or entity.deleted_at is not None:

@@ -15,6 +15,9 @@ class EventFilterRuleService:
     def list_paginated(self, page: int, page_size: int) -> tuple[list[EventFilterRuleEntity], int]:
         return self.repository.list_paginated(page, page_size)
 
+    def list_active_rules(self) -> list[EventFilterRuleEntity]:
+        return self.repository.list_active_rules()
+
     def get_by_id(self, rule_id: str) -> EventFilterRuleEntity | None:
         return self.repository.get_by_id(rule_id)
 
