@@ -47,6 +47,16 @@ backend/wheels/
 .installed.cfg
 *.egg
 
+# Python venv (current backend path)
+moppa_backend/.venv/
+moppa_backend/venv/
+moppa_backend/env/
+moppa_backend/__pycache__/
+moppa_backend/**/__pycache__/
+moppa_backend/*.py[cod]
+moppa_backend/*$py.class
+moppa_backend/**/*.py[cod]
+
 # Environment variables
 .env
 .env.local

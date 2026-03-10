@@ -1,0 +1,9 @@
+[project]
+name = "moppa-backend"
+version = "0.1.0"
+description = "FastAPI backend for MOPPA"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.116.1",
+    "uvicorn[standard]==0.35.0",
+]
