@@ -1,22 +1,31 @@
+-- MOPPA 一体化初始化脚本（无 include，PG10 触发器兼容）
+-- 作用：清空 public schema 后重建全部对象
+
+ROLLBACK;
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+GRANT ALL ON SCHEMA public TO CURRENT_USER;
+GRANT ALL ON SCHEMA public TO public;
+
 -- MOPPA 与 SOP 对齐数据库结构（审核版）
--- 目标数据库：PostgreSQL 14+
+-- 目标数据库：PostgreSQL 10+（触发器采用 EXECUTE PROCEDURE 兼容写法）
 -- 说明：
 -- 1）所有时间字段统一使用 TIMESTAMPTZ（建议 UTC）
 -- 2）敏感信息仅保存引用（secret_ref/api_key_ref），不保存明文
 -- 3）软删除统一使用 deleted_at
-BEGIN;
-
 -- 启用 UUID 与加密辅助函数
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- 通用触发器函数：更新时自动维护 updated_at
 CREATE OR REPLACE FUNCTION set_updated_at()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $func$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$func$;
 
 -- 枚举类型按条件创建，保证脚本可重复执行
 DO $$
@@ -535,82 +544,83 @@ CREATE INDEX IF NOT EXISTS idx_feedback_status_priority ON feedback(status, prio
 
 CREATE INDEX IF NOT EXISTS idx_quality_metric_name_window ON quality_metric(metric_name, date_window DESC);
 
+-- PostgreSQL 10 兼容版：触发器使用 EXECUTE PROCEDURE
 -- 触发器：为可变更表自动同步 updated_at
 DROP TRIGGER IF EXISTS trg_app_user_updated_at ON app_user;
 CREATE TRIGGER trg_app_user_updated_at BEFORE UPDATE ON app_user
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_data_source_updated_at ON data_source;
 CREATE TRIGGER trg_data_source_updated_at BEFORE UPDATE ON data_source
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_model_endpoint_updated_at ON model_endpoint;
 CREATE TRIGGER trg_model_endpoint_updated_at BEFORE UPDATE ON model_endpoint
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_rule_level_config_updated_at ON rule_level_config;
 CREATE TRIGGER trg_rule_level_config_updated_at BEFORE UPDATE ON rule_level_config
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_event_filter_rule_updated_at ON event_filter_rule;
 CREATE TRIGGER trg_event_filter_rule_updated_at BEFORE UPDATE ON event_filter_rule
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_question_template_updated_at ON question_template;
 CREATE TRIGGER trg_question_template_updated_at BEFORE UPDATE ON question_template
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_scoring_rule_version_updated_at ON scoring_rule_version;
 CREATE TRIGGER trg_scoring_rule_version_updated_at BEFORE UPDATE ON scoring_rule_version
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_event_updated_at ON event;
 CREATE TRIGGER trg_event_updated_at BEFORE UPDATE ON event
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_question_updated_at ON question;
 CREATE TRIGGER trg_question_updated_at BEFORE UPDATE ON question
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_prediction_updated_at ON prediction;
 CREATE TRIGGER trg_prediction_updated_at BEFORE UPDATE ON prediction
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_ground_truth_updated_at ON ground_truth;
 CREATE TRIGGER trg_ground_truth_updated_at BEFORE UPDATE ON ground_truth
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_score_record_updated_at ON score_record;
 CREATE TRIGGER trg_score_record_updated_at BEFORE UPDATE ON score_record
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_leaderboard_updated_at ON leaderboard;
 CREATE TRIGGER trg_leaderboard_updated_at BEFORE UPDATE ON leaderboard
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_feedback_updated_at ON feedback;
 CREATE TRIGGER trg_feedback_updated_at BEFORE UPDATE ON feedback
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_community_prediction_updated_at ON community_prediction;
 CREATE TRIGGER trg_community_prediction_updated_at BEFORE UPDATE ON community_prediction
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_change_log_updated_at ON change_log;
 CREATE TRIGGER trg_change_log_updated_at BEFORE UPDATE ON change_log
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_pipeline_task_execution_updated_at ON pipeline_task_execution;
 CREATE TRIGGER trg_pipeline_task_execution_updated_at BEFORE UPDATE ON pipeline_task_execution
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_system_config_updated_at ON system_config;
 CREATE TRIGGER trg_system_config_updated_at BEFORE UPDATE ON system_config
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_incident_record_updated_at ON incident_record;
 CREATE TRIGGER trg_incident_record_updated_at BEFORE UPDATE ON incident_record
-FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 -- 初始化基础 SOP 配置（幂等插入）
 INSERT INTO rule_level_config(level, level_name, description, weight)
@@ -642,5 +652,3 @@ VALUES
     ('quality_gate.truth_coverage_min', '0.97'::jsonb, 'min truth coverage', 'quality_gate', FALSE),
     ('quality_gate.delayed_truth_rate_max', '0.02'::jsonb, 'max delayed truth ratio', 'quality_gate', FALSE)
 ON CONFLICT (key) DO NOTHING;
-
-COMMIT;
