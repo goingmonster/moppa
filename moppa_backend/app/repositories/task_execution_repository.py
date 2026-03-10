@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -23,6 +25,84 @@ class TaskExecutionRepository:
         self.db.flush()
         self.db.commit()
         return str(entity.id)
+
+    def get_by_idempotency_key(self, idempotency_key: str) -> TaskExecutionEntity | None:
+        return self.db.scalar(
+            select(TaskExecutionEntity).where(TaskExecutionEntity.idempotency_key == idempotency_key)
+        )
+
+    def create_pending(
+        self,
+        task_type: str,
+        idempotency_key: str,
+        trace_id: UUID,
+        business_id: UUID | None,
+        date_window: datetime | None,
+    ) -> TaskExecutionEntity:
+        entity = TaskExecutionEntity(
+            task_type=task_type,
+            idempotency_key=idempotency_key,
+            trace_id=trace_id,
+            status="pending",
+            attempt_count=0,
+            business_id=business_id,
+            date_window=date_window,
+        )
+        self.db.add(entity)
+        self.db.flush()
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
+
+    def mark_running(self, task_id: UUID) -> TaskExecutionEntity | None:
+        entity = self.db.get(TaskExecutionEntity, task_id)
+        if entity is None:
+            return None
+        entity.status = "running"
+        entity.started_at = datetime.now(timezone.utc)
+        entity.error_message = None
+        entity.next_retry_at = None
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
+
+    def mark_completed(
+        self,
+        task_id: UUID,
+        result: Mapping[str, object],
+        metrics: Mapping[str, object],
+    ) -> TaskExecutionEntity | None:
+        entity = self.db.get(TaskExecutionEntity, task_id)
+        if entity is None:
+            return None
+        entity.status = "completed"
+        entity.result = dict(result)
+        entity.metrics = dict(metrics)
+        entity.finished_at = datetime.now(timezone.utc)
+        entity.error_message = None
+        entity.next_retry_at = None
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
+
+    def mark_failed(self, task_id: UUID, error_message: str, max_attempts: int = 3) -> TaskExecutionEntity | None:
+        entity = self.db.get(TaskExecutionEntity, task_id)
+        if entity is None:
+            return None
+        entity.attempt_count += 1
+        entity.error_message = error_message
+        entity.finished_at = datetime.now(timezone.utc)
+        if entity.attempt_count >= max_attempts:
+            entity.status = "dead_letter"
+            entity.next_retry_at = None
+        else:
+            entity.status = "failed"
+            backoff_minutes = [1, 5, 15]
+            delay = backoff_minutes[min(entity.attempt_count - 1, len(backoff_minutes) - 1)]
+            entity.next_retry_at = datetime.now(timezone.utc) + timedelta(minutes=delay)
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
 
     def list_paginated(self, page: int, page_size: int) -> tuple[list[TaskExecutionEntity], int]:
         offset = (page - 1) * page_size

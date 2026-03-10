@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 
+from app.api.event_filter_rules import router as event_filter_rules_router
 from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.questions import router as questions_router
+from app.api.s1_ingest import router as s1_ingest_router
 from app.api.tasks import router as tasks_router
 from app.config import settings
 from app.core import register_exception_handlers
@@ -20,8 +22,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
     app.include_router(events_router)
+    app.include_router(event_filter_rules_router)
     app.include_router(health_router)
     app.include_router(questions_router)
+    app.include_router(s1_ingest_router)
     app.include_router(tasks_router)
     app.add_api_route("/", root, methods=["GET"], tags=["root"])
     register_exception_handlers(app)

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import EventEntity
@@ -42,6 +42,71 @@ class EventRepository:
             select(func.count()).select_from(EventEntity).where(EventEntity.deleted_at.is_(None))
         )
         return items, int(total or 0)
+
+    def get_by_event_key(self, event_key: str, version: str = "v1.0") -> EventEntity | None:
+        return self.db.scalar(
+            select(EventEntity).where(
+                EventEntity.event_key == event_key,
+                EventEntity.deleted_at.is_(None),
+                EventEntity.__table__.c.version == version,
+            )
+        )
+
+    def ingest_event(
+        self,
+        event_key: str,
+        content: str,
+        source_system: str,
+        credibility_level: int,
+        event_time: datetime,
+        trace_id: UUID,
+        version: str = "v1.0",
+    ) -> tuple[EventEntity, bool]:
+        existing = self.db.scalar(
+            select(EventEntity).where(EventEntity.event_key == event_key, EventEntity.__table__.c.version == version)
+        )
+        if existing is not None:
+            return existing, False
+
+        entity = EventEntity(
+            event_key=event_key,
+            content=content,
+            source_system=source_system,
+            credibility_level=credibility_level,
+            event_time=event_time,
+            trace_id=trace_id,
+            filter_status="pending",
+        )
+        self.db.add(entity)
+        self.db.flush()
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity, True
+
+    def set_filter_result(self, event_id: UUID, status: str, reasons: list[str]) -> EventEntity | None:
+        entity = self.db.get(EventEntity, event_id)
+        if entity is None:
+            return None
+        _ = self.db.execute(
+            text(
+                """
+                UPDATE event
+                SET filter_status = :status,
+                    filter_reasons = :reasons,
+                    updated_at = :updated_at
+                WHERE id = :event_id
+                """
+            ),
+            {
+                "status": status,
+                "reasons": reasons,
+                "updated_at": datetime.now(timezone.utc),
+                "event_id": str(event_id),
+            },
+        )
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
 
     def get_by_id(self, event_id: str) -> EventEntity | None:
         entity = self.db.get(EventEntity, UUID(event_id))
