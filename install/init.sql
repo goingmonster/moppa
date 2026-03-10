@@ -1,11 +1,8 @@
 -- MOPPA 一体化初始化脚本（无 include，PG10 触发器兼容）
--- 作用：清空 public schema 后重建全部对象
-
-ROLLBACK;
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
-GRANT ALL ON SCHEMA public TO CURRENT_USER;
-GRANT ALL ON SCHEMA public TO public;
+GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
 
 -- MOPPA 与 SOP 对齐数据库结构（审核版）
 -- 目标数据库：PostgreSQL 10+（触发器采用 EXECUTE PROCEDURE 兼容写法）
@@ -23,6 +20,69 @@ LANGUAGE plpgsql
 AS $func$
 BEGIN
     NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$func$;
+
+CREATE OR REPLACE FUNCTION validate_feedback_target()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $func$
+DECLARE
+    v_exists BOOLEAN := FALSE;
+BEGIN
+    CASE NEW.target_type
+        WHEN 'question' THEN
+            SELECT EXISTS (
+                SELECT 1 FROM question q
+                WHERE q.id = NEW.target_id AND q.deleted_at IS NULL
+            ) INTO v_exists;
+        WHEN 'prediction' THEN
+            SELECT EXISTS (
+                SELECT 1 FROM prediction p
+                WHERE p.id = NEW.target_id AND p.deleted_at IS NULL
+            ) INTO v_exists;
+        WHEN 'score' THEN
+            SELECT EXISTS (
+                SELECT 1 FROM score_record s
+                WHERE s.id = NEW.target_id
+            ) INTO v_exists;
+        WHEN 'leaderboard' THEN
+            SELECT EXISTS (
+                SELECT 1 FROM leaderboard l
+                WHERE l.id = NEW.target_id AND l.deleted_at IS NULL
+            ) INTO v_exists;
+    END CASE;
+
+    IF NOT v_exists THEN
+        RAISE EXCEPTION 'Invalid feedback target: type=% id=%', NEW.target_type, NEW.target_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$func$;
+
+CREATE OR REPLACE FUNCTION validate_ground_truth_publish_time()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $func$
+DECLARE
+    v_deadline TIMESTAMPTZ;
+BEGIN
+    SELECT q.deadline
+    INTO v_deadline
+    FROM question q
+    WHERE q.id = NEW.question_id AND q.deleted_at IS NULL;
+
+    IF v_deadline IS NULL THEN
+        RAISE EXCEPTION 'Question not found or deleted for question_id=%', NEW.question_id;
+    END IF;
+
+    IF NEW.publish_time < v_deadline THEN
+        RAISE EXCEPTION 'Ground truth publish_time (%) cannot be earlier than question deadline (%) for question_id=%',
+            NEW.publish_time, v_deadline, NEW.question_id;
+    END IF;
+
     RETURN NEW;
 END;
 $func$;
@@ -125,7 +185,13 @@ CREATE TABLE IF NOT EXISTS data_source (
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at TIMESTAMPTZ
+    deleted_at TIMESTAMPTZ,
+    CONSTRAINT ck_data_source_no_plaintext_secret CHECK (
+        secret_ref IS NOT NULL
+        OR NOT (
+            connection_config ?| ARRAY['password', 'passwd', 'pwd', 'api_key', 'apikey', 'token', 'secret', 'access_key']
+        )
+    )
 );
 
 -- 模型端点注册表：每个可调用模型对应一行
@@ -241,7 +307,7 @@ CREATE TABLE IF NOT EXISTS event (
 CREATE TABLE IF NOT EXISTS question (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
-    event_id UUID NOT NULL REFERENCES event(id) ON DELETE CASCADE,
+    event_id UUID NOT NULL REFERENCES event(id) ON DELETE RESTRICT,
     template_id UUID REFERENCES question_template(id),
     level SMALLINT NOT NULL REFERENCES rule_level_config(level),
     content TEXT NOT NULL,
@@ -268,7 +334,7 @@ WHERE duplicate_check_hash IS NOT NULL AND deleted_at IS NULL;
 -- S3 阶段人工审核轨迹表（质量门）
 CREATE TABLE IF NOT EXISTS question_review (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    question_id UUID NOT NULL REFERENCES question(id) ON DELETE CASCADE,
+    question_id UUID NOT NULL REFERENCES question(id) ON DELETE RESTRICT,
     reviewer_id UUID NOT NULL REFERENCES app_user(id),
     review_type VARCHAR(30) NOT NULL CHECK (review_type IN ('initial', 'spot_check', 'duplicate_review')),
     decision review_decision NOT NULL,
@@ -283,7 +349,7 @@ CREATE TABLE IF NOT EXISTS question_review (
 );
 
 -- 调度执行台账：包含幂等、重试、超时控制
-CREATE TABLE IF NOT EXISTS pipeline_task_execution (
+CREATE TABLE IF NOT EXISTS task_execution (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     task_type VARCHAR(50) NOT NULL,
     business_id UUID,
@@ -304,14 +370,14 @@ CREATE TABLE IF NOT EXISTS pipeline_task_execution (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ,
-    CONSTRAINT ck_pipeline_task_time CHECK (finished_at IS NULL OR started_at IS NULL OR finished_at >= started_at)
+    CONSTRAINT ck_task_execution_time CHECK (finished_at IS NULL OR started_at IS NULL OR finished_at >= started_at)
 );
 
 -- S4 阶段模型预测结果表
 CREATE TABLE IF NOT EXISTS prediction (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
-    question_id UUID NOT NULL REFERENCES question(id) ON DELETE CASCADE,
+    question_id UUID NOT NULL REFERENCES question(id) ON DELETE RESTRICT,
     model_id UUID NOT NULL REFERENCES model_endpoint(id),
     prediction_content TEXT NOT NULL,
     confidence NUMERIC(5,2) CHECK (confidence BETWEEN 0 AND 100),
@@ -319,7 +385,7 @@ CREATE TABLE IF NOT EXISTS prediction (
     token_usage JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_system VARCHAR(100) NOT NULL DEFAULT 'moppa',
     trace_id UUID NOT NULL,
-    task_execution_id UUID REFERENCES pipeline_task_execution(id),
+    task_execution_id UUID REFERENCES task_execution(id),
     status prediction_status NOT NULL DEFAULT 'pending',
     error_message TEXT,
     submission_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -336,7 +402,7 @@ WHERE deleted_at IS NULL;
 CREATE TABLE IF NOT EXISTS ground_truth (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
-    question_id UUID NOT NULL REFERENCES question(id) ON DELETE CASCADE,
+    question_id UUID NOT NULL REFERENCES question(id) ON DELETE RESTRICT,
     answer TEXT NOT NULL,
     evidence_links TEXT[] NOT NULL DEFAULT '{}',
     publish_time TIMESTAMPTZ NOT NULL,
@@ -355,8 +421,8 @@ CREATE TABLE IF NOT EXISTS ground_truth (
 CREATE TABLE IF NOT EXISTS score_record (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
-    prediction_id UUID NOT NULL REFERENCES prediction(id) ON DELETE CASCADE,
-    ground_truth_id UUID NOT NULL REFERENCES ground_truth(id) ON DELETE CASCADE,
+    prediction_id UUID NOT NULL REFERENCES prediction(id) ON DELETE RESTRICT,
+    ground_truth_id UUID NOT NULL REFERENCES ground_truth(id) ON DELETE RESTRICT,
     scoring_rule_version VARCHAR(30) NOT NULL REFERENCES scoring_rule_version(version),
     dimension_scores JSONB NOT NULL,
     total_score NUMERIC(5,2) NOT NULL CHECK (total_score BETWEEN 0 AND 100),
@@ -394,7 +460,7 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 -- 榜单明细行（模型排名）
 CREATE TABLE IF NOT EXISTS leaderboard_entry (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    leaderboard_id UUID NOT NULL REFERENCES leaderboard(id) ON DELETE CASCADE,
+    leaderboard_id UUID NOT NULL REFERENCES leaderboard(id) ON DELETE RESTRICT,
     model_id UUID NOT NULL REFERENCES model_endpoint(id),
     rank_no INTEGER NOT NULL CHECK (rank_no > 0),
     score NUMERIC(8,3) NOT NULL,
@@ -426,7 +492,7 @@ CREATE TABLE IF NOT EXISTS feedback (
 -- 社区人工预测表（用于对比与互动）
 CREATE TABLE IF NOT EXISTS community_prediction (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    question_id UUID NOT NULL REFERENCES question(id) ON DELETE CASCADE,
+    question_id UUID NOT NULL REFERENCES question(id) ON DELETE RESTRICT,
     user_id UUID NOT NULL REFERENCES app_user(id),
     prediction_content TEXT NOT NULL,
     confidence NUMERIC(5,2) CHECK (confidence BETWEEN 0 AND 100),
@@ -519,25 +585,29 @@ CREATE TABLE IF NOT EXISTS incident_record (
 -- 核心查询路径索引（追踪、调度、排行、审核）
 CREATE INDEX IF NOT EXISTS idx_event_trace_id ON event(trace_id);
 CREATE INDEX IF NOT EXISTS idx_event_source_system ON event(source_system);
-CREATE INDEX IF NOT EXISTS idx_event_status_time ON event(filter_status, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_event_status_time ON event(filter_status, event_time DESC)
+WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_event_tags_gin ON event USING GIN(tags);
 
 CREATE INDEX IF NOT EXISTS idx_question_trace_id ON question(trace_id);
-CREATE INDEX IF NOT EXISTS idx_question_status_deadline ON question(status, deadline);
+CREATE INDEX IF NOT EXISTS idx_question_status_deadline ON question(status, deadline)
+WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_question_level ON question(level);
 
 CREATE INDEX IF NOT EXISTS idx_prediction_trace_id ON prediction(trace_id);
-CREATE INDEX IF NOT EXISTS idx_prediction_model ON prediction(model_id, status);
+CREATE INDEX IF NOT EXISTS idx_prediction_model ON prediction(model_id, status)
+WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_prediction_question ON prediction(question_id);
 
 CREATE INDEX IF NOT EXISTS idx_ground_truth_trace_id ON ground_truth(trace_id);
-CREATE INDEX IF NOT EXISTS idx_ground_truth_publish_time ON ground_truth(publish_time);
+CREATE INDEX IF NOT EXISTS idx_ground_truth_publish_time ON ground_truth(publish_time)
+WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_score_record_trace_id ON score_record(trace_id);
 CREATE INDEX IF NOT EXISTS idx_score_record_total_score ON score_record(total_score DESC);
 
-CREATE INDEX IF NOT EXISTS idx_pipeline_task_status_retry ON pipeline_task_execution(status, next_retry_at);
-CREATE INDEX IF NOT EXISTS idx_pipeline_task_trace_id ON pipeline_task_execution(trace_id);
+CREATE INDEX IF NOT EXISTS idx_task_execution_status_retry ON task_execution(status, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_task_execution_trace_id ON task_execution(trace_id);
 
 CREATE INDEX IF NOT EXISTS idx_feedback_target ON feedback(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_status_priority ON feedback(status, priority);
@@ -590,6 +660,11 @@ DROP TRIGGER IF EXISTS trg_ground_truth_updated_at ON ground_truth;
 CREATE TRIGGER trg_ground_truth_updated_at BEFORE UPDATE ON ground_truth
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_ground_truth_publish_time_check ON ground_truth;
+CREATE TRIGGER trg_ground_truth_publish_time_check
+BEFORE INSERT OR UPDATE OF question_id, publish_time ON ground_truth
+FOR EACH ROW EXECUTE PROCEDURE validate_ground_truth_publish_time();
+
 DROP TRIGGER IF EXISTS trg_score_record_updated_at ON score_record;
 CREATE TRIGGER trg_score_record_updated_at BEFORE UPDATE ON score_record
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
@@ -602,6 +677,11 @@ DROP TRIGGER IF EXISTS trg_feedback_updated_at ON feedback;
 CREATE TRIGGER trg_feedback_updated_at BEFORE UPDATE ON feedback
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_feedback_target_check ON feedback;
+CREATE TRIGGER trg_feedback_target_check
+BEFORE INSERT OR UPDATE OF target_type, target_id ON feedback
+FOR EACH ROW EXECUTE PROCEDURE validate_feedback_target();
+
 DROP TRIGGER IF EXISTS trg_community_prediction_updated_at ON community_prediction;
 CREATE TRIGGER trg_community_prediction_updated_at BEFORE UPDATE ON community_prediction
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
@@ -610,8 +690,8 @@ DROP TRIGGER IF EXISTS trg_change_log_updated_at ON change_log;
 CREATE TRIGGER trg_change_log_updated_at BEFORE UPDATE ON change_log
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_pipeline_task_execution_updated_at ON pipeline_task_execution;
-CREATE TRIGGER trg_pipeline_task_execution_updated_at BEFORE UPDATE ON pipeline_task_execution
+DROP TRIGGER IF EXISTS trg_task_execution_updated_at ON task_execution;
+CREATE TRIGGER trg_task_execution_updated_at BEFORE UPDATE ON task_execution
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_system_config_updated_at ON system_config;

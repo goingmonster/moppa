@@ -1,0 +1,69 @@
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.core import ApiError
+from app.db.models import QuestionEntity
+from app.db.session import get_db
+from app.models.common_model import BatchDeleteRequest, BatchDeleteResponse
+from app.models.question_model import QuestionCreateModel, QuestionListItemModel, QuestionPaginationResponse, QuestionUpdateModel
+from app.services.question_service import QuestionService
+
+router = APIRouter(prefix="/questions", tags=["questions"])
+
+
+def to_question_list_item(entity: QuestionEntity) -> QuestionListItemModel:
+    return QuestionListItemModel(
+        id=str(entity.id),
+        event_id=str(entity.event_id),
+        level=entity.level,
+        content=entity.content,
+        deadline=entity.deadline.isoformat(),
+        status=entity.status,
+        trace_id=str(entity.trace_id),
+    )
+
+
+@router.post("", summary="Create question")
+def create_question(payload: QuestionCreateModel, db: Session = Depends(get_db)) -> dict[str, str]:
+    service = QuestionService(db)
+    question_id = service.create(payload)
+    return {"id": question_id}
+
+
+@router.get("", summary="List questions")
+def list_questions(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> QuestionPaginationResponse:
+    service = QuestionService(db)
+    rows, total = service.list_paginated(page=page, page_size=page_size)
+    items = [to_question_list_item(row) for row in rows]
+    return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
+
+
+@router.delete("", summary="Batch delete questions")
+def delete_questions(payload: BatchDeleteRequest, db: Session = Depends(get_db)) -> BatchDeleteResponse:
+    service = QuestionService(db)
+    deleted_count = service.batch_delete(payload.ids)
+    return BatchDeleteResponse(deleted_count=deleted_count)
+
+
+@router.get("/{question_id}", summary="Get question detail")
+def get_question(question_id: str, db: Session = Depends(get_db)) -> QuestionListItemModel:
+    service = QuestionService(db)
+    entity = service.get_by_id(question_id)
+    if entity is None:
+        raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
+    return to_question_list_item(entity)
+
+
+@router.patch("/{question_id}", summary="Update question")
+def update_question(question_id: str, payload: QuestionUpdateModel, db: Session = Depends(get_db)) -> QuestionListItemModel:
+    service = QuestionService(db)
+    if not payload.model_dump(exclude_none=True):
+        raise ApiError(status_code=400, code="EMPTY_UPDATE_PAYLOAD", message="No fields to update")
+    entity = service.update(question_id, payload)
+    if entity is None:
+        raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
+    return to_question_list_item(entity)

@@ -51,11 +51,19 @@ backend/wheels/
 moppa_backend/.venv/
 moppa_backend/venv/
 moppa_backend/env/
+moppa_backend/.pytest_cache/
+moppa_backend/.mypy_cache/
+moppa_backend/.ruff_cache/
 moppa_backend/__pycache__/
 moppa_backend/**/__pycache__/
 moppa_backend/*.py[cod]
 moppa_backend/*$py.class
 moppa_backend/**/*.py[cod]
+
+# Generic virtual environments
+.venv/
+venv/
+env/
 
 # Environment variables
 .env
@@ -114,6 +122,7 @@ jspm_packages/
 
 # Vite build output
 dist-ssr/
+frontend/.vite/
 
 # Rollup.js default build output
 dist/
