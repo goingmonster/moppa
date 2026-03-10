@@ -41,6 +41,7 @@ class Settings:
     source_system_name: str
     source_fetch_limit: int
     scheduler_enabled: bool
+    cors_allowed_origins: list[str]
 
     @property
     def database_url(self) -> str:
@@ -69,6 +70,11 @@ def env_int(key: str, default: int) -> int:
     return int(value)
 
 
+def env_csv(key: str, default: str) -> list[str]:
+    value = os.getenv(key, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def load_settings() -> Settings:
     project_root = Path(__file__).resolve().parents[2]
     load_dotenv_file(project_root / ".env")
@@ -94,6 +100,10 @@ def load_settings() -> Settings:
         source_system_name=os.getenv("SOURCE_SYSTEM_NAME", "news_event_crawler"),
         source_fetch_limit=env_int("SOURCE_FETCH_LIMIT", 200),
         scheduler_enabled=env_bool("SCHEDULER_ENABLED", True),
+        cors_allowed_origins=env_csv(
+            "CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173",
+        ),
     )
 
 

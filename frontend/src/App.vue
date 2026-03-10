@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
+type AppView = 'home' | 'events' | 'questions'
 
 interface EventItem {
   id: string
@@ -65,6 +66,39 @@ interface RankRow {
   score: number
   avgLatency: number
   accuracy: number
+}
+
+interface BackendHealth {
+  status: string
+  database: boolean
+}
+
+interface BackendEventItem {
+  id: string
+  event_key: string
+  content: string
+  source_system: string
+  credibility_level: number
+  event_time: string
+  filter_status: string
+  trace_id: string
+}
+
+interface BackendQuestionItem {
+  id: string
+  event_id: string
+  level: number
+  content: string
+  deadline: string
+  status: string
+  trace_id: string
+}
+
+interface BackendPage<T> {
+  page: number
+  page_size: number
+  total: number
+  items: T[]
 }
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
@@ -260,10 +294,15 @@ const selectedEventId = ref(events.value[0]?.id ?? '')
 const selectedLevel = ref<Level>('L1')
 const selectedQuestionId = ref(questions.value[0]?.id ?? '')
 const rankingLevel = ref<'ALL' | Level>('ALL')
+const currentView = ref<AppView>('home')
+const backendStatus = ref('后端未连接，当前使用模拟数据')
+const backendOnline = ref(false)
 
 const draftExpert = reactive({ name: '', answer: '', reason: '' })
 const draftExpertComments = reactive<Record<string, string>>({})
 const draftQuestionComment = ref('')
+const draftEvent = reactive({ codename: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
+const draftQuestion = reactive({ title: '', level: 'L2' as Level, deadline: '', status: 'collecting' as QuestionItem['status'] })
 
 const selectedEvent = computed(() => events.value.find((eventItem) => eventItem.id === selectedEventId.value))
 const selectedTemplate = computed(() => templateState[selectedLevel.value])
@@ -272,10 +311,16 @@ const selectedQuestion = computed(() => questions.value.find((question) => quest
 const filteredQuestions = computed(() =>
   questions.value.filter((question) => !selectedEventId.value || question.eventId === selectedEventId.value),
 )
+const previewEvents = computed(() =>
+  [...events.value]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 3),
+)
 
 const selectedQuestionAnswers = computed(() => answersByQuestion[selectedQuestionId.value] ?? [])
 const selectedExpertAnswers = computed(() => expertAnswersByQuestion[selectedQuestionId.value] ?? [])
 const selectedQuestionComments = computed(() => questionCommentsByQuestion[selectedQuestionId.value] ?? [])
+const dataSourceLabel = computed(() => (backendOnline.value ? '后端' : '模拟'))
 
 const displayedRanking = computed(() => {
   const filtered =
@@ -378,6 +423,325 @@ function addExpertComment(expertId: string): void {
   })
   draftExpertComments[expertId] = ''
 }
+
+function normalizeLevel(value: number): Level {
+  if (value <= 1) {
+    return 'L1'
+  }
+  if (value === 2) {
+    return 'L2'
+  }
+  if (value === 3) {
+    return 'L3'
+  }
+  return 'L4'
+}
+
+function severityFromCredibility(value: number): EventItem['severity'] {
+  if (value >= 4) {
+    return 'high'
+  }
+  if (value === 3) {
+    return 'medium'
+  }
+  return 'low'
+}
+
+function credibilityFromSeverity(value: EventItem['severity']): number {
+  if (value === 'high') {
+    return 5
+  }
+  if (value === 'medium') {
+    return 3
+  }
+  return 2
+}
+
+function levelToNumber(value: Level): number {
+  if (value === 'L1') {
+    return 1
+  }
+  if (value === 'L2') {
+    return 2
+  }
+  if (value === 'L3') {
+    return 3
+  }
+  return 4
+}
+
+function makeTraceId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random()}`
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
+  const response = await fetch(`${base}${path}`)
+  if (!response.ok) {
+    throw new Error(`请求失败: ${response.status}`)
+  }
+  return (await response.json()) as T
+}
+
+async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', body: object): Promise<T> {
+  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    throw new Error(`请求失败: ${response.status}`)
+  }
+  if (response.status === 204) {
+    return {} as T
+  }
+  return (await response.json()) as T
+}
+
+async function createEvent(): Promise<void> {
+  try {
+    const codename = draftEvent.codename.trim()
+    const theater = draftEvent.theater.trim()
+    const summary = draftEvent.summary.trim()
+    if (!codename || !theater || !summary) {
+      backendStatus.value = '事件新增失败：请完整填写代号、来源和内容'
+      return
+    }
+
+    if (!backendOnline.value) {
+      const localId = `evt-local-${Date.now()}`
+      events.value.unshift({
+        id: localId,
+        codename,
+        theater,
+        summary,
+        severity: draftEvent.severity,
+        timestamp: new Date().toISOString(),
+      })
+      selectedEventId.value = localId
+      backendStatus.value = '后端离线：已在模拟数据中新增事件'
+    } else {
+      await sendJson<{ id: string }>('/events', 'POST', {
+        event_key: codename,
+        content: summary,
+        source_system: theater,
+        credibility_level: credibilityFromSeverity(draftEvent.severity),
+        event_time: new Date().toISOString(),
+        trace_id: makeTraceId(),
+      })
+      await hydrateFromBackend()
+      backendStatus.value = '事件新增成功（后端）'
+    }
+
+    draftEvent.codename = ''
+    draftEvent.theater = ''
+    draftEvent.summary = ''
+  } catch {
+    backendStatus.value = '事件新增失败：请检查后端接口或参数格式'
+  }
+}
+
+async function updateSelectedEvent(): Promise<void> {
+  try {
+    const current = selectedEvent.value
+    if (!current) {
+      return
+    }
+
+    if (!backendOnline.value) {
+      backendStatus.value = '后端离线：当前仅支持模拟新增，不支持模拟更新'
+      return
+    }
+
+    await sendJson(`/events/${current.id}`, 'PATCH', {
+      content: current.summary,
+      source_system: current.theater,
+      credibility_level: credibilityFromSeverity(current.severity),
+    })
+    await hydrateFromBackend()
+    backendStatus.value = '事件更新成功（后端）'
+  } catch {
+    backendStatus.value = '事件更新失败：请检查后端接口或参数格式'
+  }
+}
+
+async function deleteSelectedEvent(): Promise<void> {
+  try {
+    const currentId = selectedEventId.value
+    if (!currentId) {
+      return
+    }
+
+    if (!backendOnline.value) {
+      events.value = events.value.filter((item) => item.id !== currentId)
+      questions.value = questions.value.filter((item) => item.eventId !== currentId)
+      selectedEventId.value = events.value[0]?.id ?? ''
+      selectedQuestionId.value = questions.value.find((item) => item.eventId === selectedEventId.value)?.id ?? ''
+      backendStatus.value = '后端离线：已在模拟数据中删除事件及关联问题'
+      return
+    }
+
+    await sendJson('/events', 'DELETE', { ids: [currentId] })
+    await hydrateFromBackend()
+    backendStatus.value = '事件删除成功（后端）'
+  } catch {
+    backendStatus.value = '事件删除失败：请检查后端接口或参数格式'
+  }
+}
+
+async function createQuestion(): Promise<void> {
+  try {
+    const title = draftQuestion.title.trim()
+    if (!selectedEventId.value || !title || !draftQuestion.deadline) {
+      backendStatus.value = '问题新增失败：请选择事件并填写标题与截止时间'
+      return
+    }
+
+    if (!backendOnline.value) {
+      const localId = `q-local-${Date.now()}`
+      questions.value.unshift({
+        id: localId,
+        eventId: selectedEventId.value,
+        level: draftQuestion.level,
+        title,
+        hypothesis: '由人工创建，待补充假设。',
+        deadline: draftQuestion.deadline,
+        status: draftQuestion.status,
+        groundTruth: '待真实结果回填。',
+      })
+      selectedQuestionId.value = localId
+      backendStatus.value = '后端离线：已在模拟数据中新增问题'
+      draftQuestion.title = ''
+      return
+    }
+
+    await sendJson<{ id: string }>('/questions', 'POST', {
+      event_id: selectedEventId.value,
+      level: levelToNumber(draftQuestion.level),
+      content: title,
+      deadline: draftQuestion.deadline,
+      trace_id: makeTraceId(),
+    })
+    await hydrateFromBackend()
+    backendStatus.value = '问题新增成功（后端）'
+    draftQuestion.title = ''
+  } catch {
+    backendStatus.value = '问题新增失败：请检查后端接口或参数格式'
+  }
+}
+
+async function updateSelectedQuestion(): Promise<void> {
+  try {
+    const current = selectedQuestion.value
+    if (!current) {
+      return
+    }
+
+    if (!backendOnline.value) {
+      backendStatus.value = '后端离线：当前仅支持模拟新增，不支持模拟更新'
+      return
+    }
+
+    await sendJson(`/questions/${current.id}`, 'PATCH', {
+      content: current.title,
+      deadline: current.deadline,
+      status: current.status,
+    })
+    await hydrateFromBackend()
+    backendStatus.value = '问题更新成功（后端）'
+  } catch {
+    backendStatus.value = '问题更新失败：请检查后端接口或参数格式'
+  }
+}
+
+async function deleteSelectedQuestion(): Promise<void> {
+  try {
+    const currentId = selectedQuestionId.value
+    if (!currentId) {
+      return
+    }
+
+    if (!backendOnline.value) {
+      questions.value = questions.value.filter((item) => item.id !== currentId)
+      selectedQuestionId.value = questions.value.find((item) => item.eventId === selectedEventId.value)?.id ?? ''
+      backendStatus.value = '后端离线：已在模拟数据中删除问题'
+      return
+    }
+
+    await sendJson('/questions', 'DELETE', { ids: [currentId] })
+    await hydrateFromBackend()
+    backendStatus.value = '问题删除成功（后端）'
+  } catch {
+    backendStatus.value = '问题删除失败：请检查后端接口或参数格式'
+  }
+}
+
+async function hydrateFromBackend(): Promise<void> {
+  try {
+    const health = await fetchJson<BackendHealth>('/health')
+    backendOnline.value = health.database
+    if (!health.database) {
+      backendStatus.value = '后端在线但数据库不可用，继续使用模拟数据'
+      return
+    }
+
+    const [eventResult, questionResult] = await Promise.allSettled([
+      fetchJson<BackendPage<BackendEventItem>>('/events?page=1&page_size=3'),
+      fetchJson<BackendPage<BackendQuestionItem>>('/questions?page=1&page_size=100'),
+    ])
+
+    const loadedParts: string[] = []
+
+    if (eventResult.status === 'fulfilled' && eventResult.value.items.length > 0) {
+      const mappedEvents: EventItem[] = eventResult.value.items.map((item) => ({
+        id: item.id,
+        codename: item.event_key,
+        theater: item.source_system,
+        summary: item.content,
+        severity: severityFromCredibility(item.credibility_level),
+        timestamp: item.event_time,
+      }))
+      events.value = mappedEvents
+      selectedEventId.value = mappedEvents[0]?.id ?? selectedEventId.value
+      loadedParts.push(`事件 ${mappedEvents.length} 条`)
+    }
+
+    if (questionResult.status === 'fulfilled' && questionResult.value.items.length > 0) {
+      const mappedQuestions: QuestionItem[] = questionResult.value.items.map((item) => ({
+        id: item.id,
+        eventId: item.event_id,
+        level: normalizeLevel(item.level),
+        title: item.content,
+        hypothesis: '由后端问题内容导入，待补充可证伪假设。',
+        deadline: item.deadline,
+        status: item.status === 'resolved' ? 'resolved' : item.status === 'locked' ? 'locked' : 'collecting',
+        groundTruth: item.status === 'resolved' ? '后端状态显示已解析，请补充真实结果详情。' : '待真实结果回填。',
+      }))
+      questions.value = mappedQuestions
+      const firstQuestion = mappedQuestions.find((question) => question.eventId === selectedEventId.value)
+      selectedQuestionId.value = firstQuestion?.id ?? mappedQuestions[0]?.id ?? selectedQuestionId.value
+      loadedParts.push(`问题 ${mappedQuestions.length} 条`)
+    }
+
+    if (loadedParts.length === 0) {
+      backendStatus.value = '后端已连接，但当前接口未返回可展示数据，继续使用模拟数据'
+      return
+    }
+
+    backendStatus.value = `后端已连接：已载入 ${loadedParts.join('，')}`
+  } catch {
+    backendStatus.value = '后端连接失败，已自动回退模拟数据'
+    backendOnline.value = false
+  }
+}
+
+onMounted(() => {
+  void hydrateFromBackend()
+})
 </script>
 
 <template>
@@ -388,21 +752,38 @@ function addExpertComment(expertId: string): void {
         <h1>模型预测指挥甲板</h1>
       </div>
       <div class="status-pills">
-        <span class="chip">数据源：模拟</span>
+        <span class="chip">数据源：{{ dataSourceLabel }}</span>
         <span class="chip">模式：训练沙盘</span>
+        <span class="chip">后端状态：{{ backendOnline ? '在线' : '离线' }}</span>
       </div>
     </header>
 
-    <main class="layout-grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>后端接入状态</h2>
+        <span>/health + /events + /questions</span>
+      </div>
+      <p>{{ backendStatus }}</p>
+    </section>
+
+    <section class="panel nav-panel">
+      <div class="view-switch">
+        <button :class="['level-btn', { active: currentView === 'home' }]" @click="currentView = 'home'">首页总览</button>
+        <button :class="['level-btn', { active: currentView === 'events' }]" @click="currentView = 'events'">事件管理</button>
+        <button :class="['level-btn', { active: currentView === 'questions' }]" @click="currentView = 'questions'">问题管理</button>
+      </div>
+    </section>
+
+    <main v-if="currentView === 'home'" class="layout-grid">
       <section class="left-column">
         <article class="panel">
           <div class="panel-head">
             <h2>1) 事件监看</h2>
-            <span>{{ events.length }} 条活跃</span>
+            <span>首页仅展示最新 3 条</span>
           </div>
           <ul class="event-list">
             <li
-              v-for="eventItem in events"
+              v-for="eventItem in previewEvents"
               :key="eventItem.id"
               :class="['event-card', { active: eventItem.id === selectedEventId }]"
               @click="selectEvent(eventItem.id)"
@@ -585,6 +966,178 @@ function addExpertComment(expertId: string): void {
           </section>
         </article>
       </section>
+    </main>
+
+    <main v-if="currentView === 'events'" class="manage-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>事件列表</h2>
+          <span>{{ events.length }} 条</span>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="eventItem in events"
+            :key="`manage-${eventItem.id}`"
+            :class="['event-card', { active: eventItem.id === selectedEventId }]"
+            @click="selectEvent(eventItem.id)"
+          >
+            <div class="row-between">
+              <strong>{{ eventItem.codename }}</strong>
+              <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
+            </div>
+            <p>{{ eventItem.theater }}</p>
+            <small>{{ eventItem.summary }}</small>
+          </li>
+        </ul>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>新增事件</h2>
+          <span>支持后端写入</span>
+        </div>
+        <div class="field-block">
+          <label>事件代号</label>
+          <input v-model="draftEvent.codename" placeholder="例如：海隼预警" />
+        </div>
+        <div class="field-block">
+          <label>来源系统 / 战区</label>
+          <input v-model="draftEvent.theater" placeholder="例如：边境雷达站" />
+        </div>
+        <div class="field-block">
+          <label>事件内容</label>
+          <textarea v-model="draftEvent.summary" rows="3" placeholder="填写事件摘要"></textarea>
+        </div>
+        <div class="field-block">
+          <label>可信等级映射</label>
+          <select v-model="draftEvent.severity">
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+          </select>
+        </div>
+        <button class="action-btn" @click="createEvent">新增事件</button>
+      </article>
+
+      <article class="panel" v-if="selectedEvent">
+        <div class="panel-head">
+          <h2>编辑事件</h2>
+          <span>{{ selectedEvent.id }}</span>
+        </div>
+        <div class="field-block">
+          <label>事件代号</label>
+          <input v-model="selectedEvent.codename" />
+        </div>
+        <div class="field-block">
+          <label>来源系统 / 战区</label>
+          <input v-model="selectedEvent.theater" />
+        </div>
+        <div class="field-block">
+          <label>事件内容</label>
+          <textarea v-model="selectedEvent.summary" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>可信等级映射</label>
+          <select v-model="selectedEvent.severity">
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+          </select>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="updateSelectedEvent">保存修改</button>
+          <button class="action-btn danger" @click="deleteSelectedEvent">删除事件</button>
+        </div>
+      </article>
+    </main>
+
+    <main v-if="currentView === 'questions'" class="manage-grid">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>问题列表</h2>
+          <span>{{ questions.length }} 条</span>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="question in questions"
+            :key="`manage-${question.id}`"
+            :class="['question-card', { active: question.id === selectedQuestionId }]"
+            @click="selectedQuestionId = question.id"
+          >
+            <div class="row-between">
+              <strong>{{ question.level }}</strong>
+              <span class="status">{{ statusLabel[question.status] }}</span>
+            </div>
+            <p>{{ question.title }}</p>
+            <small>事件ID：{{ question.eventId }}</small>
+          </li>
+        </ul>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>新增问题</h2>
+          <span>支持后端写入</span>
+        </div>
+        <div class="field-block">
+          <label>绑定事件</label>
+          <select v-model="selectedEventId">
+            <option v-for="eventItem in events" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
+              {{ eventItem.codename }} ({{ eventItem.id }})
+            </option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>问题标题</label>
+          <input v-model="draftQuestion.title" placeholder="输入预测问题" />
+        </div>
+        <div class="field-block">
+          <label>问题等级</label>
+          <select v-model="draftQuestion.level">
+            <option v-for="level in levels" :key="`new-question-${level}`" :value="level">{{ level }}</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>截止时间（ISO）</label>
+          <input v-model="draftQuestion.deadline" placeholder="2026-03-20T12:00:00Z" />
+        </div>
+        <div class="field-block">
+          <label>初始状态</label>
+          <select v-model="draftQuestion.status">
+            <option value="collecting">收集中</option>
+            <option value="locked">已封存</option>
+            <option value="resolved">已解析</option>
+          </select>
+        </div>
+        <button class="action-btn" @click="createQuestion">新增问题</button>
+      </article>
+
+      <article class="panel" v-if="selectedQuestion">
+        <div class="panel-head">
+          <h2>编辑问题</h2>
+          <span>{{ selectedQuestion.id }}</span>
+        </div>
+        <div class="field-block">
+          <label>问题标题</label>
+          <input v-model="selectedQuestion.title" />
+        </div>
+        <div class="field-block">
+          <label>截止时间（ISO）</label>
+          <input v-model="selectedQuestion.deadline" />
+        </div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="selectedQuestion.status">
+            <option value="collecting">收集中</option>
+            <option value="locked">已封存</option>
+            <option value="resolved">已解析</option>
+          </select>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="updateSelectedQuestion">保存修改</button>
+          <button class="action-btn danger" @click="deleteSelectedQuestion">删除问题</button>
+        </div>
+      </article>
     </main>
   </div>
 </template>

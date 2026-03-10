@@ -102,6 +102,16 @@ textarea {
   gap: 0.45rem;
 }
 
+.nav-panel {
+  padding: 0.55rem 0.8rem;
+}
+
+.view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
 .chip {
   border: 1px solid var(--line);
   padding: 0.2rem 0.6rem;
@@ -112,6 +122,12 @@ textarea {
 .layout-grid {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.manage-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -153,6 +169,8 @@ textarea {
   list-style: none;
   display: grid;
   gap: 0.5rem;
+  max-height: 420px;
+  overflow: auto;
 }
 
 .event-card,
@@ -164,6 +182,29 @@ textarea {
   padding: 0.6rem;
   display: grid;
   gap: 0.35rem;
+  min-width: 0;
+}
+
+.event-card strong,
+.question-card strong,
+.answer-card strong,
+.event-card p,
+.question-card p,
+.answer-card p,
+.event-card small,
+.question-card small,
+.answer-card small {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.event-card small,
+.question-card p,
+.answer-card p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .event-card,
@@ -188,6 +229,7 @@ textarea {
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
+  align-items: center;
 }
 
 .badge,
@@ -243,7 +285,8 @@ textarea {
 }
 
 textarea,
-input {
+input,
+select {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: rgba(18, 24, 17, 0.95);
@@ -251,10 +294,27 @@ input {
 }
 
 textarea:focus,
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: var(--accent-strong);
   box-shadow: 0 0 0 2px rgba(198, 210, 97, 0.2);
+}
+
+.action-row {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.danger {
+  border-color: #9a5444;
+  color: #f3b2a3;
+}
+
+.danger:hover {
+  border-color: #d2775d;
+  background: rgba(104, 51, 40, 0.92);
 }
 
 .question-grid {
@@ -350,6 +410,10 @@ input:focus {
 
 @media (max-width: 1120px) {
   .layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .manage-grid {
     grid-template-columns: 1fr;
   }
 
