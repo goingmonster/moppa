@@ -33,7 +33,7 @@ class EventRepository:
             self.db.scalars(
                 select(EventEntity)
                 .where(EventEntity.deleted_at.is_(None))
-                .order_by(EventEntity.created_at.desc())
+                .order_by(EventEntity.event_time.desc())
                 .offset(offset)
                 .limit(page_size)
             )

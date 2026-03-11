@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
-type AppView = 'home' | 'events' | 'questions' | 'templates'
+type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks'
 
 interface EventItem {
   id: string
@@ -100,6 +100,46 @@ interface BackendPage<T> {
   page_size: number
   total: number
   items: T[]
+}
+
+interface TaskItem {
+  id: string
+  taskType: string
+  idempotencyKey: string
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'dead_letter'
+  attemptCount: number
+  traceId: string
+}
+
+interface BackendTaskItem {
+  id: string
+  task_type: string
+  idempotency_key: string
+  status: TaskItem['status']
+  attempt_count: number
+  trace_id: string
+}
+
+interface S1TaskResponse {
+  task_id: string
+  status: string
+  result: Record<string, unknown>
+}
+
+interface S1JobDetail {
+  task_id: string
+  task_type: string
+  idempotency_key: string
+  status: string
+  attempt_count: number
+  result: Record<string, unknown>
+  metrics: Record<string, unknown>
+  error_message: string | null
+  next_retry_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+  trace_id: string
 }
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
@@ -338,6 +378,19 @@ const questionManagePageSize = ref(6)
 const questionManageJumpPage = ref('1')
 const selectedManageQuestionIds = ref<string[]>([])
 const manageDetailQuestion = ref<QuestionItem | null>(null)
+const tasks = ref<TaskItem[]>([])
+const taskManagePage = ref(1)
+const taskManagePageSize = ref(10)
+const taskManageJumpPage = ref('1')
+const taskManageTotal = ref(0)
+const selectedManageTaskIds = ref<string[]>([])
+const createTaskDialogOpen = ref(false)
+const taskDetailDialogOpen = ref(false)
+const triggerPullDialogOpen = ref(false)
+const selectedTask = ref<TaskItem | null>(null)
+const selectedTaskDetail = ref<S1JobDetail | null>(null)
+const createTaskForm = reactive({ taskType: 's1_ingest_pull', idempotencyKey: '', traceId: '' })
+const triggerPullForm = reactive({ sourceSystem: '' })
 
 const selectedEvent = computed(() => homeEvents.value.find((eventItem) => eventItem.id === selectedEventId.value))
 const selectedTemplateDetail = computed(() =>
@@ -374,6 +427,10 @@ const allKnownEvents = computed(() => {
   }
   return Array.from(map.values())
 })
+const taskManageTotalPages = computed(() => Math.max(1, Math.ceil(taskManageTotal.value / taskManagePageSize.value)))
+const allTasksOnPageSelected = computed(
+  () => tasks.value.length > 0 && tasks.value.every((item) => selectedManageTaskIds.value.includes(item.id)),
+)
 
 const selectedQuestionAnswers = computed(() => answersByQuestion[selectedQuestionId.value] ?? [])
 const selectedExpertAnswers = computed(() => expertAnswersByQuestion[selectedQuestionId.value] ?? [])
@@ -402,6 +459,7 @@ const severityLabel: Record<EventItem['severity'], string> = {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString('zh-CN', {
+    year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -606,6 +664,152 @@ function jumpToQuestionPageFromInput(): void {
     return
   }
   goToQuestionManagePage(Math.min(Math.max(1, Math.trunc(page)), questionManageTotalPages.value))
+}
+
+function openTaskDetail(task: TaskItem): void {
+  selectedTask.value = task
+  taskDetailDialogOpen.value = true
+  void fetchTaskDetail(task.id)
+}
+
+function toggleManageTaskSelection(taskId: string): void {
+  if (selectedManageTaskIds.value.includes(taskId)) {
+    selectedManageTaskIds.value = selectedManageTaskIds.value.filter((id) => id !== taskId)
+    return
+  }
+  selectedManageTaskIds.value = [...selectedManageTaskIds.value, taskId]
+}
+
+function toggleSelectAllTasksOnPage(): void {
+  if (allTasksOnPageSelected.value) {
+    selectedManageTaskIds.value = []
+    return
+  }
+  selectedManageTaskIds.value = tasks.value.map((item) => item.id)
+}
+
+function setTaskManagePageSize(size: number): void {
+  taskManagePageSize.value = size
+  taskManagePage.value = 1
+  taskManageJumpPage.value = '1'
+  selectedManageTaskIds.value = []
+  if (backendOnline.value) {
+    void fetchTasks(1)
+  }
+}
+
+function goTaskManagePage(delta: number): void {
+  const next = taskManagePage.value + delta
+  if (next < 1 || next > taskManageTotalPages.value) {
+    return
+  }
+  goToTaskManagePage(next)
+}
+
+function goToTaskManagePage(page: number): void {
+  if (page < 1 || page > taskManageTotalPages.value) {
+    return
+  }
+  taskManagePage.value = page
+  taskManageJumpPage.value = String(page)
+  selectedManageTaskIds.value = []
+  if (backendOnline.value) {
+    void fetchTasks(page)
+  }
+}
+
+function jumpToTaskPageFromInput(): void {
+  const page = Number(taskManageJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  goToTaskManagePage(Math.min(Math.max(1, Math.trunc(page)), taskManageTotalPages.value))
+}
+
+async function fetchTasks(page = 1): Promise<void> {
+  const pageData = await fetchJson<BackendPage<BackendTaskItem>>(`/tasks?page=${page}&page_size=${taskManagePageSize.value}`)
+  tasks.value = pageData.items.map(toTaskItem)
+  taskManageTotal.value = pageData.total
+  taskManagePage.value = pageData.page
+  taskManageJumpPage.value = String(pageData.page)
+  selectedManageTaskIds.value = []
+}
+
+async function fetchTaskDetail(taskId: string): Promise<void> {
+  try {
+    selectedTaskDetail.value = await fetchJson<S1JobDetail>(`/s1/jobs/${taskId}`)
+  } catch {
+    const basic = await fetchJson<BackendTaskItem>(`/tasks/${taskId}`)
+    selectedTaskDetail.value = {
+      task_id: basic.id,
+      task_type: basic.task_type,
+      idempotency_key: basic.idempotency_key,
+      status: basic.status,
+      attempt_count: basic.attempt_count,
+      result: {},
+      metrics: {},
+      error_message: null,
+      next_retry_at: null,
+      started_at: null,
+      finished_at: null,
+      created_at: new Date().toISOString(),
+      trace_id: basic.trace_id,
+    }
+  }
+}
+
+async function submitCreateTask(): Promise<void> {
+  try {
+    if (!createTaskForm.taskType.trim() || !createTaskForm.idempotencyKey.trim()) {
+      backendStatus.value = '任务新增失败：请填写任务类型与幂等键'
+      return
+    }
+    const traceId = createTaskForm.traceId.trim() || makeTraceId()
+    await sendJson<{ id: string }>('/tasks', 'POST', {
+      task_type: createTaskForm.taskType.trim(),
+      idempotency_key: createTaskForm.idempotencyKey.trim(),
+      trace_id: traceId,
+    })
+    await fetchTasks(1)
+    backendStatus.value = '任务新增成功'
+    createTaskDialogOpen.value = false
+    createTaskForm.taskType = 's1_ingest_pull'
+    createTaskForm.idempotencyKey = ''
+    createTaskForm.traceId = ''
+  } catch {
+    backendStatus.value = '任务新增失败：请检查后端接口或参数格式'
+  }
+}
+
+async function deleteSelectedTasksBatch(): Promise<void> {
+  if (selectedManageTaskIds.value.length === 0) {
+    backendStatus.value = '请先勾选要删除的任务'
+    return
+  }
+  try {
+    await sendJson('/tasks', 'DELETE', { ids: selectedManageTaskIds.value })
+    await fetchTasks(taskManagePage.value)
+    backendStatus.value = `任务批量删除成功（${selectedManageTaskIds.value.length} 条）`
+  } catch {
+    backendStatus.value = '任务批量删除失败：请检查后端接口或参数格式'
+  }
+}
+
+async function triggerPullNow(): Promise<void> {
+  try {
+    const payload = triggerPullForm.sourceSystem.trim() ? { source_system: triggerPullForm.sourceSystem.trim() } : {}
+    const result = await sendJson<S1TaskResponse>('/s1/jobs/pull-now', 'POST', payload)
+    backendStatus.value = `烽火事件拉取已触发：${result.task_id}`
+    triggerPullDialogOpen.value = false
+    triggerPullForm.sourceSystem = ''
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = '烽火事件拉取触发失败：请检查后端接口或参数格式'
+  }
 }
 
 async function deleteSelectedEventsBatch(): Promise<void> {
@@ -903,6 +1107,21 @@ function toEventItem(item: BackendEventItem): EventItem {
   }
 }
 
+function sortByEventTimeDesc(items: EventItem[]): EventItem[] {
+  return [...items].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+}
+
+function toTaskItem(item: BackendTaskItem): TaskItem {
+  return {
+    id: item.id,
+    taskType: item.task_type,
+    idempotencyKey: item.idempotency_key,
+    status: item.status,
+    attemptCount: item.attempt_count,
+    traceId: item.trace_id,
+  }
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
   const response = await fetch(`${base}${path}`)
@@ -939,7 +1158,7 @@ async function fetchHomeEvents(page = 1): Promise<void> {
     homeEventJumpPage.value = String(page)
     return
   }
-  const mapped = eventPage.items.map(toEventItem)
+  const mapped = sortByEventTimeDesc(eventPage.items.map(toEventItem))
   homeEvents.value = mapped
   homeEventTotal.value = eventPage.total
   homeEventPage.value = page
@@ -953,7 +1172,7 @@ async function fetchManageEvents(page: number): Promise<void> {
   const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
     `/events?page=${page}&page_size=${eventManagePageSize.value}`,
   )
-  manageEvents.value = eventPage.items.map(toEventItem)
+  manageEvents.value = sortByEventTimeDesc(eventPage.items.map(toEventItem))
   manageEventTotal.value = eventPage.total
   eventManagePage.value = page
   eventManageJumpPage.value = String(page)
@@ -1168,6 +1387,17 @@ watch(currentView, (view) => {
       selectedManageEventIds.value = []
     }
   }
+  if (view === 'tasks') {
+    if (backendOnline.value) {
+      void fetchTasks(1)
+    } else {
+      tasks.value = []
+      taskManageTotal.value = 0
+      taskManagePage.value = 1
+      taskManageJumpPage.value = '1'
+      selectedManageTaskIds.value = []
+    }
+  }
 })
 </script>
 
@@ -1199,6 +1429,7 @@ watch(currentView, (view) => {
         <button :class="['level-btn', { active: currentView === 'events' }]" @click="currentView = 'events'">事件管理</button>
         <button :class="['level-btn', { active: currentView === 'questions' }]" @click="currentView = 'questions'">问题管理</button>
         <button :class="['level-btn', { active: currentView === 'templates' }]" @click="currentView = 'templates'">模板配置</button>
+        <button :class="['level-btn', { active: currentView === 'tasks' }]" @click="currentView = 'tasks'">任务管理</button>
       </div>
     </section>
 
@@ -1511,6 +1742,123 @@ watch(currentView, (view) => {
       </article>
 
     </main>
+
+    <main v-if="currentView === 'tasks'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>任务执行列表</h2>
+          <span>最新执行优先</span>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="triggerPullDialogOpen = true">拉取烽火事件</button>
+          <button class="action-btn" @click="createTaskDialogOpen = true">新增任务</button>
+          <button class="action-btn" @click="toggleSelectAllTasksOnPage">
+            {{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}
+          </button>
+          <button class="action-btn danger" @click="deleteSelectedTasksBatch">批量删除</button>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="task in tasks"
+            :key="task.id"
+            :class="['question-card', { active: selectedTask?.id === task.id }]"
+            @click="openTaskDetail(task)"
+          >
+            <div class="row-between">
+              <label class="select-row" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedManageTaskIds.includes(task.id)"
+                  @change="toggleManageTaskSelection(task.id)"
+                />
+                <span>选择</span>
+              </label>
+              <div class="tag-group">
+                <span class="badge">{{ task.taskType }}</span>
+                <span class="badge">{{ task.status }}</span>
+              </div>
+            </div>
+            <p>{{ task.idempotencyKey }}</p>
+            <small>尝试次数：{{ task.attemptCount }} | Trace: {{ task.traceId }}</small>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <button :class="['level-btn', { active: taskManagePageSize === 10 }]" @click="setTaskManagePageSize(10)">10</button>
+          <button :class="['level-btn', { active: taskManagePageSize === 20 }]" @click="setTaskManagePageSize(20)">20</button>
+          <button :class="['level-btn', { active: taskManagePageSize === 50 }]" @click="setTaskManagePageSize(50)">50</button>
+          <button class="action-btn" @click="goTaskManagePage(-1)">上一页</button>
+          <input v-model="taskManageJumpPage" class="jump-input" placeholder="页码" />
+          <button class="action-btn" @click="jumpToTaskPageFromInput">跳转</button>
+          <button class="action-btn" @click="goTaskManagePage(1)">下一页</button>
+        </div>
+      </article>
+    </main>
+
+    <div v-if="taskDetailDialogOpen && selectedTaskDetail" class="dialog-backdrop" @click.self="taskDetailDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>任务执行详情</h2>
+          <div class="action-row">
+            <button class="action-btn" @click="taskDetailDialogOpen = false">关闭</button>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <p><strong>任务ID：</strong>{{ selectedTaskDetail.task_id }}</p>
+          <p><strong>任务类型：</strong>{{ selectedTaskDetail.task_type }}</p>
+          <p><strong>状态：</strong>{{ selectedTaskDetail.status }}</p>
+          <p><strong>幂等键：</strong>{{ selectedTaskDetail.idempotency_key }}</p>
+          <p><strong>尝试次数：</strong>{{ selectedTaskDetail.attempt_count }}</p>
+          <p><strong>创建时间：</strong>{{ formatDate(selectedTaskDetail.created_at) }}</p>
+          <p><strong>开始时间：</strong>{{ selectedTaskDetail.started_at ? formatDate(selectedTaskDetail.started_at) : '-' }}</p>
+          <p><strong>结束时间：</strong>{{ selectedTaskDetail.finished_at ? formatDate(selectedTaskDetail.finished_at) : '-' }}</p>
+          <p><strong>下次重试：</strong>{{ selectedTaskDetail.next_retry_at ? formatDate(selectedTaskDetail.next_retry_at) : '-' }}</p>
+          <p><strong>错误信息：</strong>{{ selectedTaskDetail.error_message ?? '-' }}</p>
+          <p><strong>结果：</strong>{{ JSON.stringify(selectedTaskDetail.result) }}</p>
+          <p><strong>指标：</strong>{{ JSON.stringify(selectedTaskDetail.metrics) }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="createTaskDialogOpen" class="dialog-backdrop" @click.self="createTaskDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>新增任务</h2>
+          <button class="action-btn" @click="createTaskDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>任务类型</label>
+          <input v-model="createTaskForm.taskType" placeholder="例如 s1_ingest_pull" />
+        </div>
+        <div class="field-block">
+          <label>幂等键</label>
+          <input v-model="createTaskForm.idempotencyKey" placeholder="手动输入唯一键" />
+        </div>
+        <div class="field-block">
+          <label>Trace ID（可选，不填自动生成）</label>
+          <input v-model="createTaskForm.traceId" placeholder="UUID" />
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitCreateTask">提交任务</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="triggerPullDialogOpen" class="dialog-backdrop" @click.self="triggerPullDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>拉取烽火事件</h2>
+          <button class="action-btn" @click="triggerPullDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>来源系统（可选）</label>
+          <input v-model="triggerPullForm.sourceSystem" placeholder="如 news_event_crawler" />
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="triggerPullNow">立即拉取</button>
+        </div>
+      </section>
+    </div>
 
     <div v-if="homeDetailDialogOpen && homeDetailEvent" class="dialog-backdrop" @click.self="homeDetailDialogOpen = false">
       <section class="dialog-panel">
