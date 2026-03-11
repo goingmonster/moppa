@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import EventEntity
@@ -42,6 +42,33 @@ class EventRepository:
         total = self.db.scalar(
             select(func.count()).select_from(EventEntity).where(EventEntity.deleted_at.is_(None))
         )
+        return items, int(total or 0)
+
+    def search_paginated(self, keyword: str, page: int, page_size: int) -> tuple[list[EventEntity], int]:
+        offset = (page - 1) * page_size
+        base_query = select(EventEntity).where(EventEntity.deleted_at.is_(None))
+        count_query = select(func.count()).select_from(EventEntity).where(EventEntity.deleted_at.is_(None))
+
+        normalized = keyword.strip()
+        if normalized:
+            escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            condition = or_(
+                EventEntity.title.ilike(pattern, escape="\\"),
+                EventEntity.content.ilike(pattern, escape="\\"),
+            )
+            base_query = base_query.where(condition)
+            count_query = count_query.where(condition)
+
+        items = list(
+            self.db.scalars(
+                base_query
+                .order_by(EventEntity.event_time.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+        )
+        total = self.db.scalar(count_query)
         return items, int(total or 0)
 
     def get_by_event_key(self, event_key: str, version: str = "v1.0") -> EventEntity | None:

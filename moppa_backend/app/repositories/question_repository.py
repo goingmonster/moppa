@@ -42,6 +42,29 @@ class QuestionRepository:
         )
         return items, int(total or 0)
 
+    def search_paginated(self, keyword: str, page: int, page_size: int) -> tuple[list[QuestionEntity], int]:
+        offset = (page - 1) * page_size
+        base_query = select(QuestionEntity).where(QuestionEntity.deleted_at.is_(None))
+        count_query = select(func.count()).select_from(QuestionEntity).where(QuestionEntity.deleted_at.is_(None))
+
+        normalized = keyword.strip()
+        if normalized:
+            escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            base_query = base_query.where(QuestionEntity.content.ilike(pattern, escape="\\"))
+            count_query = count_query.where(QuestionEntity.content.ilike(pattern, escape="\\"))
+
+        items = list(
+            self.db.scalars(
+                base_query
+                .order_by(QuestionEntity.created_at.desc())
+                .offset(offset)
+                .limit(page_size)
+            )
+        )
+        total = self.db.scalar(count_query)
+        return items, int(total or 0)
+
     def get_by_id(self, question_id: str) -> QuestionEntity | None:
         entity = self.db.get(QuestionEntity, UUID(question_id))
         if entity is None or entity.deleted_at is not None:

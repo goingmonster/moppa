@@ -44,6 +44,19 @@ def list_events(
     return EventPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
 
+@router.get("/search", summary="Search events by title/content")
+def search_events(
+    keyword: str = Query(default=""),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> EventPaginationResponse:
+    service = EventService(db)
+    rows, total = service.search_paginated(keyword=keyword, page=page, page_size=page_size)
+    items = [to_event_list_item(row) for row in rows]
+    return EventPaginationResponse(page=page, page_size=page_size, total=total, items=items)
+
+
 @router.delete("", summary="Batch delete events")
 def delete_events(payload: BatchDeleteRequest, db: Session = Depends(get_db)) -> BatchDeleteResponse:
     service = EventService(db)

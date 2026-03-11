@@ -15,6 +15,9 @@ class EventService:
     def list_paginated(self, page: int, page_size: int) -> tuple[list[EventEntity], int]:
         return self.repository.list_paginated(page, page_size)
 
+    def search_paginated(self, keyword: str, page: int, page_size: int) -> tuple[list[EventEntity], int]:
+        return self.repository.search_paginated(keyword, page, page_size)
+
     def get_by_id(self, event_id: str) -> EventEntity | None:
         return self.repository.get_by_id(event_id)
 

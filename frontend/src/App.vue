@@ -415,6 +415,12 @@ const eventDetailDialogOpen = ref(false)
 const homeDetailDialogOpen = ref(false)
 const createEventDialogOpen = ref(false)
 const createQuestionDialogOpen = ref(false)
+const questionEventSearch = ref('')
+const questionEventSearchLoading = ref(false)
+const questionEventSearchTotal = ref(0)
+const questionEventOptions = ref<EventItem[]>([])
+const questionEventSearchSeq = ref(0)
+let questionEventSearchTimer: number | undefined
 const questionDetailDialogOpen = ref(false)
 const questionEditDialogOpen = ref(false)
 const templateEditDialogOpen = ref(false)
@@ -438,12 +444,22 @@ const homeEventJumpPage = ref('1')
 const eventManagePage = ref(1)
 const eventManagePageSize = ref(6)
 const eventManageJumpPage = ref('1')
+const eventManageSearchKeyword = ref('')
+const eventManageSearchLoading = ref(false)
+const eventManageSearchSeq = ref(0)
+let eventManageSearchTimer: number | undefined
 const manageEvents = ref<EventItem[]>([])
 const manageEventTotal = ref(0)
 const selectedManageEventIds = ref<string[]>([])
 const questionManagePage = ref(1)
 const questionManagePageSize = ref(6)
 const questionManageJumpPage = ref('1')
+const questionManageSearchKeyword = ref('')
+const questionManageSearchLoading = ref(false)
+const questionManageSearchSeq = ref(0)
+let questionManageSearchTimer: number | undefined
+const manageQuestions = ref<QuestionItem[]>([])
+const questionManageTotal = ref(questions.value.length)
 const selectedManageQuestionIds = ref<string[]>([])
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const tasks = ref<TaskItem[]>([])
@@ -534,16 +550,51 @@ const filteredQuestions = computed(() =>
 )
 const previewEvents = computed(() => homeEvents.value)
 const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.value / homeEventPageSize)))
-const eventManageTotalPages = computed(() => Math.max(1, Math.ceil(manageEventTotal.value / eventManagePageSize.value)))
-const pagedManageEvents = computed(() => manageEvents.value)
+const localFilteredManageEvents = computed(() => {
+  const keyword = eventManageSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) {
+    return manageEvents.value
+  }
+  return manageEvents.value.filter((item) => {
+    const haystack = `${item.title}\n${item.summary}\n${item.theater}`.toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+const eventManageTotalPages = computed(() => {
+  const total = backendOnline.value ? manageEventTotal.value : localFilteredManageEvents.value.length
+  return Math.max(1, Math.ceil(total / eventManagePageSize.value))
+})
+const pagedManageEvents = computed(() => {
+  if (backendOnline.value) {
+    return manageEvents.value
+  }
+  const start = (eventManagePage.value - 1) * eventManagePageSize.value
+  return localFilteredManageEvents.value.slice(start, start + eventManagePageSize.value)
+})
 const allEventsOnPageSelected = computed(() =>
   pagedManageEvents.value.length > 0 && pagedManageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
 )
 
-const questionManageTotalPages = computed(() => Math.max(1, Math.ceil(questions.value.length / questionManagePageSize.value)))
+const localFilteredManageQuestions = computed(() => {
+  const keyword = questionManageSearchKeyword.value.trim().toLowerCase()
+  if (!keyword) {
+    return questions.value
+  }
+  return questions.value.filter((item) => {
+    const haystack = `${item.title}\n${item.hypothesis}\n${item.groundTruth}`.toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+const questionManageTotalPages = computed(() => {
+  const total = backendOnline.value ? questionManageTotal.value : localFilteredManageQuestions.value.length
+  return Math.max(1, Math.ceil(total / questionManagePageSize.value))
+})
 const pagedManageQuestions = computed(() => {
+  if (backendOnline.value) {
+    return manageQuestions.value
+  }
   const start = (questionManagePage.value - 1) * questionManagePageSize.value
-  return questions.value.slice(start, start + questionManagePageSize.value)
+  return localFilteredManageQuestions.value.slice(start, start + questionManagePageSize.value)
 })
 const allQuestionsOnPageSelected = computed(() =>
   pagedManageQuestions.value.length > 0 && pagedManageQuestions.value.every((item) => selectedManageQuestionIds.value.includes(item.id)),
@@ -558,6 +609,22 @@ const allKnownEvents = computed(() => {
   }
   return Array.from(map.values())
 })
+const localFilteredKnownEventsForQuestion = computed(() => {
+  const keyword = questionEventSearch.value.trim().toLowerCase()
+  if (!keyword) {
+    return allKnownEvents.value
+  }
+  return allKnownEvents.value.filter((item) => {
+    const haystack = `${item.title}\n${item.summary}`.toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
+const filteredKnownEventsForQuestion = computed(() =>
+  backendOnline.value ? questionEventOptions.value : localFilteredKnownEventsForQuestion.value,
+)
+const questionEventMatchedTotal = computed(() =>
+  backendOnline.value ? questionEventSearchTotal.value : filteredKnownEventsForQuestion.value.length,
+)
 const taskManageTotalPages = computed(() => Math.max(1, Math.ceil(taskManageTotal.value / taskManagePageSize.value)))
 const allTasksOnPageSelected = computed(
   () => tasks.value.length > 0 && tasks.value.every((item) => selectedManageTaskIds.value.includes(item.id)),
@@ -659,11 +726,39 @@ function openQuestionEdit(questionItem: QuestionItem): void {
   questionEditDialogOpen.value = true
 }
 
+function openCreateQuestionDialog(): void {
+  questionEventSearch.value = ''
+  createQuestionDialogOpen.value = true
+  if (backendOnline.value) {
+    void fetchQuestionEventOptions('')
+  }
+}
+
+function closeCreateQuestionDialog(): void {
+  if (questionEventSearchTimer !== undefined) {
+    window.clearTimeout(questionEventSearchTimer)
+    questionEventSearchTimer = undefined
+  }
+  questionEventSearchSeq.value += 1
+  questionEventOptions.value = []
+  questionEventSearchTotal.value = 0
+  questionEventSearchLoading.value = false
+  questionEventSearch.value = ''
+  createQuestionDialogOpen.value = false
+}
+
+function clearQuestionEventSearch(): void {
+  questionEventSearch.value = ''
+  if (backendOnline.value && createQuestionDialogOpen.value) {
+    void fetchQuestionEventOptions('')
+  }
+}
+
 async function submitCreateQuestionFromDialog(): Promise<void> {
   const before = draftQuestion.title
   await createQuestion()
   if (!draftQuestion.title && before.trim()) {
-    createQuestionDialogOpen.value = false
+    closeCreateQuestionDialog()
   }
 }
 
@@ -777,6 +872,9 @@ function setQuestionManagePageSize(size: number): void {
   questionManagePage.value = 1
   questionManageJumpPage.value = '1'
   selectedManageQuestionIds.value = []
+  if (backendOnline.value) {
+    void fetchManageQuestions(1)
+  }
 }
 
 function goManageQuestionPage(delta: number): void {
@@ -784,9 +882,7 @@ function goManageQuestionPage(delta: number): void {
   if (next < 1 || next > questionManageTotalPages.value) {
     return
   }
-  questionManagePage.value = next
-  questionManageJumpPage.value = String(next)
-  selectedManageQuestionIds.value = []
+  goToQuestionManagePage(next)
 }
 
 function goToQuestionManagePage(page: number): void {
@@ -796,6 +892,9 @@ function goToQuestionManagePage(page: number): void {
   questionManagePage.value = page
   questionManageJumpPage.value = String(page)
   selectedManageQuestionIds.value = []
+  if (backendOnline.value) {
+    void fetchManageQuestions(page)
+  }
 }
 
 function jumpToEventPageFromInput(): void {
@@ -1308,7 +1407,7 @@ async function deleteSelectedQuestionsBatch(): Promise<void> {
       backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟问题`
     } else {
       await sendJson('/questions', 'DELETE', { ids })
-      await hydrateFromBackend()
+      await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
       backendStatus.value = `问题批量删除成功（${ids.length} 条）`
     }
     if (ids.includes(selectedQuestionId.value)) {
@@ -1346,7 +1445,7 @@ async function submitQuestionEdit(): Promise<void> {
       deadline: questionEditForm.deadline,
       status: questionEditForm.status,
     })
-    await hydrateFromBackend()
+    await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
     backendStatus.value = '问题更新成功（后端）'
     questionEditDialogOpen.value = false
   } catch {
@@ -1573,6 +1672,19 @@ function toEventItem(item: BackendEventItem): EventItem {
   }
 }
 
+function toQuestionItem(item: BackendQuestionItem): QuestionItem {
+  return {
+    id: item.id,
+    eventId: item.event_id,
+    level: normalizeLevel(item.level),
+    title: item.content,
+    hypothesis: '由后端问题内容导入，待补充可证伪假设。',
+    deadline: item.deadline,
+    status: item.status === 'resolved' ? 'resolved' : item.status === 'locked' ? 'locked' : 'collecting',
+    groundTruth: item.status === 'resolved' ? '后端状态显示已解析，请补充真实结果详情。' : '待真实结果回填。',
+  }
+}
+
 function sortByEventTimeDesc(items: EventItem[]): EventItem[] {
   return [...items].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 }
@@ -1648,6 +1760,48 @@ async function fetchSourceSystemOptions(): Promise<void> {
   }
 }
 
+async function fetchQuestionEventOptions(keyword: string): Promise<void> {
+  if (!backendOnline.value) {
+    questionEventOptions.value = []
+    questionEventSearchTotal.value = 0
+    questionEventSearchLoading.value = false
+    return
+  }
+
+  const requestSeq = questionEventSearchSeq.value + 1
+  questionEventSearchSeq.value = requestSeq
+  questionEventSearchLoading.value = true
+
+  try {
+    const query = encodeURIComponent(keyword.trim())
+    const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
+      `/events/search?keyword=${query}&page=1&page_size=50`,
+    )
+    if (requestSeq !== questionEventSearchSeq.value) {
+      return
+    }
+
+    const mapped = sortByEventTimeDesc(eventPage.items.map(toEventItem))
+    questionEventOptions.value = mapped
+    questionEventSearchTotal.value = eventPage.total
+
+    if (mapped.length > 0 && !mapped.some((item) => item.id === selectedEventId.value)) {
+      selectedEventId.value = mapped[0]?.id ?? selectedEventId.value
+    }
+  } catch {
+    if (requestSeq !== questionEventSearchSeq.value) {
+      return
+    }
+    questionEventOptions.value = []
+    questionEventSearchTotal.value = 0
+    backendStatus.value = '事件搜索失败：请检查后端搜索接口'
+  } finally {
+    if (requestSeq === questionEventSearchSeq.value) {
+      questionEventSearchLoading.value = false
+    }
+  }
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
   const response = await fetch(`${base}${path}`)
@@ -1695,14 +1849,61 @@ async function fetchHomeEvents(page = 1): Promise<void> {
 }
 
 async function fetchManageEvents(page: number): Promise<void> {
-  const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-    `/events?page=${page}&page_size=${eventManagePageSize.value}`,
-  )
-  manageEvents.value = sortByEventTimeDesc(eventPage.items.map(toEventItem))
-  manageEventTotal.value = eventPage.total
-  eventManagePage.value = page
-  eventManageJumpPage.value = String(page)
-  selectedManageEventIds.value = []
+  if (!backendOnline.value) {
+    return
+  }
+  const requestSeq = eventManageSearchSeq.value + 1
+  eventManageSearchSeq.value = requestSeq
+  eventManageSearchLoading.value = true
+
+  try {
+    const keyword = encodeURIComponent(eventManageSearchKeyword.value.trim())
+    const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
+      `/events/search?keyword=${keyword}&page=${page}&page_size=${eventManagePageSize.value}`,
+    )
+    if (requestSeq !== eventManageSearchSeq.value) {
+      return
+    }
+
+    manageEvents.value = sortByEventTimeDesc(eventPage.items.map(toEventItem))
+    manageEventTotal.value = eventPage.total
+    eventManagePage.value = page
+    eventManageJumpPage.value = String(page)
+    selectedManageEventIds.value = []
+  } finally {
+    if (requestSeq === eventManageSearchSeq.value) {
+      eventManageSearchLoading.value = false
+    }
+  }
+}
+
+async function fetchManageQuestions(page: number): Promise<void> {
+  if (!backendOnline.value) {
+    return
+  }
+  const requestSeq = questionManageSearchSeq.value + 1
+  questionManageSearchSeq.value = requestSeq
+  questionManageSearchLoading.value = true
+
+  try {
+    const keyword = encodeURIComponent(questionManageSearchKeyword.value.trim())
+    const questionPage = await fetchJson<BackendPage<BackendQuestionItem>>(
+      `/questions/search?keyword=${keyword}&page=${page}&page_size=${questionManagePageSize.value}`,
+    )
+    if (requestSeq !== questionManageSearchSeq.value) {
+      return
+    }
+
+    manageQuestions.value = questionPage.items.map(toQuestionItem)
+    questionManageTotal.value = questionPage.total
+    questionManagePage.value = page
+    questionManageJumpPage.value = String(page)
+    selectedManageQuestionIds.value = []
+  } finally {
+    if (requestSeq === questionManageSearchSeq.value) {
+      questionManageSearchLoading.value = false
+    }
+  }
 }
 
 async function createEvent(): Promise<void> {
@@ -1790,10 +1991,18 @@ async function deleteSelectedEvent(): Promise<void> {
 async function createQuestion(): Promise<void> {
   try {
     const title = draftQuestion.title.trim()
-    if (!selectedEventId.value || !title || !draftQuestion.deadline) {
+    const deadline = draftQuestion.deadline.trim()
+    if (!selectedEventId.value || !title || !deadline) {
       backendStatus.value = '问题新增失败：请选择事件并填写标题与截止时间'
       return
     }
+
+    const parsedDeadline = new Date(deadline)
+    if (Number.isNaN(parsedDeadline.getTime())) {
+      backendStatus.value = '问题新增失败：截止时间格式无效'
+      return
+    }
+    const normalizedDeadline = parsedDeadline.toISOString()
 
     if (!backendOnline.value) {
       const localId = `q-local-${Date.now()}`
@@ -1803,7 +2012,7 @@ async function createQuestion(): Promise<void> {
         level: draftQuestion.level,
         title,
         hypothesis: '由人工创建，待补充假设。',
-        deadline: draftQuestion.deadline,
+        deadline: normalizedDeadline,
         status: draftQuestion.status,
         groundTruth: '待真实结果回填。',
       })
@@ -1817,10 +2026,10 @@ async function createQuestion(): Promise<void> {
       event_id: selectedEventId.value,
       level: levelToNumber(draftQuestion.level),
       content: title,
-      deadline: draftQuestion.deadline,
+      deadline: normalizedDeadline,
       trace_id: makeTraceId(),
     })
-    await hydrateFromBackend()
+    await Promise.all([hydrateFromBackend(), fetchManageQuestions(1)])
     backendStatus.value = '问题新增成功（后端）'
     draftQuestion.title = ''
   } catch {
@@ -1843,7 +2052,7 @@ async function deleteSelectedQuestion(): Promise<void> {
     }
 
     await sendJson('/questions', 'DELETE', { ids: [currentId] })
-    await hydrateFromBackend()
+    await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
     backendStatus.value = '问题删除成功（后端）'
   } catch {
     backendStatus.value = '问题删除失败：请检查后端接口或参数格式'
@@ -1870,18 +2079,10 @@ async function hydrateFromBackend(): Promise<void> {
       loadedParts.push(`事件首页 ${homeEvents.value.length} 条`)
     }
 
-    if (questionResult.status === 'fulfilled' && questionResult.value.items.length > 0) {
-      const mappedQuestions: QuestionItem[] = questionResult.value.items.map((item) => ({
-        id: item.id,
-        eventId: item.event_id,
-        level: normalizeLevel(item.level),
-        title: item.content,
-        hypothesis: '由后端问题内容导入，待补充可证伪假设。',
-        deadline: item.deadline,
-        status: item.status === 'resolved' ? 'resolved' : item.status === 'locked' ? 'locked' : 'collecting',
-        groundTruth: item.status === 'resolved' ? '后端状态显示已解析，请补充真实结果详情。' : '待真实结果回填。',
-      }))
+    if (questionResult.status === 'fulfilled') {
+      const mappedQuestions: QuestionItem[] = questionResult.value.items.map(toQuestionItem)
       questions.value = mappedQuestions
+      questionManageTotal.value = mappedQuestions.length
       const firstQuestion = mappedQuestions.find((question) => question.eventId === selectedEventId.value)
       selectedQuestionId.value = firstQuestion?.id ?? mappedQuestions[0]?.id ?? selectedQuestionId.value
       questionManagePage.value = 1
@@ -1918,6 +2119,17 @@ watch(currentView, (view) => {
       selectedManageEventIds.value = []
     }
   }
+  if (view === 'questions') {
+    if (backendOnline.value) {
+      void fetchManageQuestions(1)
+    } else {
+      manageQuestions.value = []
+      questionManageTotal.value = localFilteredManageQuestions.value.length
+      questionManagePage.value = 1
+      questionManageJumpPage.value = '1'
+      selectedManageQuestionIds.value = []
+    }
+  }
   if (view === 'tasks') {
     if (backendOnline.value) {
       void fetchTasks(1)
@@ -1950,6 +2162,60 @@ watch(currentView, (view) => {
       filterRuleManageJumpPage.value = '1'
       selectedManageFilterRuleIds.value = []
     }
+  }
+})
+
+watch(eventManageSearchKeyword, () => {
+  eventManagePage.value = 1
+  eventManageJumpPage.value = '1'
+  selectedManageEventIds.value = []
+  if (!backendOnline.value || currentView.value !== 'events') {
+    return
+  }
+  if (eventManageSearchTimer !== undefined) {
+    window.clearTimeout(eventManageSearchTimer)
+  }
+  eventManageSearchTimer = window.setTimeout(() => {
+    void fetchManageEvents(1)
+  }, 250)
+})
+
+watch(questionManageSearchKeyword, () => {
+  questionManagePage.value = 1
+  questionManageJumpPage.value = '1'
+  selectedManageQuestionIds.value = []
+  if (!backendOnline.value || currentView.value !== 'questions') {
+    return
+  }
+  if (questionManageSearchTimer !== undefined) {
+    window.clearTimeout(questionManageSearchTimer)
+  }
+  questionManageSearchTimer = window.setTimeout(() => {
+    void fetchManageQuestions(1)
+  }, 250)
+})
+
+watch(questionEventSearch, (keyword) => {
+  if (!createQuestionDialogOpen.value || !backendOnline.value) {
+    return
+  }
+  if (questionEventSearchTimer !== undefined) {
+    window.clearTimeout(questionEventSearchTimer)
+  }
+  questionEventSearchTimer = window.setTimeout(() => {
+    void fetchQuestionEventOptions(keyword)
+  }, 250)
+})
+
+watch(backendOnline, (online) => {
+  if (online && currentView.value === 'events') {
+    void fetchManageEvents(1)
+  }
+  if (online && currentView.value === 'questions') {
+    void fetchManageQuestions(1)
+  }
+  if (online && createQuestionDialogOpen.value) {
+    void fetchQuestionEventOptions(questionEventSearch.value)
   }
 })
 </script>
@@ -2172,6 +2438,8 @@ watch(currentView, (view) => {
             {{ allEventsOnPageSelected ? '取消全选本页' : '全选本页' }}
           </button>
           <button class="action-btn danger" @click="deleteSelectedEventsBatch">批量删除所选</button>
+          <input v-model="eventManageSearchKeyword" placeholder="搜索事件标题/内容" />
+          <small>{{ eventManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? manageEventTotal : localFilteredManageEvents.length} 条` }}</small>
         </div>
         <ul class="event-list">
           <li
@@ -2222,11 +2490,13 @@ watch(currentView, (view) => {
           <span>第 {{ questionManagePage }} / {{ questionManageTotalPages }} 页</span>
         </div>
         <div class="action-row">
-          <button class="action-btn" @click="createQuestionDialogOpen = true">新增问题</button>
+          <button class="action-btn" @click="openCreateQuestionDialog">新增问题</button>
           <button class="action-btn" @click="toggleSelectAllQuestionsOnPage">
             {{ allQuestionsOnPageSelected ? '取消全选本页' : '全选本页' }}
           </button>
           <button class="action-btn danger" @click="deleteSelectedQuestionsBatch">批量删除所选</button>
+          <input v-model="questionManageSearchKeyword" placeholder="搜索问题标题" />
+          <small>{{ questionManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? questionManageTotal : localFilteredManageQuestions.length} 条` }}</small>
         </div>
         <ul class="event-list">
           <li
@@ -2937,16 +3207,28 @@ watch(currentView, (view) => {
       </section>
     </div>
 
-    <div v-if="createQuestionDialogOpen" class="dialog-backdrop" @click.self="createQuestionDialogOpen = false">
+    <div v-if="createQuestionDialogOpen" class="dialog-backdrop" @click.self="closeCreateQuestionDialog">
       <section class="dialog-panel">
         <div class="panel-head">
           <h2>新增问题</h2>
-          <button class="action-btn" @click="createQuestionDialogOpen = false">关闭</button>
+          <button class="action-btn" @click="closeCreateQuestionDialog">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>搜索新闻（标题/内容）</label>
+          <div class="action-row">
+            <input v-model="questionEventSearch" placeholder="输入关键词筛选绑定新闻" />
+            <button v-if="questionEventSearch" class="action-btn" @click="clearQuestionEventSearch">清空</button>
+          </div>
+          <small>
+            {{ questionEventSearchLoading ? '搜索中...' : `匹配 ${questionEventMatchedTotal} 条` }}
+          </small>
         </div>
         <div class="field-block">
           <label>绑定事件</label>
           <select v-model="selectedEventId">
-            <option v-for="eventItem in allKnownEvents" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
+            <option v-if="questionEventSearchLoading" value="" disabled>搜索中...</option>
+            <option v-if="filteredKnownEventsForQuestion.length === 0" value="" disabled>无匹配新闻</option>
+            <option v-for="eventItem in filteredKnownEventsForQuestion" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
               {{ eventItem.title }}（{{ eventItem.theater }}）
             </option>
           </select>
@@ -2962,8 +3244,8 @@ watch(currentView, (view) => {
           </select>
         </div>
         <div class="field-block">
-          <label>截止时间（ISO）</label>
-          <input v-model="draftQuestion.deadline" placeholder="2026-03-20T12:00:00Z" />
+          <label>截止时间</label>
+          <input v-model="draftQuestion.deadline" type="datetime-local" />
         </div>
         <div class="field-block">
           <label>初始状态</label>

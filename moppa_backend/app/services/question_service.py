@@ -15,6 +15,9 @@ class QuestionService:
     def list_paginated(self, page: int, page_size: int) -> tuple[list[QuestionEntity], int]:
         return self.repository.list_paginated(page, page_size)
 
+    def search_paginated(self, keyword: str, page: int, page_size: int) -> tuple[list[QuestionEntity], int]:
+        return self.repository.search_paginated(keyword, page, page_size)
+
     def get_by_id(self, question_id: str) -> QuestionEntity | None:
         return self.repository.get_by_id(question_id)
 

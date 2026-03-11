@@ -42,6 +42,19 @@ def list_questions(
     return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
 
+@router.get("/search", summary="Search questions by content")
+def search_questions(
+    keyword: str = Query(default=""),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> QuestionPaginationResponse:
+    service = QuestionService(db)
+    rows, total = service.search_paginated(keyword=keyword, page=page, page_size=page_size)
+    items = [to_question_list_item(row) for row in rows]
+    return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
+
+
 @router.delete("", summary="Batch delete questions")
 def delete_questions(payload: BatchDeleteRequest, db: Session = Depends(get_db)) -> BatchDeleteResponse:
     service = QuestionService(db)
