@@ -218,8 +218,7 @@ class S1IngestService:
 
     def _map_source_row_to_event(self, row: SourceNewsRow, source_system: str) -> S1EventInputModel:
         create_time = self._coerce_datetime(row["create_time"], field_name="create_time")
-        published = row.get("published")
-        event_time: datetime = self._coerce_datetime(published, field_name="published", default=create_time)
+        event_time: datetime = create_time
         url = str(row.get("url") or "")
         title = str(row.get("title_translate") or "")
         content = str(row.get("text_translate") or "")
