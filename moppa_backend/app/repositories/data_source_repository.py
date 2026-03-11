@@ -29,19 +29,24 @@ class DataSourceRepository:
         return row is not None
 
     def ensure_source_system(self, source_system: str) -> None:
-        if self.exists_active_source_system(source_system):
-            return
         _ = self.db.execute(
             text(
                 """
                 INSERT INTO data_source (
                     name, source_system, source_type, connection_config,
-                    secret_ref, credibility_level, sync_frequency, is_active, version
+                    secret_ref, credibility_level, sync_frequency, is_active, version, deleted_at
                 )
                 VALUES (
                     :name, :source_system, 'database', '{}'::jsonb,
-                    :secret_ref, 3, INTERVAL '1 hour', TRUE, 'v1.0'
+                    :secret_ref, 3, INTERVAL '1 hour', TRUE, 'v1.0', NULL
                 )
+                ON CONFLICT (source_system)
+                DO UPDATE SET
+                    is_active = TRUE,
+                    deleted_at = NULL,
+                    updated_at = NOW(),
+                    source_type = EXCLUDED.source_type,
+                    secret_ref = COALESCE(data_source.secret_ref, EXCLUDED.secret_ref)
                 """
             ),
             {
@@ -188,6 +193,12 @@ class DataSourceRepository:
                     updated_at = :updated_at
                 WHERE id = ANY(CAST(:ids AS uuid[]))
                   AND deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM event e
+                      WHERE e.source_system = data_source.source_system
+                        AND e.deleted_at IS NULL
+                  )
                 """
             ),
             {"deleted_at": now, "updated_at": now, "ids": uuid_ids},
