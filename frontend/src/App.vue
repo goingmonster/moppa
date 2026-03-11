@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
-type AppView = 'home' | 'events' | 'questions'
+type AppView = 'home' | 'events' | 'questions' | 'templates'
 
 interface EventItem {
   id: string
@@ -10,6 +10,7 @@ interface EventItem {
   theater: string
   summary: string
   severity: 'low' | 'medium' | 'high'
+  filterStatus: string
   timestamp: string
 }
 
@@ -103,13 +104,14 @@ interface BackendPage<T> {
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
 
-const events = ref<EventItem[]>([
+const homeEvents = ref<EventItem[]>([
   {
     id: 'evt-001',
     codename: '铁砂行动',
     theater: '边境 A7 扇区',
     summary: '在争议走廊附近监测到补给车队改道。',
     severity: 'high',
+    filterStatus: 'passed',
     timestamp: '2026-03-08T05:20:00Z',
   },
   {
@@ -118,6 +120,7 @@ const events = ref<EventItem[]>([
     theater: '沿海 C2 网格',
     summary: '未标绘海底通道出现异常声呐回波。',
     severity: 'medium',
+    filterStatus: 'reviewing',
     timestamp: '2026-03-09T13:15:00Z',
   },
   {
@@ -126,6 +129,7 @@ const events = ref<EventItem[]>([
     theater: '极地中继枢纽',
     summary: '卫星丢包与风暴前沿及干扰信号同时出现。',
     severity: 'high',
+    filterStatus: 'blocked',
     timestamp: '2026-03-10T01:45:00Z',
   },
 ])
@@ -290,7 +294,7 @@ const rankingRows = ref<RankRow[]>([
   { model: 'Sentinel-R', level: 'L4', score: 75.9, avgLatency: 2210, accuracy: 68 },
 ])
 
-const selectedEventId = ref(events.value[0]?.id ?? '')
+const selectedEventId = ref(homeEvents.value[0]?.id ?? '')
 const selectedLevel = ref<Level>('L1')
 const selectedQuestionId = ref(questions.value[0]?.id ?? '')
 const rankingLevel = ref<'ALL' | Level>('ALL')
@@ -301,21 +305,75 @@ const backendOnline = ref(false)
 const draftExpert = reactive({ name: '', answer: '', reason: '' })
 const draftExpertComments = reactive<Record<string, string>>({})
 const draftQuestionComment = ref('')
-const draftEvent = reactive({ codename: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
+const draftEvent = reactive({ theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
 const draftQuestion = reactive({ title: '', level: 'L2' as Level, deadline: '', status: 'collecting' as QuestionItem['status'] })
+const homeDetailEvent = ref<EventItem | null>(null)
+const manageDetailEvent = ref<EventItem | null>(null)
+const eventEditDialogOpen = ref(false)
+const eventDetailDialogOpen = ref(false)
+const homeDetailDialogOpen = ref(false)
+const createEventDialogOpen = ref(false)
+const createQuestionDialogOpen = ref(false)
+const questionDetailDialogOpen = ref(false)
+const questionEditDialogOpen = ref(false)
+const templateEditDialogOpen = ref(false)
+const templateDetailDialogOpen = ref(false)
+const eventEditForm = reactive({ id: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'], filterStatus: '' })
+const questionEditForm = reactive({ id: '', title: '', deadline: '', status: 'collecting' as QuestionItem['status'] })
+const templateEditForm = reactive({ objective: '', constraints: '', outputFormat: '', qualityRule: '' })
+const templateEditLevel = ref<Level>('L1')
+const selectedTemplateLevel = ref<Level | null>(null)
+const homeEventPage = ref(1)
+const homeEventPageSize = 3
+const homeEventTotal = ref(homeEvents.value.length)
+const homeEventJumpPage = ref('1')
+const eventManagePage = ref(1)
+const eventManagePageSize = ref(6)
+const eventManageJumpPage = ref('1')
+const manageEvents = ref<EventItem[]>([])
+const manageEventTotal = ref(0)
+const selectedManageEventIds = ref<string[]>([])
+const questionManagePage = ref(1)
+const questionManagePageSize = ref(6)
+const questionManageJumpPage = ref('1')
+const selectedManageQuestionIds = ref<string[]>([])
+const manageDetailQuestion = ref<QuestionItem | null>(null)
 
-const selectedEvent = computed(() => events.value.find((eventItem) => eventItem.id === selectedEventId.value))
-const selectedTemplate = computed(() => templateState[selectedLevel.value])
+const selectedEvent = computed(() => homeEvents.value.find((eventItem) => eventItem.id === selectedEventId.value))
+const selectedTemplateDetail = computed(() =>
+  selectedTemplateLevel.value ? templateState[selectedTemplateLevel.value] : null,
+)
 const selectedQuestion = computed(() => questions.value.find((question) => question.id === selectedQuestionId.value))
 
 const filteredQuestions = computed(() =>
   questions.value.filter((question) => !selectedEventId.value || question.eventId === selectedEventId.value),
 )
-const previewEvents = computed(() =>
-  [...events.value]
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 3),
+const previewEvents = computed(() => homeEvents.value)
+const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.value / homeEventPageSize)))
+const eventManageTotalPages = computed(() => Math.max(1, Math.ceil(manageEventTotal.value / eventManagePageSize.value)))
+const pagedManageEvents = computed(() => manageEvents.value)
+const allEventsOnPageSelected = computed(() =>
+  pagedManageEvents.value.length > 0 && pagedManageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
 )
+
+const questionManageTotalPages = computed(() => Math.max(1, Math.ceil(questions.value.length / questionManagePageSize.value)))
+const pagedManageQuestions = computed(() => {
+  const start = (questionManagePage.value - 1) * questionManagePageSize.value
+  return questions.value.slice(start, start + questionManagePageSize.value)
+})
+const allQuestionsOnPageSelected = computed(() =>
+  pagedManageQuestions.value.length > 0 && pagedManageQuestions.value.every((item) => selectedManageQuestionIds.value.includes(item.id)),
+)
+const allKnownEvents = computed(() => {
+  const map = new Map<string, EventItem>()
+  for (const item of homeEvents.value) {
+    map.set(item.id, item)
+  }
+  for (const item of manageEvents.value) {
+    map.set(item.id, item)
+  }
+  return Array.from(map.values())
+})
 
 const selectedQuestionAnswers = computed(() => answersByQuestion[selectedQuestionId.value] ?? [])
 const selectedExpertAnswers = computed(() => expertAnswersByQuestion[selectedQuestionId.value] ?? [])
@@ -359,15 +417,371 @@ function selectEvent(id: string): void {
   }
 }
 
-function saveTemplate(): void {
-  const current = templateState[selectedLevel.value]
-  templateState[selectedLevel.value] = {
-    ...current,
-    objective: current.objective.trim(),
-    constraints: current.constraints.trim(),
-    outputFormat: current.outputFormat.trim(),
-    qualityRule: current.qualityRule.trim(),
+function openHomeDetail(eventItem: EventItem): void {
+  homeDetailEvent.value = eventItem
+  homeDetailDialogOpen.value = true
+}
+
+function openManageDetail(eventItem: EventItem): void {
+  selectedEventId.value = eventItem.id
+  manageDetailEvent.value = eventItem
+  eventDetailDialogOpen.value = true
+}
+
+function openEventEdit(eventItem: EventItem): void {
+  selectedEventId.value = eventItem.id
+  eventEditForm.id = eventItem.id
+  eventEditForm.theater = eventItem.theater
+  eventEditForm.summary = eventItem.summary
+  eventEditForm.severity = eventItem.severity
+  eventEditForm.filterStatus = eventItem.filterStatus
+  eventEditDialogOpen.value = true
+}
+
+function openManageQuestionDetail(questionItem: QuestionItem): void {
+  selectedQuestionId.value = questionItem.id
+  manageDetailQuestion.value = questionItem
+  questionDetailDialogOpen.value = true
+}
+
+function openQuestionEdit(questionItem: QuestionItem): void {
+  selectedQuestionId.value = questionItem.id
+  questionEditForm.id = questionItem.id
+  questionEditForm.title = questionItem.title
+  questionEditForm.deadline = questionItem.deadline
+  questionEditForm.status = questionItem.status
+  questionEditDialogOpen.value = true
+}
+
+async function submitCreateQuestionFromDialog(): Promise<void> {
+  const before = draftQuestion.title
+  await createQuestion()
+  if (!draftQuestion.title && before.trim()) {
+    createQuestionDialogOpen.value = false
   }
+}
+
+async function submitCreateEventFromDialog(): Promise<void> {
+  const before = `${draftEvent.theater}|${draftEvent.summary}`
+  await createEvent()
+  if (!draftEvent.theater && !draftEvent.summary && before.trim()) {
+    createEventDialogOpen.value = false
+  }
+}
+
+function toggleManageEventSelection(eventId: string): void {
+  if (selectedManageEventIds.value.includes(eventId)) {
+    selectedManageEventIds.value = selectedManageEventIds.value.filter((id) => id !== eventId)
+    return
+  }
+  selectedManageEventIds.value = [...selectedManageEventIds.value, eventId]
+}
+
+function toggleSelectAllEventsOnPage(): void {
+  if (allEventsOnPageSelected.value) {
+    selectedManageEventIds.value = selectedManageEventIds.value.filter(
+      (id) => !pagedManageEvents.value.some((item) => item.id === id),
+    )
+    return
+  }
+
+  const pageIds = pagedManageEvents.value.map((item) => item.id)
+  selectedManageEventIds.value = Array.from(new Set([...selectedManageEventIds.value, ...pageIds]))
+}
+
+function setEventManagePageSize(size: number): void {
+  eventManagePageSize.value = size
+  eventManagePage.value = 1
+  eventManageJumpPage.value = '1'
+  selectedManageEventIds.value = []
+  if (backendOnline.value) {
+    void fetchManageEvents(1)
+  }
+}
+
+function goToEventManagePage(page: number): void {
+  if (page < 1 || page > eventManageTotalPages.value) {
+    return
+  }
+  eventManagePage.value = page
+  eventManageJumpPage.value = String(page)
+  selectedManageEventIds.value = []
+  if (backendOnline.value) {
+    void fetchManageEvents(page)
+  }
+}
+
+function goHomeEventPage(delta: number): void {
+  const next = homeEventPage.value + delta
+  if (next < 1 || next > homeEventTotalPages.value) {
+    return
+  }
+  if (backendOnline.value) {
+    void fetchHomeEvents(next)
+    return
+  }
+  homeEventPage.value = next
+  homeEventJumpPage.value = String(next)
+}
+
+function jumpToHomeEventPageFromInput(): void {
+  const page = Number(homeEventJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  const target = Math.min(Math.max(1, Math.trunc(page)), homeEventTotalPages.value)
+  if (backendOnline.value) {
+    void fetchHomeEvents(target)
+    return
+  }
+  homeEventPage.value = target
+  homeEventJumpPage.value = String(target)
+}
+
+function goManageEventPage(delta: number): void {
+  const next = eventManagePage.value + delta
+  if (next < 1 || next > eventManageTotalPages.value) {
+    return
+  }
+  goToEventManagePage(next)
+}
+
+function toggleManageQuestionSelection(questionId: string): void {
+  if (selectedManageQuestionIds.value.includes(questionId)) {
+    selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter((id) => id !== questionId)
+    return
+  }
+  selectedManageQuestionIds.value = [...selectedManageQuestionIds.value, questionId]
+}
+
+function toggleSelectAllQuestionsOnPage(): void {
+  if (allQuestionsOnPageSelected.value) {
+    selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter(
+      (id) => !pagedManageQuestions.value.some((item) => item.id === id),
+    )
+    return
+  }
+
+  const pageIds = pagedManageQuestions.value.map((item) => item.id)
+  selectedManageQuestionIds.value = Array.from(new Set([...selectedManageQuestionIds.value, ...pageIds]))
+}
+
+function setQuestionManagePageSize(size: number): void {
+  questionManagePageSize.value = size
+  questionManagePage.value = 1
+  questionManageJumpPage.value = '1'
+  selectedManageQuestionIds.value = []
+}
+
+function goManageQuestionPage(delta: number): void {
+  const next = questionManagePage.value + delta
+  if (next < 1 || next > questionManageTotalPages.value) {
+    return
+  }
+  questionManagePage.value = next
+  questionManageJumpPage.value = String(next)
+  selectedManageQuestionIds.value = []
+}
+
+function goToQuestionManagePage(page: number): void {
+  if (page < 1 || page > questionManageTotalPages.value) {
+    return
+  }
+  questionManagePage.value = page
+  questionManageJumpPage.value = String(page)
+  selectedManageQuestionIds.value = []
+}
+
+function jumpToEventPageFromInput(): void {
+  const page = Number(eventManageJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  goToEventManagePage(Math.min(Math.max(1, Math.trunc(page)), eventManageTotalPages.value))
+}
+
+function jumpToQuestionPageFromInput(): void {
+  const page = Number(questionManageJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  goToQuestionManagePage(Math.min(Math.max(1, Math.trunc(page)), questionManageTotalPages.value))
+}
+
+async function deleteSelectedEventsBatch(): Promise<void> {
+  if (selectedManageEventIds.value.length === 0) {
+    backendStatus.value = '请先勾选要删除的事件'
+    return
+  }
+
+  try {
+    const ids = [...selectedManageEventIds.value]
+    if (!backendOnline.value) {
+      homeEvents.value = homeEvents.value.filter((item) => !ids.includes(item.id))
+      manageEvents.value = manageEvents.value.filter((item) => !ids.includes(item.id))
+      homeEventTotal.value = Math.max(0, homeEventTotal.value - ids.length)
+      manageEventTotal.value = Math.max(0, manageEventTotal.value - ids.length)
+      questions.value = questions.value.filter((item) => !ids.includes(item.eventId))
+      backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟事件`
+    } else {
+      await sendJson('/events', 'DELETE', { ids })
+      await Promise.all([fetchHomeEvents(), fetchManageEvents(eventManagePage.value)])
+      backendStatus.value = `事件批量删除成功（${ids.length} 条）`
+    }
+    selectedManageEventIds.value = []
+    if (eventManagePage.value > eventManageTotalPages.value) {
+      eventManagePage.value = eventManageTotalPages.value
+    }
+  } catch {
+    backendStatus.value = '事件批量删除失败：请检查后端接口或参数格式'
+  }
+}
+
+async function deleteSelectedQuestionsBatch(): Promise<void> {
+  if (selectedManageQuestionIds.value.length === 0) {
+    backendStatus.value = '请先勾选要删除的问题'
+    return
+  }
+
+  try {
+    const ids = [...selectedManageQuestionIds.value]
+    if (!backendOnline.value) {
+      questions.value = questions.value.filter((item) => !ids.includes(item.id))
+      backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟问题`
+    } else {
+      await sendJson('/questions', 'DELETE', { ids })
+      await hydrateFromBackend()
+      backendStatus.value = `问题批量删除成功（${ids.length} 条）`
+    }
+    if (ids.includes(selectedQuestionId.value)) {
+      selectedQuestionId.value = questions.value[0]?.id ?? ''
+    }
+    selectedManageQuestionIds.value = []
+    if (questionManagePage.value > questionManageTotalPages.value) {
+      questionManagePage.value = questionManageTotalPages.value
+    }
+  } catch {
+    backendStatus.value = '问题批量删除失败：请检查后端接口或参数格式'
+  }
+}
+
+async function submitQuestionEdit(): Promise<void> {
+  if (!questionEditForm.id) {
+    return
+  }
+
+  try {
+    if (!backendOnline.value) {
+      const target = questions.value.find((item) => item.id === questionEditForm.id)
+      if (target) {
+        target.title = questionEditForm.title
+        target.deadline = questionEditForm.deadline
+        target.status = questionEditForm.status
+      }
+      backendStatus.value = '后端离线：已更新模拟问题'
+      questionEditDialogOpen.value = false
+      return
+    }
+
+    await sendJson(`/questions/${questionEditForm.id}`, 'PATCH', {
+      content: questionEditForm.title,
+      deadline: questionEditForm.deadline,
+      status: questionEditForm.status,
+    })
+    await hydrateFromBackend()
+    backendStatus.value = '问题更新成功（后端）'
+    questionEditDialogOpen.value = false
+  } catch {
+    backendStatus.value = '问题更新失败：请检查后端接口或参数格式'
+  }
+}
+
+async function deleteQuestionInEditDialog(): Promise<void> {
+  await deleteSelectedQuestion()
+  questionEditDialogOpen.value = false
+}
+
+async function submitEventEdit(): Promise<void> {
+  if (!eventEditForm.id) {
+    return
+  }
+  try {
+    if (!backendOnline.value) {
+      for (const target of homeEvents.value) {
+        if (target.id === eventEditForm.id) {
+          target.theater = eventEditForm.theater
+          target.summary = eventEditForm.summary
+          target.severity = eventEditForm.severity
+          target.filterStatus = eventEditForm.filterStatus || target.filterStatus
+        }
+      }
+      for (const target of manageEvents.value) {
+        if (target.id === eventEditForm.id) {
+          target.theater = eventEditForm.theater
+          target.summary = eventEditForm.summary
+          target.severity = eventEditForm.severity
+          target.filterStatus = eventEditForm.filterStatus || target.filterStatus
+        }
+      }
+      backendStatus.value = '后端离线：已更新模拟事件'
+      eventEditDialogOpen.value = false
+      return
+    }
+
+    await sendJson(`/events/${eventEditForm.id}`, 'PATCH', {
+      source_system: eventEditForm.theater,
+      content: eventEditForm.summary,
+      credibility_level: credibilityFromSeverity(eventEditForm.severity),
+      filter_status: eventEditForm.filterStatus,
+    })
+    await Promise.all([fetchHomeEvents(), fetchManageEvents(eventManagePage.value)])
+    backendStatus.value = '事件更新成功（后端）'
+    eventEditDialogOpen.value = false
+  } catch {
+    backendStatus.value = '事件更新失败：请检查后端接口或参数格式'
+  }
+}
+
+async function deleteEventInEditDialog(): Promise<void> {
+  await deleteSelectedEvent()
+  eventEditDialogOpen.value = false
+}
+
+function openTemplateEdit(level: Level): void {
+  selectedLevel.value = level
+  selectedTemplateLevel.value = level
+  templateEditLevel.value = level
+  const current = templateState[level]
+  templateEditForm.objective = current.objective
+  templateEditForm.constraints = current.constraints
+  templateEditForm.outputFormat = current.outputFormat
+  templateEditForm.qualityRule = current.qualityRule
+  templateEditDialogOpen.value = true
+}
+
+function openTemplateDetail(level: Level): void {
+  selectedTemplateLevel.value = level
+  templateDetailDialogOpen.value = true
+}
+
+function openTemplateEditFromDetail(): void {
+  if (!selectedTemplateLevel.value) {
+    return
+  }
+  templateDetailDialogOpen.value = false
+  openTemplateEdit(selectedTemplateLevel.value)
+}
+
+function saveTemplate(): void {
+  const level = templateEditLevel.value
+  templateState[level] = {
+    ...templateState[level],
+    objective: templateEditForm.objective.trim(),
+    constraints: templateEditForm.constraints.trim(),
+    outputFormat: templateEditForm.outputFormat.trim(),
+    qualityRule: templateEditForm.qualityRule.trim(),
+  }
+  templateEditDialogOpen.value = false
 }
 
 function addQuestionComment(): void {
@@ -477,6 +891,18 @@ function makeTraceId(): string {
   return `${Date.now()}-${Math.random()}`
 }
 
+function toEventItem(item: BackendEventItem): EventItem {
+  return {
+    id: item.id,
+    codename: item.event_key,
+    theater: item.source_system,
+    summary: item.content,
+    severity: severityFromCredibility(item.credibility_level),
+    filterStatus: item.filter_status,
+    timestamp: item.event_time,
+  }
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
   const response = await fetch(`${base}${path}`)
@@ -502,27 +928,67 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
   return (await response.json()) as T
 }
 
+async function fetchHomeEvents(page = 1): Promise<void> {
+  const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
+    `/events?page=${page}&page_size=${homeEventPageSize}`,
+  )
+  if (eventPage.items.length === 0) {
+    homeEvents.value = []
+    homeEventTotal.value = eventPage.total
+    homeEventPage.value = page
+    homeEventJumpPage.value = String(page)
+    return
+  }
+  const mapped = eventPage.items.map(toEventItem)
+  homeEvents.value = mapped
+  homeEventTotal.value = eventPage.total
+  homeEventPage.value = page
+  homeEventJumpPage.value = String(page)
+  if (!mapped.some((item) => item.id === selectedEventId.value)) {
+    selectedEventId.value = mapped[0]?.id ?? ''
+  }
+}
+
+async function fetchManageEvents(page: number): Promise<void> {
+  const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
+    `/events?page=${page}&page_size=${eventManagePageSize.value}`,
+  )
+  manageEvents.value = eventPage.items.map(toEventItem)
+  manageEventTotal.value = eventPage.total
+  eventManagePage.value = page
+  eventManageJumpPage.value = String(page)
+  selectedManageEventIds.value = []
+}
+
 async function createEvent(): Promise<void> {
   try {
-    const codename = draftEvent.codename.trim()
     const theater = draftEvent.theater.trim()
     const summary = draftEvent.summary.trim()
-    if (!codename || !theater || !summary) {
-      backendStatus.value = '事件新增失败：请完整填写代号、来源和内容'
+    if (!theater || !summary) {
+      backendStatus.value = '事件新增失败：请完整填写来源和内容'
       return
     }
 
+    const codename = `EVENT-${Date.now()}`
+
     if (!backendOnline.value) {
       const localId = `evt-local-${Date.now()}`
-      events.value.unshift({
+      const newItem: EventItem = {
         id: localId,
         codename,
         theater,
         summary,
         severity: draftEvent.severity,
+        filterStatus: 'mock_new',
         timestamp: new Date().toISOString(),
-      })
+      }
+      homeEvents.value.unshift(newItem)
+      if (currentView.value === 'events') {
+        manageEvents.value.unshift({ ...newItem })
+      }
       selectedEventId.value = localId
+      homeEventTotal.value += 1
+      manageEventTotal.value += 1
       backendStatus.value = '后端离线：已在模拟数据中新增事件'
     } else {
       await sendJson<{ id: string }>('/events', 'POST', {
@@ -533,39 +999,15 @@ async function createEvent(): Promise<void> {
         event_time: new Date().toISOString(),
         trace_id: makeTraceId(),
       })
-      await hydrateFromBackend()
+      await Promise.all([fetchHomeEvents(), fetchManageEvents(1)])
+      eventManagePage.value = 1
       backendStatus.value = '事件新增成功（后端）'
     }
 
-    draftEvent.codename = ''
     draftEvent.theater = ''
     draftEvent.summary = ''
   } catch {
     backendStatus.value = '事件新增失败：请检查后端接口或参数格式'
-  }
-}
-
-async function updateSelectedEvent(): Promise<void> {
-  try {
-    const current = selectedEvent.value
-    if (!current) {
-      return
-    }
-
-    if (!backendOnline.value) {
-      backendStatus.value = '后端离线：当前仅支持模拟新增，不支持模拟更新'
-      return
-    }
-
-    await sendJson(`/events/${current.id}`, 'PATCH', {
-      content: current.summary,
-      source_system: current.theater,
-      credibility_level: credibilityFromSeverity(current.severity),
-    })
-    await hydrateFromBackend()
-    backendStatus.value = '事件更新成功（后端）'
-  } catch {
-    backendStatus.value = '事件更新失败：请检查后端接口或参数格式'
   }
 }
 
@@ -577,16 +1019,19 @@ async function deleteSelectedEvent(): Promise<void> {
     }
 
     if (!backendOnline.value) {
-      events.value = events.value.filter((item) => item.id !== currentId)
+      homeEvents.value = homeEvents.value.filter((item) => item.id !== currentId)
+      manageEvents.value = manageEvents.value.filter((item) => item.id !== currentId)
+      homeEventTotal.value = Math.max(0, homeEventTotal.value - 1)
+      manageEventTotal.value = Math.max(0, manageEventTotal.value - 1)
       questions.value = questions.value.filter((item) => item.eventId !== currentId)
-      selectedEventId.value = events.value[0]?.id ?? ''
+      selectedEventId.value = homeEvents.value[0]?.id ?? ''
       selectedQuestionId.value = questions.value.find((item) => item.eventId === selectedEventId.value)?.id ?? ''
       backendStatus.value = '后端离线：已在模拟数据中删除事件及关联问题'
       return
     }
 
     await sendJson('/events', 'DELETE', { ids: [currentId] })
-    await hydrateFromBackend()
+    await Promise.all([fetchHomeEvents(), fetchManageEvents(eventManagePage.value)])
     backendStatus.value = '事件删除成功（后端）'
   } catch {
     backendStatus.value = '事件删除失败：请检查后端接口或参数格式'
@@ -634,30 +1079,6 @@ async function createQuestion(): Promise<void> {
   }
 }
 
-async function updateSelectedQuestion(): Promise<void> {
-  try {
-    const current = selectedQuestion.value
-    if (!current) {
-      return
-    }
-
-    if (!backendOnline.value) {
-      backendStatus.value = '后端离线：当前仅支持模拟新增，不支持模拟更新'
-      return
-    }
-
-    await sendJson(`/questions/${current.id}`, 'PATCH', {
-      content: current.title,
-      deadline: current.deadline,
-      status: current.status,
-    })
-    await hydrateFromBackend()
-    backendStatus.value = '问题更新成功（后端）'
-  } catch {
-    backendStatus.value = '问题更新失败：请检查后端接口或参数格式'
-  }
-}
-
 async function deleteSelectedQuestion(): Promise<void> {
   try {
     const currentId = selectedQuestionId.value
@@ -689,25 +1110,15 @@ async function hydrateFromBackend(): Promise<void> {
       return
     }
 
-    const [eventResult, questionResult] = await Promise.allSettled([
-      fetchJson<BackendPage<BackendEventItem>>('/events?page=1&page_size=3'),
+    const [homeEventResult, questionResult] = await Promise.allSettled([
+      fetchHomeEvents(),
       fetchJson<BackendPage<BackendQuestionItem>>('/questions?page=1&page_size=100'),
     ])
 
     const loadedParts: string[] = []
 
-    if (eventResult.status === 'fulfilled' && eventResult.value.items.length > 0) {
-      const mappedEvents: EventItem[] = eventResult.value.items.map((item) => ({
-        id: item.id,
-        codename: item.event_key,
-        theater: item.source_system,
-        summary: item.content,
-        severity: severityFromCredibility(item.credibility_level),
-        timestamp: item.event_time,
-      }))
-      events.value = mappedEvents
-      selectedEventId.value = mappedEvents[0]?.id ?? selectedEventId.value
-      loadedParts.push(`事件 ${mappedEvents.length} 条`)
+    if (homeEventResult.status === 'fulfilled') {
+      loadedParts.push(`事件首页 ${homeEvents.value.length} 条`)
     }
 
     if (questionResult.status === 'fulfilled' && questionResult.value.items.length > 0) {
@@ -724,6 +1135,8 @@ async function hydrateFromBackend(): Promise<void> {
       questions.value = mappedQuestions
       const firstQuestion = mappedQuestions.find((question) => question.eventId === selectedEventId.value)
       selectedQuestionId.value = firstQuestion?.id ?? mappedQuestions[0]?.id ?? selectedQuestionId.value
+      questionManagePage.value = 1
+      selectedManageQuestionIds.value = []
       loadedParts.push(`问题 ${mappedQuestions.length} 条`)
     }
 
@@ -741,6 +1154,20 @@ async function hydrateFromBackend(): Promise<void> {
 
 onMounted(() => {
   void hydrateFromBackend()
+})
+
+watch(currentView, (view) => {
+  if (view === 'events') {
+    if (backendOnline.value) {
+      void fetchManageEvents(1)
+    } else {
+      manageEvents.value = [...homeEvents.value]
+      manageEventTotal.value = homeEvents.value.length
+      eventManagePage.value = 1
+      eventManageJumpPage.value = '1'
+      selectedManageEventIds.value = []
+    }
+  }
 })
 </script>
 
@@ -771,6 +1198,7 @@ onMounted(() => {
         <button :class="['level-btn', { active: currentView === 'home' }]" @click="currentView = 'home'">首页总览</button>
         <button :class="['level-btn', { active: currentView === 'events' }]" @click="currentView = 'events'">事件管理</button>
         <button :class="['level-btn', { active: currentView === 'questions' }]" @click="currentView = 'questions'">问题管理</button>
+        <button :class="['level-btn', { active: currentView === 'templates' }]" @click="currentView = 'templates'">模板配置</button>
       </div>
     </section>
 
@@ -779,7 +1207,7 @@ onMounted(() => {
         <article class="panel">
           <div class="panel-head">
             <h2>1) 事件监看</h2>
-            <span>首页仅展示最新 3 条</span>
+            <span>每页 3 条，可分页</span>
           </div>
           <ul class="event-list">
             <li
@@ -789,49 +1217,27 @@ onMounted(() => {
               @click="selectEvent(eventItem.id)"
             >
               <div class="row-between">
-                <strong>{{ eventItem.codename }}</strong>
-                <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
+                <strong>{{ eventItem.theater }}</strong>
+                <div class="tag-group">
+                  <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
+                  <span class="badge filter-badge">{{ eventItem.filterStatus }}</span>
+                </div>
               </div>
               <p>{{ eventItem.theater }}</p>
               <small>{{ eventItem.summary }}</small>
               <span class="time">{{ formatDate(eventItem.timestamp) }}</span>
+              <div class="action-row action-right">
+                <button class="action-btn mini-btn" @click.stop="openHomeDetail(eventItem)">详情</button>
+              </div>
             </li>
           </ul>
-        </article>
-
-        <article class="panel">
-          <div class="panel-head">
-            <h2>2) 模板配置</h2>
-            <span>按等级</span>
+          <div class="action-row pagination-row pagination-center mini-pagination">
+            <button class="action-btn mini-btn" @click="goHomeEventPage(-1)">上一页</button>
+            <span>{{ homeEventPage }} / {{ homeEventTotalPages }}</span>
+            <input v-model="homeEventJumpPage" class="jump-input mini-jump-input" placeholder="页码" />
+            <button class="action-btn mini-btn" @click="jumpToHomeEventPageFromInput">跳转</button>
+            <button class="action-btn mini-btn" @click="goHomeEventPage(1)">下一页</button>
           </div>
-          <div class="level-switch">
-            <button
-              v-for="level in levels"
-              :key="level"
-              :class="['level-btn', { active: level === selectedLevel }]"
-              @click="selectedLevel = level"
-            >
-              {{ level }}
-            </button>
-          </div>
-
-          <div class="field-block">
-            <label>目标</label>
-            <textarea v-model="selectedTemplate.objective" rows="2"></textarea>
-          </div>
-          <div class="field-block">
-            <label>约束</label>
-            <textarea v-model="selectedTemplate.constraints" rows="2"></textarea>
-          </div>
-          <div class="field-block">
-            <label>输出格式</label>
-            <textarea v-model="selectedTemplate.outputFormat" rows="2"></textarea>
-          </div>
-          <div class="field-block">
-            <label>质量规则</label>
-            <textarea v-model="selectedTemplate.qualityRule" rows="2"></textarea>
-          </div>
-          <button class="action-btn" @click="saveTemplate">保存模板（模拟）</button>
         </article>
 
         <article class="panel">
@@ -877,7 +1283,7 @@ onMounted(() => {
         <article class="panel">
           <div class="panel-head">
             <h2>3) 自动生成问题</h2>
-            <span>{{ selectedEvent?.codename ?? '未选择事件' }}</span>
+            <span>{{ selectedEvent?.theater ?? '未选择事件' }}</span>
           </div>
           <div class="question-grid">
             <div
@@ -969,36 +1375,322 @@ onMounted(() => {
     </main>
 
     <main v-if="currentView === 'events'" class="manage-grid">
-      <article class="panel">
+      <article class="panel list-panel">
         <div class="panel-head">
           <h2>事件列表</h2>
-          <span>{{ events.length }} 条</span>
+          <span>第 {{ eventManagePage }} / {{ eventManageTotalPages }} 页</span>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="createEventDialogOpen = true">新增事件</button>
+          <button class="action-btn" @click="toggleSelectAllEventsOnPage">
+            {{ allEventsOnPageSelected ? '取消全选本页' : '全选本页' }}
+          </button>
+          <button class="action-btn danger" @click="deleteSelectedEventsBatch">批量删除所选</button>
         </div>
         <ul class="event-list">
           <li
-            v-for="eventItem in events"
+            v-for="eventItem in pagedManageEvents"
             :key="`manage-${eventItem.id}`"
             :class="['event-card', { active: eventItem.id === selectedEventId }]"
-            @click="selectEvent(eventItem.id)"
+            @click="selectEvent(eventItem.id); openManageDetail(eventItem)"
           >
             <div class="row-between">
-              <strong>{{ eventItem.codename }}</strong>
-              <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
+              <label class="select-row" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedManageEventIds.includes(eventItem.id)"
+                  @change="toggleManageEventSelection(eventItem.id)"
+                />
+                <span>选择</span>
+              </label>
+              <strong>{{ eventItem.theater }}</strong>
+              <div class="tag-group">
+                <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
+                <span class="badge filter-badge">{{ eventItem.filterStatus }}</span>
+              </div>
             </div>
             <p>{{ eventItem.theater }}</p>
             <small>{{ eventItem.summary }}</small>
+            <div class="action-row">
+              <button class="action-btn" @click.stop="openEventEdit(eventItem)">编辑</button>
+            </div>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <button :class="['level-btn', { active: eventManagePageSize === 3 }]" @click="setEventManagePageSize(3)">3</button>
+          <button :class="['level-btn', { active: eventManagePageSize === 6 }]" @click="setEventManagePageSize(6)">6</button>
+          <button :class="['level-btn', { active: eventManagePageSize === 10 }]" @click="setEventManagePageSize(10)">10</button>
+          <button class="action-btn" @click="goManageEventPage(-1)">上一页</button>
+          <input v-model="eventManageJumpPage" class="jump-input" placeholder="页码" />
+          <button class="action-btn" @click="jumpToEventPageFromInput">跳转</button>
+          <button class="action-btn" @click="goManageEventPage(1)">下一页</button>
+        </div>
+      </article>
+    </main>
+
+    <main v-if="currentView === 'questions'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>问题列表</h2>
+          <span>第 {{ questionManagePage }} / {{ questionManageTotalPages }} 页</span>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="createQuestionDialogOpen = true">新增问题</button>
+          <button class="action-btn" @click="toggleSelectAllQuestionsOnPage">
+            {{ allQuestionsOnPageSelected ? '取消全选本页' : '全选本页' }}
+          </button>
+          <button class="action-btn danger" @click="deleteSelectedQuestionsBatch">批量删除所选</button>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="question in pagedManageQuestions"
+            :key="`manage-${question.id}`"
+            :class="['question-card', { active: question.id === selectedQuestionId }]"
+            @click="selectedQuestionId = question.id; openManageQuestionDetail(question)"
+          >
+            <div class="row-between">
+              <label class="select-row" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedManageQuestionIds.includes(question.id)"
+                  @change="toggleManageQuestionSelection(question.id)"
+                />
+                <span>选择</span>
+              </label>
+              <div class="tag-group">
+                <span class="badge">{{ question.level }}</span>
+                <span class="badge">{{ statusLabel[question.status] }}</span>
+              </div>
+            </div>
+            <p>{{ question.title }}</p>
+            <small>关联事件：{{ allKnownEvents.find((eventItem) => eventItem.id === question.eventId)?.theater ?? '未匹配事件' }}</small>
+            <div class="action-row action-right">
+              <button class="action-btn" @click.stop="openQuestionEdit(question)">编辑</button>
+            </div>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <button :class="['level-btn', { active: questionManagePageSize === 3 }]" @click="setQuestionManagePageSize(3)">3</button>
+          <button :class="['level-btn', { active: questionManagePageSize === 6 }]" @click="setQuestionManagePageSize(6)">6</button>
+          <button :class="['level-btn', { active: questionManagePageSize === 10 }]" @click="setQuestionManagePageSize(10)">10</button>
+          <button class="action-btn" @click="goManageQuestionPage(-1)">上一页</button>
+          <input v-model="questionManageJumpPage" class="jump-input" placeholder="页码" />
+          <button class="action-btn" @click="jumpToQuestionPageFromInput">跳转</button>
+          <button class="action-btn" @click="goManageQuestionPage(1)">下一页</button>
+        </div>
+      </article>
+
+    </main>
+
+    <main v-if="currentView === 'templates'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>模板配置列表</h2>
+          <span>按等级选择</span>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="level in levels"
+            :key="`template-${level}`"
+            :class="['question-card', { active: level === selectedTemplateLevel }]"
+            @click="openTemplateDetail(level)"
+          >
+            <div class="row-between">
+              <strong>{{ level }}</strong>
+              <span class="badge">模板配置</span>
+            </div>
+            <p>{{ templateState[level].objective }}</p>
+            <small>{{ templateState[level].qualityRule }}</small>
+            <div class="action-row action-right">
+              <button class="action-btn" @click.stop="openTemplateEdit(level)">编辑</button>
+            </div>
           </li>
         </ul>
       </article>
 
-      <article class="panel">
+    </main>
+
+    <div v-if="homeDetailDialogOpen && homeDetailEvent" class="dialog-backdrop" @click.self="homeDetailDialogOpen = false">
+      <section class="dialog-panel">
         <div class="panel-head">
-          <h2>新增事件</h2>
-          <span>支持后端写入</span>
+          <h2>事件详情（只读）</h2>
+          <button class="action-btn" @click="homeDetailDialogOpen = false">关闭</button>
+        </div>
+        <div class="detail-grid">
+          <p><strong>ID：</strong>{{ homeDetailEvent.id }}</p>
+          <p><strong>event_key：</strong>{{ homeDetailEvent.codename }}</p>
+          <p><strong>来源系统：</strong>{{ homeDetailEvent.theater }}</p>
+          <p><strong>可信等级：</strong>{{ severityLabel[homeDetailEvent.severity] }}</p>
+          <p><strong>filter_status：</strong>{{ homeDetailEvent.filterStatus }}</p>
+          <p><strong>事件时间：</strong>{{ formatDate(homeDetailEvent.timestamp) }}</p>
+          <p><strong>内容：</strong>{{ homeDetailEvent.summary }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="eventDetailDialogOpen && manageDetailEvent" class="dialog-backdrop" @click.self="eventDetailDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>事件详情（只读）</h2>
+          <div class="action-row">
+            <button class="action-btn" @click="openEventEdit(manageDetailEvent)">编辑</button>
+            <button class="action-btn" @click="eventDetailDialogOpen = false">关闭</button>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <p><strong>ID：</strong>{{ manageDetailEvent.id }}</p>
+          <p><strong>event_key：</strong>{{ manageDetailEvent.codename }}</p>
+          <p><strong>来源系统：</strong>{{ manageDetailEvent.theater }}</p>
+          <p><strong>可信等级：</strong>{{ severityLabel[manageDetailEvent.severity] }}</p>
+          <p><strong>filter_status：</strong>{{ manageDetailEvent.filterStatus }}</p>
+          <p><strong>事件时间：</strong>{{ formatDate(manageDetailEvent.timestamp) }}</p>
+          <p><strong>内容：</strong>{{ manageDetailEvent.summary }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="eventEditDialogOpen" class="dialog-backdrop" @click.self="eventEditDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>编辑事件</h2>
+          <button class="action-btn" @click="eventEditDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
-          <label>事件代号</label>
-          <input v-model="draftEvent.codename" placeholder="例如：海隼预警" />
+          <label>来源系统 / 战区</label>
+          <input v-model="eventEditForm.theater" />
+        </div>
+        <div class="field-block">
+          <label>事件内容</label>
+          <textarea v-model="eventEditForm.summary" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>可信等级映射</label>
+          <select v-model="eventEditForm.severity">
+            <option value="low">低</option>
+            <option value="medium">中</option>
+            <option value="high">高</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>filter_status</label>
+          <input v-model="eventEditForm.filterStatus" placeholder="passed/reviewing/blocked" />
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="submitEventEdit">保存修改</button>
+          <button class="action-btn danger" @click="deleteEventInEditDialog">删除该事件</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="questionDetailDialogOpen && manageDetailQuestion" class="dialog-backdrop" @click.self="questionDetailDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>问题详情（只读）</h2>
+          <div class="action-row">
+            <button class="action-btn" @click="openQuestionEdit(manageDetailQuestion!)">编辑</button>
+            <button class="action-btn" @click="questionDetailDialogOpen = false">关闭</button>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <p><strong>ID：</strong>{{ manageDetailQuestion.id }}</p>
+          <p><strong>关联事件：</strong>{{ allKnownEvents.find((item) => item.id === (manageDetailQuestion?.eventId ?? ''))?.theater ?? '未匹配事件' }}</p>
+          <p><strong>等级：</strong>{{ manageDetailQuestion.level }}</p>
+          <p><strong>状态：</strong>{{ statusLabel[manageDetailQuestion.status] }}</p>
+          <p><strong>截止时间：</strong>{{ formatDate(manageDetailQuestion.deadline) }}</p>
+          <p><strong>标题：</strong>{{ manageDetailQuestion.title }}</p>
+          <p><strong>假设：</strong>{{ manageDetailQuestion.hypothesis }}</p>
+          <p><strong>真实结果：</strong>{{ manageDetailQuestion.groundTruth }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="questionEditDialogOpen" class="dialog-backdrop" @click.self="questionEditDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>编辑问题</h2>
+          <button class="action-btn" @click="questionEditDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>问题标题</label>
+          <input v-model="questionEditForm.title" />
+        </div>
+        <div class="field-block">
+          <label>截止时间（ISO）</label>
+          <input v-model="questionEditForm.deadline" />
+        </div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="questionEditForm.status">
+            <option value="collecting">收集中</option>
+            <option value="locked">已封存</option>
+            <option value="resolved">已解析</option>
+          </select>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="submitQuestionEdit">保存修改</button>
+          <button class="action-btn danger" @click="deleteQuestionInEditDialog">删除该问题</button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="templateDetailDialogOpen && selectedTemplateLevel && selectedTemplateDetail"
+      class="dialog-backdrop"
+      @click.self="templateDetailDialogOpen = false"
+    >
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>模板详情（{{ selectedTemplateLevel }}）</h2>
+          <div class="action-row">
+            <button class="action-btn" @click="openTemplateEditFromDetail">编辑</button>
+            <button class="action-btn" @click="templateDetailDialogOpen = false">关闭</button>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <p><strong>等级：</strong>{{ selectedTemplateLevel }}</p>
+          <p><strong>目标：</strong>{{ selectedTemplateDetail.objective }}</p>
+          <p><strong>约束：</strong>{{ selectedTemplateDetail.constraints }}</p>
+          <p><strong>输出格式：</strong>{{ selectedTemplateDetail.outputFormat }}</p>
+          <p><strong>质量规则：</strong>{{ selectedTemplateDetail.qualityRule }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="templateEditDialogOpen" class="dialog-backdrop" @click.self="templateEditDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>编辑模板（{{ templateEditLevel }}）</h2>
+          <button class="action-btn" @click="templateEditDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>目标</label>
+          <textarea v-model="templateEditForm.objective" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>约束</label>
+          <textarea v-model="templateEditForm.constraints" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>输出格式</label>
+          <textarea v-model="templateEditForm.outputFormat" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>质量规则</label>
+          <textarea v-model="templateEditForm.qualityRule" rows="3"></textarea>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="saveTemplate">保存模板（模拟）</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="createEventDialogOpen" class="dialog-backdrop" @click.self="createEventDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>新增事件</h2>
+          <button class="action-btn" @click="createEventDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
           <label>来源系统 / 战区</label>
@@ -1016,74 +1708,23 @@ onMounted(() => {
             <option value="high">高</option>
           </select>
         </div>
-        <button class="action-btn" @click="createEvent">新增事件</button>
-      </article>
-
-      <article class="panel" v-if="selectedEvent">
-        <div class="panel-head">
-          <h2>编辑事件</h2>
-          <span>{{ selectedEvent.id }}</span>
-        </div>
-        <div class="field-block">
-          <label>事件代号</label>
-          <input v-model="selectedEvent.codename" />
-        </div>
-        <div class="field-block">
-          <label>来源系统 / 战区</label>
-          <input v-model="selectedEvent.theater" />
-        </div>
-        <div class="field-block">
-          <label>事件内容</label>
-          <textarea v-model="selectedEvent.summary" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>可信等级映射</label>
-          <select v-model="selectedEvent.severity">
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
-          </select>
-        </div>
         <div class="action-row">
-          <button class="action-btn" @click="updateSelectedEvent">保存修改</button>
-          <button class="action-btn danger" @click="deleteSelectedEvent">删除事件</button>
+          <button class="action-btn" @click="submitCreateEventFromDialog">提交事件</button>
         </div>
-      </article>
-    </main>
+      </section>
+    </div>
 
-    <main v-if="currentView === 'questions'" class="manage-grid">
-      <article class="panel">
-        <div class="panel-head">
-          <h2>问题列表</h2>
-          <span>{{ questions.length }} 条</span>
-        </div>
-        <ul class="event-list">
-          <li
-            v-for="question in questions"
-            :key="`manage-${question.id}`"
-            :class="['question-card', { active: question.id === selectedQuestionId }]"
-            @click="selectedQuestionId = question.id"
-          >
-            <div class="row-between">
-              <strong>{{ question.level }}</strong>
-              <span class="status">{{ statusLabel[question.status] }}</span>
-            </div>
-            <p>{{ question.title }}</p>
-            <small>事件ID：{{ question.eventId }}</small>
-          </li>
-        </ul>
-      </article>
-
-      <article class="panel">
+    <div v-if="createQuestionDialogOpen" class="dialog-backdrop" @click.self="createQuestionDialogOpen = false">
+      <section class="dialog-panel">
         <div class="panel-head">
           <h2>新增问题</h2>
-          <span>支持后端写入</span>
+          <button class="action-btn" @click="createQuestionDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
           <label>绑定事件</label>
           <select v-model="selectedEventId">
-            <option v-for="eventItem in events" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
-              {{ eventItem.codename }} ({{ eventItem.id }})
+            <option v-for="eventItem in allKnownEvents" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
+              {{ eventItem.theater }}
             </option>
           </select>
         </div>
@@ -1109,35 +1750,10 @@ onMounted(() => {
             <option value="resolved">已解析</option>
           </select>
         </div>
-        <button class="action-btn" @click="createQuestion">新增问题</button>
-      </article>
-
-      <article class="panel" v-if="selectedQuestion">
-        <div class="panel-head">
-          <h2>编辑问题</h2>
-          <span>{{ selectedQuestion.id }}</span>
-        </div>
-        <div class="field-block">
-          <label>问题标题</label>
-          <input v-model="selectedQuestion.title" />
-        </div>
-        <div class="field-block">
-          <label>截止时间（ISO）</label>
-          <input v-model="selectedQuestion.deadline" />
-        </div>
-        <div class="field-block">
-          <label>状态</label>
-          <select v-model="selectedQuestion.status">
-            <option value="collecting">收集中</option>
-            <option value="locked">已封存</option>
-            <option value="resolved">已解析</option>
-          </select>
-        </div>
         <div class="action-row">
-          <button class="action-btn" @click="updateSelectedQuestion">保存修改</button>
-          <button class="action-btn danger" @click="deleteSelectedQuestion">删除问题</button>
+          <button class="action-btn" @click="submitCreateQuestionFromDialog">提交问题</button>
         </div>
-      </article>
-    </main>
+      </section>
+    </div>
   </div>
 </template>
