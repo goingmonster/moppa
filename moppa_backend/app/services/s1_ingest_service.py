@@ -44,13 +44,15 @@ class S1IngestService:
         if existing is not None and existing.status in {"running", "completed"}:
             return self._to_task_response(existing)
 
-        task = existing or self.task_repository.create_pending(
-            task_type="s1_ingest_push",
-            idempotency_key=idempotency_key,
-            trace_id=uuid4(),
-            business_id=None,
-            date_window=date_window,
-        )
+        task = existing
+        if task is None:
+            task = self.task_repository.create_pending(
+                task_type="s1_ingest_push",
+                idempotency_key=idempotency_key,
+                trace_id=uuid4(),
+                business_id=None,
+                date_window=date_window,
+            )
         _ = self.task_repository.mark_running(task.id)
         try:
             result, metrics = self._ingest_events(payload.events)
@@ -72,32 +74,59 @@ class S1IngestService:
         if existing is not None and existing.status in {"running", "completed"}:
             return self._to_task_response(existing)
 
-        task = existing or self.task_repository.create_pending(
-            task_type="s1_ingest_pull",
-            idempotency_key=idempotency_key,
-            trace_id=uuid4(),
-            business_id=None,
-            date_window=date_window,
-        )
+        task = existing
+        if task is None:
+            task = self.task_repository.create_pending(
+                task_type="s1_ingest_pull",
+                idempotency_key=idempotency_key,
+                trace_id=uuid4(),
+                business_id=None,
+                date_window=date_window,
+            )
         _ = self.task_repository.mark_running(task.id)
         try:
-            source_system = payload.source_system or "news_event_crawler"
+            source_system = payload.source_system or settings.source_system_name
             self.data_source_repository.ensure_source_system(source_system)
 
             watermark = self._get_pull_watermark()
-            rows = cast(
-                list[SourceNewsRow],
-                self.source_news_repository.fetch_data_test_rows(
-                since=watermark,
-                limit=self._resolve_source_fetch_limit(),
-                ),
-            )
-            events = [self._map_source_row_to_event(row, source_system=source_system) for row in rows]
+            latest_mode = watermark is None
+            if latest_mode:
+                rows = cast(
+                    list[SourceNewsRow],
+                    self.source_news_repository.fetch_latest_rows(
+                        limit=self._resolve_source_fetch_limit(latest_mode=True),
+                    ),
+                )
+            else:
+                watermark_time = cast(datetime, watermark["last_create_time"])
+                rows = cast(
+                    list[SourceNewsRow],
+                    self.source_news_repository.fetch_incremental_rows(
+                        since=watermark_time,
+                        overlap_minutes=self._resolve_source_overlap_minutes(),
+                        limit=self._resolve_source_fetch_limit(latest_mode=False),
+                    ),
+                )
+            malformed = 0
+            events: list[S1EventInputModel] = []
+            for row in rows:
+                try:
+                    events.append(self._map_source_row_to_event(row, source_system=source_system))
+                except ValueError:
+                    malformed += 1
             result, metrics = self._ingest_events(events)
             result["fetched"] = len(rows)
+            result["skipped_malformed"] = malformed
+            result["pull_mode"] = "latest_bootstrap" if latest_mode else "incremental"
             if rows:
-                latest = max(row["create_time"] for row in rows)
-                self._set_pull_watermark(latest)
+                latest_row = max(
+                    rows,
+                    key=lambda row: (self._coerce_datetime(row["create_time"], field_name="create_time"), str(row.get("url") or "")),
+                )
+                self._set_pull_watermark(
+                    last_create_time=self._coerce_datetime(latest_row["create_time"], field_name="create_time"),
+                    last_url=str(latest_row.get("url") or ""),
+                )
 
             completed = self.task_repository.mark_completed(task.id, result=result, metrics=metrics)
             return self._to_task_response(completed or task)
@@ -188,12 +217,9 @@ class S1IngestService:
         return result, metrics
 
     def _map_source_row_to_event(self, row: SourceNewsRow, source_system: str) -> S1EventInputModel:
-        create_time_raw = row["create_time"]
-        if not isinstance(create_time_raw, datetime):
-            raise ValueError("create_time is not datetime")
-        create_time = create_time_raw
+        create_time = self._coerce_datetime(row["create_time"], field_name="create_time")
         published = row.get("published")
-        event_time: datetime = published if isinstance(published, datetime) else create_time
+        event_time: datetime = self._coerce_datetime(published, field_name="published", default=create_time)
         url = str(row.get("url") or "")
         title = str(row.get("title_translate") or "")
         content = str(row.get("text_translate") or "")
@@ -211,6 +237,25 @@ class S1IngestService:
             event_time=event_time,
             trace_id=uuid4(),
         )
+
+    def _coerce_datetime(
+        self,
+        value: object,
+        field_name: str,
+        default: datetime | None = None,
+    ) -> datetime:
+        if value is None:
+            if default is not None:
+                return default
+            raise ValueError(f"{field_name} is missing")
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError(f"{field_name} parse failed") from exc
+        raise ValueError(f"{field_name} is not datetime")
 
     def _build_push_idempotency_key(self, events: list[S1EventInputModel], date_window: datetime) -> str:
         digest_source = "|".join(sorted(event.event_key for event in events))
@@ -239,37 +284,63 @@ class S1IngestService:
                 return 3
         return 3
 
-    def _resolve_source_fetch_limit(self) -> int:
+    def _resolve_source_fetch_limit(self, latest_mode: bool) -> int:
         config = self.task_config_repository.get_by_task_type("s1_ingest_pull")
+        default_limit = settings.source_bootstrap_limit if latest_mode else settings.source_fetch_limit
         if config is None:
-            return settings.source_fetch_limit
-        raw = config.value.get("source_fetch_limit")
+            return default_limit
+        raw_key = "source_bootstrap_limit" if latest_mode else "source_fetch_limit"
+        raw = config.value.get(raw_key)
         if isinstance(raw, int) and raw > 0:
             return raw
         if isinstance(raw, str):
             try:
                 parsed = int(raw)
-                return parsed if parsed > 0 else settings.source_fetch_limit
+                return parsed if parsed > 0 else default_limit
             except ValueError:
-                return settings.source_fetch_limit
-        return settings.source_fetch_limit
+                return default_limit
+        return default_limit
 
-    def _get_pull_watermark(self) -> datetime | None:
+    def _resolve_source_overlap_minutes(self) -> int:
+        config = self.task_config_repository.get_by_task_type("s1_ingest_pull")
+        if config is None:
+            return settings.source_overlap_minutes
+        raw = config.value.get("source_overlap_minutes")
+        if isinstance(raw, int) and raw >= 0:
+            return raw
+        if isinstance(raw, str):
+            try:
+                parsed = int(raw)
+                return parsed if parsed >= 0 else settings.source_overlap_minutes
+            except ValueError:
+                return settings.source_overlap_minutes
+        return settings.source_overlap_minutes
+
+    def _get_pull_watermark(self) -> dict[str, datetime | str] | None:
         value = self.system_config_repository.get_value("task.s1_ingest_pull.watermark")
         if value is None:
             return None
         raw = value.get("last_create_time")
         if not isinstance(raw, str):
             return None
+        last_url = value.get("last_url")
+        if not isinstance(last_url, str):
+            last_url = ""
         try:
-            return datetime.fromisoformat(raw)
+            return {
+                "last_create_time": datetime.fromisoformat(raw),
+                "last_url": last_url,
+            }
         except ValueError:
             return None
 
-    def _set_pull_watermark(self, last_create_time: datetime) -> None:
+    def _set_pull_watermark(self, last_create_time: datetime, last_url: str) -> None:
         _ = self.system_config_repository.upsert_value(
             key="task.s1_ingest_pull.watermark",
-            value={"last_create_time": last_create_time.isoformat()},
+            value={
+                "last_create_time": last_create_time.isoformat(),
+                "last_url": last_url,
+            },
             description="S1 pull last consumed create_time",
             category="task",
         )

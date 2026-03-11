@@ -40,6 +40,8 @@ class Settings:
     source_db_password: str
     source_system_name: str
     source_fetch_limit: int
+    source_bootstrap_limit: int
+    source_overlap_minutes: int
     scheduler_enabled: bool
     cors_allowed_origins: list[str]
 
@@ -99,6 +101,8 @@ def load_settings() -> Settings:
         source_db_password=os.getenv("SOURCE_DB_PASSWORD", ""),
         source_system_name=os.getenv("SOURCE_SYSTEM_NAME", "news_event_crawler"),
         source_fetch_limit=env_int("SOURCE_FETCH_LIMIT", 200),
+        source_bootstrap_limit=env_int("SOURCE_BOOTSTRAP_LIMIT", 500),
+        source_overlap_minutes=env_int("SOURCE_OVERLAP_MINUTES", 10),
         scheduler_enabled=env_bool("SCHEDULER_ENABLED", True),
         cors_allowed_origins=env_csv(
             "CORS_ALLOWED_ORIGINS",

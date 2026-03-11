@@ -11,6 +11,8 @@ class TaskConfigPayloadModel(BaseModel):
     retry_intervals_minutes: list[int] = Field(default_factory=lambda: [1, 5, 15], min_length=1)
     timeout_seconds: int = Field(default=3600, ge=1)
     source_fetch_limit: int = Field(default=200, ge=1, le=5000)
+    source_bootstrap_limit: int = Field(default=500, ge=1, le=5000)
+    source_overlap_minutes: int = Field(default=10, ge=0, le=120)
 
 
 class TaskConfigCreateModel(BaseModel):

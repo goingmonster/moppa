@@ -60,6 +60,7 @@ class TaskExecutionRepository:
             return None
         entity.status = "running"
         entity.started_at = datetime.now(timezone.utc)
+        entity.finished_at = None
         entity.error_message = None
         entity.next_retry_at = None
         self.db.commit()
