@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
-type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSources'
+type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
 
 interface EventItem {
   id: string
@@ -167,6 +167,32 @@ interface BackendDataSourceItem {
   credibility_level: number
   sync_frequency: string
   is_active: boolean
+  version: string
+  created_at: string
+  updated_at: string
+}
+
+interface FilterRuleItem {
+  id: string
+  name: string
+  level: number
+  filterExpression: string
+  filterConfig: Record<string, unknown>
+  priority: number
+  status: 'active' | 'inactive' | 'archived'
+  version: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface BackendFilterRuleItem {
+  id: string
+  name: string
+  level: number
+  filter_expression: string
+  filter_config: Record<string, unknown>
+  priority: number
+  status: FilterRuleItem['status']
   version: string
   created_at: string
   updated_at: string
@@ -455,6 +481,35 @@ const editDataSourceForm = reactive({
   isActive: true,
   version: 'v1.0',
 })
+const filterRules = ref<FilterRuleItem[]>([])
+const filterRuleManagePage = ref(1)
+const filterRuleManagePageSize = ref(10)
+const filterRuleManageJumpPage = ref('1')
+const filterRuleManageTotal = ref(0)
+const selectedManageFilterRuleIds = ref<string[]>([])
+const selectedFilterRule = ref<FilterRuleItem | null>(null)
+const filterRuleDetailDialogOpen = ref(false)
+const createFilterRuleDialogOpen = ref(false)
+const editFilterRuleDialogOpen = ref(false)
+const createFilterRuleForm = reactive({
+  name: '',
+  level: 1,
+  filterExpression: 'keyword_exclude',
+  filterConfig: '{"keywords":["rumor"]}',
+  priority: 100,
+  status: 'active' as FilterRuleItem['status'],
+  version: 'v1.0',
+})
+const editFilterRuleForm = reactive({
+  id: '',
+  name: '',
+  level: 1,
+  filterExpression: 'keyword_exclude',
+  filterConfig: '{}',
+  priority: 0,
+  status: 'active' as FilterRuleItem['status'],
+  version: 'v1.0',
+})
 
 const selectedEvent = computed(() => homeEvents.value.find((eventItem) => eventItem.id === selectedEventId.value))
 const selectedTemplateDetail = computed(() =>
@@ -502,6 +557,14 @@ const allDataSourcesOnPageSelected = computed(
   () =>
     dataSources.value.length > 0 &&
     dataSources.value.every((item) => selectedManageDataSourceIds.value.includes(item.id)),
+)
+const filterRuleManageTotalPages = computed(
+  () => Math.max(1, Math.ceil(filterRuleManageTotal.value / filterRuleManagePageSize.value)),
+)
+const allFilterRulesOnPageSelected = computed(
+  () =>
+    filterRules.value.length > 0 &&
+    filterRules.value.every((item) => selectedManageFilterRuleIds.value.includes(item.id)),
 )
 
 const selectedQuestionAnswers = computed(() => answersByQuestion[selectedQuestionId.value] ?? [])
@@ -1041,6 +1104,155 @@ async function deleteSelectedDataSourcesBatch(): Promise<void> {
   }
 }
 
+async function fetchFilterRules(page = 1): Promise<void> {
+  const pageData = await fetchJson<BackendPage<BackendFilterRuleItem>>(
+    `/event-filter-rules?page=${page}&page_size=${filterRuleManagePageSize.value}`,
+  )
+  filterRules.value = pageData.items.map(toFilterRuleItem)
+  filterRuleManageTotal.value = pageData.total
+  filterRuleManagePage.value = pageData.page
+  filterRuleManageJumpPage.value = String(pageData.page)
+  selectedManageFilterRuleIds.value = []
+}
+
+function openFilterRuleDetail(item: FilterRuleItem): void {
+  selectedFilterRule.value = item
+  filterRuleDetailDialogOpen.value = true
+}
+
+function openFilterRuleEdit(item: FilterRuleItem): void {
+  selectedFilterRule.value = item
+  editFilterRuleForm.id = item.id
+  editFilterRuleForm.name = item.name
+  editFilterRuleForm.level = item.level
+  editFilterRuleForm.filterExpression = item.filterExpression
+  editFilterRuleForm.filterConfig = JSON.stringify(item.filterConfig, null, 2)
+  editFilterRuleForm.priority = item.priority
+  editFilterRuleForm.status = item.status
+  editFilterRuleForm.version = item.version
+  editFilterRuleDialogOpen.value = true
+}
+
+function toggleManageFilterRuleSelection(id: string): void {
+  if (selectedManageFilterRuleIds.value.includes(id)) {
+    selectedManageFilterRuleIds.value = selectedManageFilterRuleIds.value.filter((item) => item !== id)
+    return
+  }
+  selectedManageFilterRuleIds.value = [...selectedManageFilterRuleIds.value, id]
+}
+
+function toggleSelectAllFilterRulesOnPage(): void {
+  if (allFilterRulesOnPageSelected.value) {
+    selectedManageFilterRuleIds.value = []
+    return
+  }
+  selectedManageFilterRuleIds.value = filterRules.value.map((item) => item.id)
+}
+
+function setFilterRuleManagePageSize(size: number): void {
+  filterRuleManagePageSize.value = size
+  filterRuleManagePage.value = 1
+  filterRuleManageJumpPage.value = '1'
+  selectedManageFilterRuleIds.value = []
+  if (backendOnline.value) {
+    void fetchFilterRules(1)
+  }
+}
+
+function goFilterRuleManagePage(delta: number): void {
+  const next = filterRuleManagePage.value + delta
+  if (next < 1 || next > filterRuleManageTotalPages.value) {
+    return
+  }
+  goToFilterRuleManagePage(next)
+}
+
+function goToFilterRuleManagePage(page: number): void {
+  if (page < 1 || page > filterRuleManageTotalPages.value) {
+    return
+  }
+  filterRuleManagePage.value = page
+  filterRuleManageJumpPage.value = String(page)
+  selectedManageFilterRuleIds.value = []
+  if (backendOnline.value) {
+    void fetchFilterRules(page)
+  }
+}
+
+function jumpToFilterRulePageFromInput(): void {
+  const page = Number(filterRuleManageJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  goToFilterRuleManagePage(Math.min(Math.max(1, Math.trunc(page)), filterRuleManageTotalPages.value))
+}
+
+async function submitCreateFilterRule(): Promise<void> {
+  try {
+    await sendJson('/event-filter-rules', 'POST', {
+      name: createFilterRuleForm.name.trim(),
+      level: createFilterRuleForm.level,
+      filter_expression: createFilterRuleForm.filterExpression.trim(),
+      filter_config: parseJsonObject(createFilterRuleForm.filterConfig),
+      priority: createFilterRuleForm.priority,
+      status: createFilterRuleForm.status,
+      version: createFilterRuleForm.version.trim(),
+    })
+    await fetchFilterRules(1)
+    backendStatus.value = '过滤规则新增成功'
+    createFilterRuleDialogOpen.value = false
+    createFilterRuleForm.name = ''
+    createFilterRuleForm.filterConfig = '{"keywords":["rumor"]}'
+  } catch {
+    backendStatus.value = '过滤规则新增失败：请检查字段与后端接口'
+  }
+}
+
+async function submitEditFilterRule(): Promise<void> {
+  try {
+    await sendJson(`/event-filter-rules/${editFilterRuleForm.id}`, 'PATCH', {
+      name: editFilterRuleForm.name.trim(),
+      level: editFilterRuleForm.level,
+      filter_expression: editFilterRuleForm.filterExpression.trim(),
+      filter_config: parseJsonObject(editFilterRuleForm.filterConfig),
+      priority: editFilterRuleForm.priority,
+      status: editFilterRuleForm.status,
+      version: editFilterRuleForm.version.trim(),
+    })
+    await fetchFilterRules(filterRuleManagePage.value)
+    backendStatus.value = '过滤规则更新成功'
+    editFilterRuleDialogOpen.value = false
+  } catch {
+    backendStatus.value = '过滤规则更新失败：请检查字段与后端接口'
+  }
+}
+
+async function deleteFilterRuleInEditDialog(): Promise<void> {
+  try {
+    await sendJson(`/event-filter-rules/${editFilterRuleForm.id}`, 'DELETE', {})
+    await fetchFilterRules(filterRuleManagePage.value)
+    backendStatus.value = '过滤规则删除成功'
+    editFilterRuleDialogOpen.value = false
+  } catch {
+    backendStatus.value = '过滤规则删除失败：请检查后端接口'
+  }
+}
+
+async function deleteSelectedFilterRulesBatch(): Promise<void> {
+  if (selectedManageFilterRuleIds.value.length === 0) {
+    backendStatus.value = '请先勾选要删除的过滤规则'
+    return
+  }
+  try {
+    const ids = [...selectedManageFilterRuleIds.value]
+    await Promise.all(ids.map((id) => sendJson(`/event-filter-rules/${id}`, 'DELETE', {})))
+    await fetchFilterRules(filterRuleManagePage.value)
+    backendStatus.value = `过滤规则批量删除成功（${ids.length} 条）`
+  } catch {
+    backendStatus.value = '过滤规则批量删除失败：请检查后端接口'
+  }
+}
+
 async function deleteSelectedEventsBatch(): Promise<void> {
   if (selectedManageEventIds.value.length === 0) {
     backendStatus.value = '请先勾选要删除的事件'
@@ -1368,6 +1580,21 @@ function toDataSourceItem(item: BackendDataSourceItem): DataSourceItem {
   }
 }
 
+function toFilterRuleItem(item: BackendFilterRuleItem): FilterRuleItem {
+  return {
+    id: item.id,
+    name: item.name,
+    level: item.level,
+    filterExpression: item.filter_expression,
+    filterConfig: item.filter_config ?? {},
+    priority: item.priority,
+    status: item.status,
+    version: item.version,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }
+}
+
 function parseJsonObject(text: string): Record<string, unknown> {
   const trimmed = text.trim()
   if (!trimmed) {
@@ -1684,6 +1911,17 @@ watch(currentView, (view) => {
       selectedManageDataSourceIds.value = []
     }
   }
+  if (view === 'filterRules') {
+    if (backendOnline.value) {
+      void fetchFilterRules(1)
+    } else {
+      filterRules.value = []
+      filterRuleManageTotal.value = 0
+      filterRuleManagePage.value = 1
+      filterRuleManageJumpPage.value = '1'
+      selectedManageFilterRuleIds.value = []
+    }
+  }
 })
 </script>
 
@@ -1717,6 +1955,7 @@ watch(currentView, (view) => {
         <button :class="['level-btn', { active: currentView === 'templates' }]" @click="currentView = 'templates'">模板配置</button>
         <button :class="['level-btn', { active: currentView === 'tasks' }]" @click="currentView = 'tasks'">任务管理</button>
         <button :class="['level-btn', { active: currentView === 'dataSources' }]" @click="currentView = 'dataSources'">数据源管理</button>
+        <button :class="['level-btn', { active: currentView === 'filterRules' }]" @click="currentView = 'filterRules'">过滤规则管理</button>
       </div>
     </section>
 
@@ -2136,6 +2375,60 @@ watch(currentView, (view) => {
       </article>
     </main>
 
+    <main v-if="currentView === 'filterRules'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>过滤规则列表</h2>
+          <span>分页 + 批量操作</span>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="createFilterRuleDialogOpen = true">新增规则</button>
+          <button class="action-btn" @click="toggleSelectAllFilterRulesOnPage">
+            {{ allFilterRulesOnPageSelected ? '取消全选本页' : '全选本页' }}
+          </button>
+          <button class="action-btn danger" @click="deleteSelectedFilterRulesBatch">批量删除</button>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="item in filterRules"
+            :key="item.id"
+            :class="['question-card', { active: selectedFilterRule?.id === item.id }]"
+            @click="openFilterRuleDetail(item)"
+          >
+            <div class="row-between">
+              <label class="select-row" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedManageFilterRuleIds.includes(item.id)"
+                  @change="toggleManageFilterRuleSelection(item.id)"
+                />
+                <span>选择</span>
+              </label>
+              <div class="tag-group">
+                <span class="badge">{{ item.filterExpression }}</span>
+                <span class="badge">{{ item.status }}</span>
+              </div>
+            </div>
+            <p>{{ item.name }} (L{{ item.level }})</p>
+            <small>优先级 {{ item.priority }} | 版本 {{ item.version }}</small>
+            <div class="action-row action-right">
+              <button class="action-btn" @click.stop="openFilterRuleEdit(item)">编辑</button>
+            </div>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <button :class="['level-btn', { active: filterRuleManagePageSize === 10 }]" @click="setFilterRuleManagePageSize(10)">10</button>
+          <button :class="['level-btn', { active: filterRuleManagePageSize === 20 }]" @click="setFilterRuleManagePageSize(20)">20</button>
+          <button :class="['level-btn', { active: filterRuleManagePageSize === 50 }]" @click="setFilterRuleManagePageSize(50)">50</button>
+          <button class="action-btn" @click="goFilterRuleManagePage(-1)">上一页</button>
+          <input v-model="filterRuleManageJumpPage" class="jump-input" placeholder="页码" />
+          <button class="action-btn" @click="jumpToFilterRulePageFromInput">跳转</button>
+          <button class="action-btn" @click="goFilterRuleManagePage(1)">下一页</button>
+        </div>
+      </article>
+    </main>
+
     <div v-if="taskDetailDialogOpen && selectedTaskDetail" class="dialog-backdrop" @click.self="taskDetailDialogOpen = false">
       <section class="dialog-panel">
         <div class="panel-head">
@@ -2299,6 +2592,101 @@ watch(currentView, (view) => {
         <div class="action-row action-right">
           <button class="action-btn" @click="submitEditDataSource">保存</button>
           <button class="action-btn danger" @click="deleteDataSourceInEditDialog">删除</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="filterRuleDetailDialogOpen && selectedFilterRule" class="dialog-backdrop" @click.self="filterRuleDetailDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>过滤规则详情</h2>
+          <div class="action-row">
+            <button class="action-btn" @click="openFilterRuleEdit(selectedFilterRule)">编辑</button>
+            <button class="action-btn" @click="filterRuleDetailDialogOpen = false">关闭</button>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <p><strong>ID：</strong>{{ selectedFilterRule.id }}</p>
+          <p><strong>名称：</strong>{{ selectedFilterRule.name }}</p>
+          <p><strong>等级：</strong>{{ selectedFilterRule.level }}</p>
+          <p><strong>表达式：</strong>{{ selectedFilterRule.filterExpression }}</p>
+          <p><strong>配置：</strong>{{ JSON.stringify(selectedFilterRule.filterConfig) }}</p>
+          <p><strong>优先级：</strong>{{ selectedFilterRule.priority }}</p>
+          <p><strong>状态：</strong>{{ selectedFilterRule.status }}</p>
+          <p><strong>版本：</strong>{{ selectedFilterRule.version }}</p>
+          <p><strong>创建时间：</strong>{{ formatDate(selectedFilterRule.createdAt) }}</p>
+          <p><strong>更新时间：</strong>{{ formatDate(selectedFilterRule.updatedAt) }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="createFilterRuleDialogOpen" class="dialog-backdrop" @click.self="createFilterRuleDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>新增过滤规则</h2>
+          <button class="action-btn" @click="createFilterRuleDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block"><label>名称</label><input v-model="createFilterRuleForm.name" /></div>
+        <div class="field-block"><label>等级</label><input v-model.number="createFilterRuleForm.level" type="number" min="1" max="4" /></div>
+        <div class="field-block">
+          <label>表达式</label>
+          <select v-model="createFilterRuleForm.filterExpression">
+            <option value="keyword_include">keyword_include</option>
+            <option value="keyword_exclude">keyword_exclude</option>
+            <option value="credibility_min">credibility_min</option>
+            <option value="event_time_within_hours">event_time_within_hours</option>
+            <option value="content_length_min">content_length_min</option>
+          </select>
+        </div>
+        <div class="field-block"><label>规则配置(JSON)</label><textarea v-model="createFilterRuleForm.filterConfig" rows="4"></textarea></div>
+        <div class="field-block"><label>优先级</label><input v-model.number="createFilterRuleForm.priority" type="number" /></div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="createFilterRuleForm.status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="archived">archived</option>
+          </select>
+        </div>
+        <div class="field-block"><label>版本</label><input v-model="createFilterRuleForm.version" /></div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitCreateFilterRule">提交</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="editFilterRuleDialogOpen" class="dialog-backdrop" @click.self="editFilterRuleDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>编辑过滤规则</h2>
+          <button class="action-btn" @click="editFilterRuleDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block"><label>名称</label><input v-model="editFilterRuleForm.name" /></div>
+        <div class="field-block"><label>等级</label><input v-model.number="editFilterRuleForm.level" type="number" min="1" max="4" /></div>
+        <div class="field-block">
+          <label>表达式</label>
+          <select v-model="editFilterRuleForm.filterExpression">
+            <option value="keyword_include">keyword_include</option>
+            <option value="keyword_exclude">keyword_exclude</option>
+            <option value="credibility_min">credibility_min</option>
+            <option value="event_time_within_hours">event_time_within_hours</option>
+            <option value="content_length_min">content_length_min</option>
+          </select>
+        </div>
+        <div class="field-block"><label>规则配置(JSON)</label><textarea v-model="editFilterRuleForm.filterConfig" rows="4"></textarea></div>
+        <div class="field-block"><label>优先级</label><input v-model.number="editFilterRuleForm.priority" type="number" /></div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="editFilterRuleForm.status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="archived">archived</option>
+          </select>
+        </div>
+        <div class="field-block"><label>版本</label><input v-model="editFilterRuleForm.version" /></div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitEditFilterRule">保存</button>
+          <button class="action-btn danger" @click="deleteFilterRuleInEditDialog">删除</button>
         </div>
       </section>
     </div>
