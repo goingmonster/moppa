@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
-type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks'
+type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSources'
 
 interface EventItem {
   id: string
@@ -140,6 +140,36 @@ interface S1JobDetail {
   finished_at: string | null
   created_at: string
   trace_id: string
+}
+
+interface DataSourceItem {
+  id: string
+  name: string
+  sourceSystem: string
+  sourceType: 'api' | 'database' | 'file' | 'websocket'
+  connectionConfig: Record<string, unknown>
+  secretRef: string | null
+  credibilityLevel: number
+  syncFrequency: string
+  isActive: boolean
+  version: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface BackendDataSourceItem {
+  id: string
+  name: string
+  source_system: string
+  source_type: DataSourceItem['sourceType']
+  connection_config: Record<string, unknown>
+  secret_ref: string | null
+  credibility_level: number
+  sync_frequency: string
+  is_active: boolean
+  version: string
+  created_at: string
+  updated_at: string
 }
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
@@ -391,6 +421,40 @@ const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
 const createTaskForm = reactive({ taskType: 's1_ingest_pull', idempotencyKey: '', traceId: '' })
 const triggerPullForm = reactive({ sourceSystem: '' })
+const sourceSystemOptions = ref<string[]>([])
+const dataSources = ref<DataSourceItem[]>([])
+const dataSourceManagePage = ref(1)
+const dataSourceManagePageSize = ref(10)
+const dataSourceManageJumpPage = ref('1')
+const dataSourceManageTotal = ref(0)
+const selectedManageDataSourceIds = ref<string[]>([])
+const selectedDataSource = ref<DataSourceItem | null>(null)
+const dataSourceDetailDialogOpen = ref(false)
+const createDataSourceDialogOpen = ref(false)
+const editDataSourceDialogOpen = ref(false)
+const createDataSourceForm = reactive({
+  name: '',
+  sourceSystem: '',
+  sourceType: 'database' as DataSourceItem['sourceType'],
+  connectionConfig: '{}',
+  secretRef: '',
+  credibilityLevel: 3,
+  syncFrequency: '1 hour',
+  isActive: true,
+  version: 'v1.0',
+})
+const editDataSourceForm = reactive({
+  id: '',
+  name: '',
+  sourceSystem: '',
+  sourceType: 'database' as DataSourceItem['sourceType'],
+  connectionConfig: '{}',
+  secretRef: '',
+  credibilityLevel: 3,
+  syncFrequency: '1 hour',
+  isActive: true,
+  version: 'v1.0',
+})
 
 const selectedEvent = computed(() => homeEvents.value.find((eventItem) => eventItem.id === selectedEventId.value))
 const selectedTemplateDetail = computed(() =>
@@ -430,6 +494,14 @@ const allKnownEvents = computed(() => {
 const taskManageTotalPages = computed(() => Math.max(1, Math.ceil(taskManageTotal.value / taskManagePageSize.value)))
 const allTasksOnPageSelected = computed(
   () => tasks.value.length > 0 && tasks.value.every((item) => selectedManageTaskIds.value.includes(item.id)),
+)
+const dataSourceManageTotalPages = computed(
+  () => Math.max(1, Math.ceil(dataSourceManageTotal.value / dataSourceManagePageSize.value)),
+)
+const allDataSourcesOnPageSelected = computed(
+  () =>
+    dataSources.value.length > 0 &&
+    dataSources.value.every((item) => selectedManageDataSourceIds.value.includes(item.id)),
 )
 
 const selectedQuestionAnswers = computed(() => answersByQuestion[selectedQuestionId.value] ?? [])
@@ -812,6 +884,163 @@ async function triggerPullNow(): Promise<void> {
   }
 }
 
+async function fetchDataSources(page = 1): Promise<void> {
+  const pageData = await fetchJson<BackendPage<BackendDataSourceItem>>(
+    `/data-sources?page=${page}&page_size=${dataSourceManagePageSize.value}`,
+  )
+  dataSources.value = pageData.items.map(toDataSourceItem)
+  dataSourceManageTotal.value = pageData.total
+  dataSourceManagePage.value = pageData.page
+  dataSourceManageJumpPage.value = String(pageData.page)
+  selectedManageDataSourceIds.value = []
+}
+
+function openDataSourceDetail(item: DataSourceItem): void {
+  selectedDataSource.value = item
+  dataSourceDetailDialogOpen.value = true
+}
+
+function openDataSourceEdit(item: DataSourceItem): void {
+  selectedDataSource.value = item
+  editDataSourceForm.id = item.id
+  editDataSourceForm.name = item.name
+  editDataSourceForm.sourceSystem = item.sourceSystem
+  editDataSourceForm.sourceType = item.sourceType
+  editDataSourceForm.connectionConfig = JSON.stringify(item.connectionConfig, null, 2)
+  editDataSourceForm.secretRef = item.secretRef ?? ''
+  editDataSourceForm.credibilityLevel = item.credibilityLevel
+  editDataSourceForm.syncFrequency = item.syncFrequency
+  editDataSourceForm.isActive = item.isActive
+  editDataSourceForm.version = item.version
+  editDataSourceDialogOpen.value = true
+}
+
+function toggleManageDataSourceSelection(id: string): void {
+  if (selectedManageDataSourceIds.value.includes(id)) {
+    selectedManageDataSourceIds.value = selectedManageDataSourceIds.value.filter((item) => item !== id)
+    return
+  }
+  selectedManageDataSourceIds.value = [...selectedManageDataSourceIds.value, id]
+}
+
+function toggleSelectAllDataSourcesOnPage(): void {
+  if (allDataSourcesOnPageSelected.value) {
+    selectedManageDataSourceIds.value = []
+    return
+  }
+  selectedManageDataSourceIds.value = dataSources.value.map((item) => item.id)
+}
+
+function setDataSourceManagePageSize(size: number): void {
+  dataSourceManagePageSize.value = size
+  dataSourceManagePage.value = 1
+  dataSourceManageJumpPage.value = '1'
+  selectedManageDataSourceIds.value = []
+  if (backendOnline.value) {
+    void fetchDataSources(1)
+  }
+}
+
+function goDataSourceManagePage(delta: number): void {
+  const next = dataSourceManagePage.value + delta
+  if (next < 1 || next > dataSourceManageTotalPages.value) {
+    return
+  }
+  goToDataSourceManagePage(next)
+}
+
+function goToDataSourceManagePage(page: number): void {
+  if (page < 1 || page > dataSourceManageTotalPages.value) {
+    return
+  }
+  dataSourceManagePage.value = page
+  dataSourceManageJumpPage.value = String(page)
+  selectedManageDataSourceIds.value = []
+  if (backendOnline.value) {
+    void fetchDataSources(page)
+  }
+}
+
+function jumpToDataSourcePageFromInput(): void {
+  const page = Number(dataSourceManageJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  goToDataSourceManagePage(Math.min(Math.max(1, Math.trunc(page)), dataSourceManageTotalPages.value))
+}
+
+async function submitCreateDataSource(): Promise<void> {
+  try {
+    await sendJson<{ id: string }>('/data-sources', 'POST', {
+      name: createDataSourceForm.name.trim(),
+      source_system: createDataSourceForm.sourceSystem.trim(),
+      source_type: createDataSourceForm.sourceType,
+      connection_config: parseJsonObject(createDataSourceForm.connectionConfig),
+      secret_ref: createDataSourceForm.secretRef.trim() || null,
+      credibility_level: createDataSourceForm.credibilityLevel,
+      sync_frequency: createDataSourceForm.syncFrequency.trim(),
+      is_active: createDataSourceForm.isActive,
+      version: createDataSourceForm.version.trim(),
+    })
+    await fetchDataSources(1)
+    backendStatus.value = '数据源新增成功'
+    createDataSourceDialogOpen.value = false
+    createDataSourceForm.name = ''
+    createDataSourceForm.sourceSystem = ''
+    createDataSourceForm.connectionConfig = '{}'
+    createDataSourceForm.secretRef = ''
+  } catch {
+    backendStatus.value = '数据源新增失败：请检查字段与后端接口'
+  }
+}
+
+async function submitEditDataSource(): Promise<void> {
+  try {
+    await sendJson(`/data-sources/${editDataSourceForm.id}`, 'PATCH', {
+      name: editDataSourceForm.name.trim(),
+      source_system: editDataSourceForm.sourceSystem.trim(),
+      source_type: editDataSourceForm.sourceType,
+      connection_config: parseJsonObject(editDataSourceForm.connectionConfig),
+      secret_ref: editDataSourceForm.secretRef.trim() || null,
+      credibility_level: editDataSourceForm.credibilityLevel,
+      sync_frequency: editDataSourceForm.syncFrequency.trim(),
+      is_active: editDataSourceForm.isActive,
+      version: editDataSourceForm.version.trim(),
+    })
+    await fetchDataSources(dataSourceManagePage.value)
+    backendStatus.value = '数据源更新成功'
+    editDataSourceDialogOpen.value = false
+  } catch {
+    backendStatus.value = '数据源更新失败：请检查字段与后端接口'
+  }
+}
+
+async function deleteDataSourceInEditDialog(): Promise<void> {
+  try {
+    await sendJson('/data-sources', 'DELETE', { ids: [editDataSourceForm.id] })
+    await fetchDataSources(dataSourceManagePage.value)
+    backendStatus.value = '数据源删除成功'
+    editDataSourceDialogOpen.value = false
+  } catch {
+    backendStatus.value = '数据源删除失败：请检查后端接口'
+  }
+}
+
+async function deleteSelectedDataSourcesBatch(): Promise<void> {
+  if (selectedManageDataSourceIds.value.length === 0) {
+    backendStatus.value = '请先勾选要删除的数据源'
+    return
+  }
+  try {
+    const count = selectedManageDataSourceIds.value.length
+    await sendJson('/data-sources', 'DELETE', { ids: selectedManageDataSourceIds.value })
+    await fetchDataSources(dataSourceManagePage.value)
+    backendStatus.value = `数据源批量删除成功（${count} 条）`
+  } catch {
+    backendStatus.value = '数据源批量删除失败：请检查后端接口'
+  }
+}
+
 async function deleteSelectedEventsBatch(): Promise<void> {
   if (selectedManageEventIds.value.length === 0) {
     backendStatus.value = '请先勾选要删除的事件'
@@ -1122,6 +1351,51 @@ function toTaskItem(item: BackendTaskItem): TaskItem {
   }
 }
 
+function toDataSourceItem(item: BackendDataSourceItem): DataSourceItem {
+  return {
+    id: item.id,
+    name: item.name,
+    sourceSystem: item.source_system,
+    sourceType: item.source_type,
+    connectionConfig: item.connection_config ?? {},
+    secretRef: item.secret_ref,
+    credibilityLevel: item.credibility_level,
+    syncFrequency: item.sync_frequency,
+    isActive: item.is_active,
+    version: item.version,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }
+}
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    return {}
+  }
+  const parsed = JSON.parse(trimmed)
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>
+  }
+  throw new Error('JSON must be an object')
+}
+
+async function fetchSourceSystemOptions(): Promise<void> {
+  try {
+    const pageData = await fetchJson<BackendPage<BackendDataSourceItem>>('/data-sources?page=1&page_size=100')
+    const options = Array.from(
+      new Set(pageData.items.filter((item) => item.is_active).map((item) => item.source_system)),
+    )
+    sourceSystemOptions.value = options
+    const firstSource = options.length > 0 ? options[0] : undefined
+    if (!draftEvent.theater && firstSource) {
+      draftEvent.theater = firstSource
+    }
+  } catch {
+    sourceSystemOptions.value = []
+  }
+}
+
 async function fetchJson<T>(path: string): Promise<T> {
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
   const response = await fetch(`${base}${path}`)
@@ -1373,6 +1647,7 @@ async function hydrateFromBackend(): Promise<void> {
 
 onMounted(() => {
   void hydrateFromBackend()
+  void fetchSourceSystemOptions()
 })
 
 watch(currentView, (view) => {
@@ -1396,6 +1671,17 @@ watch(currentView, (view) => {
       taskManagePage.value = 1
       taskManageJumpPage.value = '1'
       selectedManageTaskIds.value = []
+    }
+  }
+  if (view === 'dataSources') {
+    if (backendOnline.value) {
+      void fetchDataSources(1)
+    } else {
+      dataSources.value = []
+      dataSourceManageTotal.value = 0
+      dataSourceManagePage.value = 1
+      dataSourceManageJumpPage.value = '1'
+      selectedManageDataSourceIds.value = []
     }
   }
 })
@@ -1430,6 +1716,7 @@ watch(currentView, (view) => {
         <button :class="['level-btn', { active: currentView === 'questions' }]" @click="currentView = 'questions'">问题管理</button>
         <button :class="['level-btn', { active: currentView === 'templates' }]" @click="currentView = 'templates'">模板配置</button>
         <button :class="['level-btn', { active: currentView === 'tasks' }]" @click="currentView = 'tasks'">任务管理</button>
+        <button :class="['level-btn', { active: currentView === 'dataSources' }]" @click="currentView = 'dataSources'">数据源管理</button>
       </div>
     </section>
 
@@ -1612,7 +1899,7 @@ watch(currentView, (view) => {
           <span>第 {{ eventManagePage }} / {{ eventManageTotalPages }} 页</span>
         </div>
         <div class="action-row">
-          <button class="action-btn" @click="createEventDialogOpen = true">新增事件</button>
+          <button class="action-btn" @click="createEventDialogOpen = true; void fetchSourceSystemOptions()">新增事件</button>
           <button class="action-btn" @click="toggleSelectAllEventsOnPage">
             {{ allEventsOnPageSelected ? '取消全选本页' : '全选本页' }}
           </button>
@@ -1750,7 +2037,7 @@ watch(currentView, (view) => {
           <span>最新执行优先</span>
         </div>
         <div class="action-row">
-          <button class="action-btn" @click="triggerPullDialogOpen = true">拉取烽火事件</button>
+          <button class="action-btn" @click="triggerPullDialogOpen = true; void fetchSourceSystemOptions()">拉取烽火事件</button>
           <button class="action-btn" @click="createTaskDialogOpen = true">新增任务</button>
           <button class="action-btn" @click="toggleSelectAllTasksOnPage">
             {{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}
@@ -1791,6 +2078,60 @@ watch(currentView, (view) => {
           <input v-model="taskManageJumpPage" class="jump-input" placeholder="页码" />
           <button class="action-btn" @click="jumpToTaskPageFromInput">跳转</button>
           <button class="action-btn" @click="goTaskManagePage(1)">下一页</button>
+        </div>
+      </article>
+    </main>
+
+    <main v-if="currentView === 'dataSources'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>数据源列表</h2>
+          <span>分页 + 批量操作</span>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="createDataSourceDialogOpen = true">新增数据源</button>
+          <button class="action-btn" @click="toggleSelectAllDataSourcesOnPage">
+            {{ allDataSourcesOnPageSelected ? '取消全选本页' : '全选本页' }}
+          </button>
+          <button class="action-btn danger" @click="deleteSelectedDataSourcesBatch">批量删除</button>
+        </div>
+        <ul class="event-list">
+          <li
+            v-for="item in dataSources"
+            :key="item.id"
+            :class="['question-card', { active: selectedDataSource?.id === item.id }]"
+            @click="openDataSourceDetail(item)"
+          >
+            <div class="row-between">
+              <label class="select-row" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedManageDataSourceIds.includes(item.id)"
+                  @change="toggleManageDataSourceSelection(item.id)"
+                />
+                <span>选择</span>
+              </label>
+              <div class="tag-group">
+                <span class="badge">{{ item.sourceType }}</span>
+                <span class="badge">{{ item.isActive ? 'active' : 'inactive' }}</span>
+              </div>
+            </div>
+            <p>{{ item.name }} ({{ item.sourceSystem }})</p>
+            <small>可信度 {{ item.credibilityLevel }} | 频率 {{ item.syncFrequency }}</small>
+            <div class="action-row action-right">
+              <button class="action-btn" @click.stop="openDataSourceEdit(item)">编辑</button>
+            </div>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <button :class="['level-btn', { active: dataSourceManagePageSize === 10 }]" @click="setDataSourceManagePageSize(10)">10</button>
+          <button :class="['level-btn', { active: dataSourceManagePageSize === 20 }]" @click="setDataSourceManagePageSize(20)">20</button>
+          <button :class="['level-btn', { active: dataSourceManagePageSize === 50 }]" @click="setDataSourceManagePageSize(50)">50</button>
+          <button class="action-btn" @click="goDataSourceManagePage(-1)">上一页</button>
+          <input v-model="dataSourceManageJumpPage" class="jump-input" placeholder="页码" />
+          <button class="action-btn" @click="jumpToDataSourcePageFromInput">跳转</button>
+          <button class="action-btn" @click="goDataSourceManagePage(1)">下一页</button>
         </div>
       </article>
     </main>
@@ -1852,10 +2193,112 @@ watch(currentView, (view) => {
         </div>
         <div class="field-block">
           <label>来源系统（可选）</label>
-          <input v-model="triggerPullForm.sourceSystem" placeholder="如 news_event_crawler" />
+          <select v-model="triggerPullForm.sourceSystem">
+            <option value="">默认数据源（配置项）</option>
+            <option v-for="source in sourceSystemOptions" :key="`pull-source-${source}`" :value="source">
+              {{ source }}
+            </option>
+          </select>
         </div>
         <div class="action-row action-right">
           <button class="action-btn" @click="triggerPullNow">立即拉取</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="dataSourceDetailDialogOpen && selectedDataSource" class="dialog-backdrop" @click.self="dataSourceDetailDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>数据源详情</h2>
+          <div class="action-row">
+            <button class="action-btn" @click="openDataSourceEdit(selectedDataSource)">编辑</button>
+            <button class="action-btn" @click="dataSourceDetailDialogOpen = false">关闭</button>
+          </div>
+        </div>
+        <div class="detail-grid">
+          <p><strong>ID：</strong>{{ selectedDataSource.id }}</p>
+          <p><strong>名称：</strong>{{ selectedDataSource.name }}</p>
+          <p><strong>source_system：</strong>{{ selectedDataSource.sourceSystem }}</p>
+          <p><strong>来源类型：</strong>{{ selectedDataSource.sourceType }}</p>
+          <p><strong>可信度：</strong>{{ selectedDataSource.credibilityLevel }}</p>
+          <p><strong>同步频率：</strong>{{ selectedDataSource.syncFrequency }}</p>
+          <p><strong>启用状态：</strong>{{ selectedDataSource.isActive ? 'active' : 'inactive' }}</p>
+          <p><strong>版本：</strong>{{ selectedDataSource.version }}</p>
+          <p><strong>Secret Ref：</strong>{{ selectedDataSource.secretRef ?? '-' }}</p>
+          <p><strong>连接配置：</strong>{{ JSON.stringify(selectedDataSource.connectionConfig) }}</p>
+          <p><strong>创建时间：</strong>{{ formatDate(selectedDataSource.createdAt) }}</p>
+          <p><strong>更新时间：</strong>{{ formatDate(selectedDataSource.updatedAt) }}</p>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="createDataSourceDialogOpen" class="dialog-backdrop" @click.self="createDataSourceDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>新增数据源</h2>
+          <button class="action-btn" @click="createDataSourceDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block"><label>名称</label><input v-model="createDataSourceForm.name" /></div>
+        <div class="field-block"><label>source_system</label><input v-model="createDataSourceForm.sourceSystem" /></div>
+        <div class="field-block">
+          <label>来源类型</label>
+          <select v-model="createDataSourceForm.sourceType">
+            <option value="api">api</option>
+            <option value="database">database</option>
+            <option value="file">file</option>
+            <option value="websocket">websocket</option>
+          </select>
+        </div>
+        <div class="field-block"><label>connection_config(JSON)</label><textarea v-model="createDataSourceForm.connectionConfig" rows="4"></textarea></div>
+        <div class="field-block"><label>secret_ref</label><input v-model="createDataSourceForm.secretRef" /></div>
+        <div class="field-block"><label>可信度</label><input v-model.number="createDataSourceForm.credibilityLevel" type="number" min="1" max="5" /></div>
+        <div class="field-block"><label>同步频率</label><input v-model="createDataSourceForm.syncFrequency" placeholder="1 hour" /></div>
+        <div class="field-block"><label>版本</label><input v-model="createDataSourceForm.version" /></div>
+        <div class="field-block">
+          <label>启用状态</label>
+          <select v-model="createDataSourceForm.isActive">
+            <option :value="true">active</option>
+            <option :value="false">inactive</option>
+          </select>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitCreateDataSource">提交</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="editDataSourceDialogOpen" class="dialog-backdrop" @click.self="editDataSourceDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>编辑数据源</h2>
+          <button class="action-btn" @click="editDataSourceDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block"><label>名称</label><input v-model="editDataSourceForm.name" /></div>
+        <div class="field-block"><label>source_system</label><input v-model="editDataSourceForm.sourceSystem" /></div>
+        <div class="field-block">
+          <label>来源类型</label>
+          <select v-model="editDataSourceForm.sourceType">
+            <option value="api">api</option>
+            <option value="database">database</option>
+            <option value="file">file</option>
+            <option value="websocket">websocket</option>
+          </select>
+        </div>
+        <div class="field-block"><label>connection_config(JSON)</label><textarea v-model="editDataSourceForm.connectionConfig" rows="4"></textarea></div>
+        <div class="field-block"><label>secret_ref</label><input v-model="editDataSourceForm.secretRef" /></div>
+        <div class="field-block"><label>可信度</label><input v-model.number="editDataSourceForm.credibilityLevel" type="number" min="1" max="5" /></div>
+        <div class="field-block"><label>同步频率</label><input v-model="editDataSourceForm.syncFrequency" /></div>
+        <div class="field-block"><label>版本</label><input v-model="editDataSourceForm.version" /></div>
+        <div class="field-block">
+          <label>启用状态</label>
+          <select v-model="editDataSourceForm.isActive">
+            <option :value="true">active</option>
+            <option :value="false">inactive</option>
+          </select>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitEditDataSource">保存</button>
+          <button class="action-btn danger" @click="deleteDataSourceInEditDialog">删除</button>
         </div>
       </section>
     </div>
@@ -2042,7 +2485,12 @@ watch(currentView, (view) => {
         </div>
         <div class="field-block">
           <label>来源系统 / 战区</label>
-          <input v-model="draftEvent.theater" placeholder="例如：边境雷达站" />
+          <select v-model="draftEvent.theater">
+            <option value="" disabled>请选择数据源</option>
+            <option v-for="source in sourceSystemOptions" :key="`event-source-${source}`" :value="source">
+              {{ source }}
+            </option>
+          </select>
         </div>
         <div class="field-block">
           <label>事件内容</label>

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.event_filter_rules import router as event_filter_rules_router
 from app.api.events import router as events_router
+from app.api.data_sources import router as data_sources_router
 from app.api.health import router as health_router
 from app.api.questions import router as questions_router
 from app.api.s1_ingest import router as s1_ingest_router
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(events_router)
+    app.include_router(data_sources_router)
     app.include_router(event_filter_rules_router)
     app.include_router(health_router)
     app.include_router(questions_router)
