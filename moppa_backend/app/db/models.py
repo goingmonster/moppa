@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import DateTime, Integer, String, Text, func, text
+from sqlalchemy import BigInteger, DateTime, Integer, Interval, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -88,3 +88,26 @@ class SystemConfigEntity(Base):
     secret_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class QuestionTemplateEntity(Base):
+    __tablename__ = "question_template"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    name: Mapped[str] = mapped_column(String(120))
+    level: Mapped[int] = mapped_column(Integer)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    template_content: Mapped[str] = mapped_column(Text)
+    variables: Mapped[list[object]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    generation_config: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    verification_conditions: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    duplicate_check_window: Mapped[timedelta] = mapped_column(Interval, server_default=text("INTERVAL '7 days'"))
+    max_duplicate_rate: Mapped[float] = mapped_column(Numeric(5, 2), server_default=text("5.00"))
+    status: Mapped[str] = mapped_column(String(20), server_default=text("'active'"))
+    version: Mapped[str] = mapped_column(String(20), server_default=text("'v1.0'"))
+    created_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    approved_by: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    usage_count: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

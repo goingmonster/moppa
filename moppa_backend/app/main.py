@@ -6,6 +6,7 @@ from app.api.events import router as events_router
 from app.api.data_sources import router as data_sources_router
 from app.api.health import router as health_router
 from app.api.questions import router as questions_router
+from app.api.question_templates import router as question_templates_router
 from app.api.s1_ingest import router as s1_ingest_router
 from app.api.task_configs import router as task_configs_router
 from app.api.tasks import router as tasks_router
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     app.include_router(event_filter_rules_router)
     app.include_router(health_router)
     app.include_router(questions_router)
+    app.include_router(question_templates_router)
     app.include_router(s1_ingest_router)
     app.include_router(task_configs_router)
     app.include_router(tasks_router)

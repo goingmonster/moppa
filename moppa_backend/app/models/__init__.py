@@ -7,6 +7,12 @@ from .event_filter_rule_model import (
 )
 from .event_model import EventCreateModel, EventListItemModel, EventPaginationResponse, EventUpdateModel
 from .question_model import QuestionCreateModel, QuestionListItemModel, QuestionPaginationResponse, QuestionUpdateModel
+from .question_template_model import (
+    QuestionTemplateCreateModel,
+    QuestionTemplateListItemModel,
+    QuestionTemplatePaginationResponse,
+    QuestionTemplateUpdateModel,
+)
 from .s1_ingest_model import (
     S1DryRunRequestModel,
     S1DryRunResponseModel,
@@ -43,6 +49,10 @@ __all__ = [
     "QuestionCreateModel",
     "QuestionListItemModel",
     "QuestionPaginationResponse",
+    "QuestionTemplateCreateModel",
+    "QuestionTemplateListItemModel",
+    "QuestionTemplatePaginationResponse",
+    "QuestionTemplateUpdateModel",
     "QuestionUpdateModel",
     "S1EventInputModel",
     "S1DryRunRequestModel",
