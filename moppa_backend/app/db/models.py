@@ -15,6 +15,7 @@ class EventEntity(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     version: Mapped[str] = mapped_column(String(20), server_default=text("'v1.0'"))
     event_key: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text)
     source_system: Mapped[str] = mapped_column(String(100))
     credibility_level: Mapped[int] = mapped_column(Integer)

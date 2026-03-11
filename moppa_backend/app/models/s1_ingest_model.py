@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class S1EventInputModel(BaseModel):
     event_key: str = Field(min_length=1)
+    title: str = Field(min_length=1, max_length=255)
     content: str = Field(min_length=1)
     source_system: str = Field(min_length=1)
     credibility_level: int = Field(ge=1, le=5)

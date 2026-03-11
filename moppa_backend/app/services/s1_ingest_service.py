@@ -182,6 +182,7 @@ class S1IngestService:
 
             entity, created = self.event_repository.ingest_event(
                 event_key=item.event_key,
+                title=item.title,
                 content=item.content,
                 source_system=item.source_system,
                 credibility_level=item.credibility_level,
@@ -230,6 +231,7 @@ class S1IngestService:
         merged = "\n".join(part for part in [title, content, source_information, source_site, type_name] if part)
         return S1EventInputModel(
             event_key=event_key,
+            title=title or (content[:120] if content else url[:120] if url else "untitled"),
             content=merged or title or content or url,
             source_system=source_system,
             credibility_level=3,

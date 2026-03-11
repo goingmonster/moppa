@@ -15,6 +15,7 @@ class EventRepository:
     def create(self, payload: EventCreateModel) -> str:
         entity = EventEntity(
             event_key=payload.event_key,
+            title=payload.title,
             content=payload.content,
             source_system=payload.source_system,
             credibility_level=payload.credibility_level,
@@ -55,6 +56,7 @@ class EventRepository:
     def ingest_event(
         self,
         event_key: str,
+        title: str,
         content: str,
         source_system: str,
         credibility_level: int,
@@ -70,6 +72,7 @@ class EventRepository:
 
         entity = EventEntity(
             event_key=event_key,
+            title=title,
             content=content,
             source_system=source_system,
             credibility_level=credibility_level,
@@ -121,6 +124,8 @@ class EventRepository:
 
         if payload.content is not None:
             entity.content = payload.content
+        if payload.title is not None:
+            entity.title = payload.title
         if payload.source_system is not None:
             entity.source_system = payload.source_system
         if payload.credibility_level is not None:

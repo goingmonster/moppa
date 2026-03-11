@@ -288,6 +288,7 @@ CREATE TABLE IF NOT EXISTS event (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_key VARCHAR(255) NOT NULL,
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
+    title TEXT NOT NULL,
     content TEXT NOT NULL,
     source_system VARCHAR(100) NOT NULL REFERENCES data_source(source_system),
     credibility_level SMALLINT NOT NULL CHECK (credibility_level BETWEEN 1 AND 5),

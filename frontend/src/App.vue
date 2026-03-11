@@ -7,6 +7,7 @@ type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSo
 interface EventItem {
   id: string
   codename: string
+  title: string
   theater: string
   summary: string
   severity: 'low' | 'medium' | 'high'
@@ -77,6 +78,7 @@ interface BackendHealth {
 interface BackendEventItem {
   id: string
   event_key: string
+  title: string
   content: string
   source_system: string
   credibility_level: number
@@ -204,6 +206,7 @@ const homeEvents = ref<EventItem[]>([
   {
     id: 'evt-001',
     codename: '铁砂行动',
+    title: '边境补给车队改道异常',
     theater: '边境 A7 扇区',
     summary: '在争议走廊附近监测到补给车队改道。',
     severity: 'high',
@@ -213,6 +216,7 @@ const homeEvents = ref<EventItem[]>([
   {
     id: 'evt-002',
     codename: '静港回波',
+    title: '未标绘海底通道声呐异常',
     theater: '沿海 C2 网格',
     summary: '未标绘海底通道出现异常声呐回波。',
     severity: 'medium',
@@ -222,6 +226,7 @@ const homeEvents = ref<EventItem[]>([
   {
     id: 'evt-003',
     codename: '北境极光',
+    title: '极地中继丢包与干扰并发',
     theater: '极地中继枢纽',
     summary: '卫星丢包与风暴前沿及干扰信号同时出现。',
     severity: 'high',
@@ -401,7 +406,7 @@ const backendOnline = ref(false)
 const draftExpert = reactive({ name: '', answer: '', reason: '' })
 const draftExpertComments = reactive<Record<string, string>>({})
 const draftQuestionComment = ref('')
-const draftEvent = reactive({ theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
+const draftEvent = reactive({ title: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
 const draftQuestion = reactive({ title: '', level: 'L2' as Level, deadline: '', status: 'collecting' as QuestionItem['status'] })
 const homeDetailEvent = ref<EventItem | null>(null)
 const manageDetailEvent = ref<EventItem | null>(null)
@@ -414,7 +419,14 @@ const questionDetailDialogOpen = ref(false)
 const questionEditDialogOpen = ref(false)
 const templateEditDialogOpen = ref(false)
 const templateDetailDialogOpen = ref(false)
-const eventEditForm = reactive({ id: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'], filterStatus: '' })
+const eventEditForm = reactive({
+  id: '',
+  title: '',
+  theater: '',
+  summary: '',
+  severity: 'medium' as EventItem['severity'],
+  filterStatus: '',
+})
 const questionEditForm = reactive({ id: '', title: '', deadline: '', status: 'collecting' as QuestionItem['status'] })
 const templateEditForm = reactive({ objective: '', constraints: '', outputFormat: '', qualityRule: '' })
 const templateEditLevel = ref<Level>('L1')
@@ -624,6 +636,7 @@ function openManageDetail(eventItem: EventItem): void {
 function openEventEdit(eventItem: EventItem): void {
   selectedEventId.value = eventItem.id
   eventEditForm.id = eventItem.id
+  eventEditForm.title = eventItem.title
   eventEditForm.theater = eventItem.theater
   eventEditForm.summary = eventItem.summary
   eventEditForm.severity = eventItem.severity
@@ -655,9 +668,9 @@ async function submitCreateQuestionFromDialog(): Promise<void> {
 }
 
 async function submitCreateEventFromDialog(): Promise<void> {
-  const before = `${draftEvent.theater}|${draftEvent.summary}`
+  const hadInputBeforeSubmit = [draftEvent.title, draftEvent.theater, draftEvent.summary].some((value) => value.trim())
   await createEvent()
-  if (!draftEvent.theater && !draftEvent.summary && before.trim()) {
+  if (!draftEvent.title && !draftEvent.theater && !draftEvent.summary && hadInputBeforeSubmit) {
     createEventDialogOpen.value = false
   }
 }
@@ -1351,19 +1364,29 @@ async function submitEventEdit(): Promise<void> {
     return
   }
   try {
+    const title = eventEditForm.title.trim()
+    const theater = eventEditForm.theater.trim()
+    const summary = eventEditForm.summary.trim()
+    if (!title || !theater || !summary) {
+      backendStatus.value = '事件更新失败：请完整填写标题、来源和内容'
+      return
+    }
+
     if (!backendOnline.value) {
       for (const target of homeEvents.value) {
         if (target.id === eventEditForm.id) {
-          target.theater = eventEditForm.theater
-          target.summary = eventEditForm.summary
+          target.title = title
+          target.theater = theater
+          target.summary = summary
           target.severity = eventEditForm.severity
           target.filterStatus = eventEditForm.filterStatus || target.filterStatus
         }
       }
       for (const target of manageEvents.value) {
         if (target.id === eventEditForm.id) {
-          target.theater = eventEditForm.theater
-          target.summary = eventEditForm.summary
+          target.title = title
+          target.theater = theater
+          target.summary = summary
           target.severity = eventEditForm.severity
           target.filterStatus = eventEditForm.filterStatus || target.filterStatus
         }
@@ -1374,8 +1397,9 @@ async function submitEventEdit(): Promise<void> {
     }
 
     await sendJson(`/events/${eventEditForm.id}`, 'PATCH', {
-      source_system: eventEditForm.theater,
-      content: eventEditForm.summary,
+      title,
+      source_system: theater,
+      content: summary,
       credibility_level: credibilityFromSeverity(eventEditForm.severity),
       filter_status: eventEditForm.filterStatus,
     })
@@ -1540,6 +1564,7 @@ function toEventItem(item: BackendEventItem): EventItem {
   return {
     id: item.id,
     codename: item.event_key,
+    title: item.title,
     theater: item.source_system,
     summary: item.content,
     severity: severityFromCredibility(item.credibility_level),
@@ -1682,10 +1707,11 @@ async function fetchManageEvents(page: number): Promise<void> {
 
 async function createEvent(): Promise<void> {
   try {
+    const title = draftEvent.title.trim()
     const theater = draftEvent.theater.trim()
     const summary = draftEvent.summary.trim()
-    if (!theater || !summary) {
-      backendStatus.value = '事件新增失败：请完整填写来源和内容'
+    if (!title || !theater || !summary) {
+      backendStatus.value = '事件新增失败：请完整填写标题、来源和内容'
       return
     }
 
@@ -1696,6 +1722,7 @@ async function createEvent(): Promise<void> {
       const newItem: EventItem = {
         id: localId,
         codename,
+        title,
         theater,
         summary,
         severity: draftEvent.severity,
@@ -1713,6 +1740,7 @@ async function createEvent(): Promise<void> {
     } else {
       await sendJson<{ id: string }>('/events', 'POST', {
         event_key: codename,
+        title,
         content: summary,
         source_system: theater,
         credibility_level: credibilityFromSeverity(draftEvent.severity),
@@ -1724,6 +1752,7 @@ async function createEvent(): Promise<void> {
       backendStatus.value = '事件新增成功（后端）'
     }
 
+    draftEvent.title = ''
     draftEvent.theater = ''
     draftEvent.summary = ''
   } catch {
@@ -1974,7 +2003,7 @@ watch(currentView, (view) => {
               @click="selectEvent(eventItem.id)"
             >
               <div class="row-between">
-                <strong>{{ eventItem.theater }}</strong>
+                <strong>{{ eventItem.title }}</strong>
                 <div class="tag-group">
                   <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
                   <span class="badge filter-badge">{{ eventItem.filterStatus }}</span>
@@ -2160,7 +2189,7 @@ watch(currentView, (view) => {
                 />
                 <span>选择</span>
               </label>
-              <strong>{{ eventItem.theater }}</strong>
+              <strong>{{ eventItem.title }}</strong>
               <div class="tag-group">
                 <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
                 <span class="badge filter-badge">{{ eventItem.filterStatus }}</span>
@@ -2221,7 +2250,7 @@ watch(currentView, (view) => {
               </div>
             </div>
             <p>{{ question.title }}</p>
-            <small>关联事件：{{ allKnownEvents.find((eventItem) => eventItem.id === question.eventId)?.theater ?? '未匹配事件' }}</small>
+            <small>关联事件：{{ allKnownEvents.find((eventItem) => eventItem.id === question.eventId)?.title ?? '未匹配事件' }}</small>
             <div class="action-row action-right">
               <button class="action-btn" @click.stop="openQuestionEdit(question)">编辑</button>
             </div>
@@ -2699,6 +2728,7 @@ watch(currentView, (view) => {
         </div>
         <div class="detail-grid">
           <p><strong>ID：</strong>{{ homeDetailEvent.id }}</p>
+          <p><strong>标题：</strong>{{ homeDetailEvent.title }}</p>
           <p><strong>event_key：</strong>{{ homeDetailEvent.codename }}</p>
           <p><strong>来源系统：</strong>{{ homeDetailEvent.theater }}</p>
           <p><strong>可信等级：</strong>{{ severityLabel[homeDetailEvent.severity] }}</p>
@@ -2720,6 +2750,7 @@ watch(currentView, (view) => {
         </div>
         <div class="detail-grid">
           <p><strong>ID：</strong>{{ manageDetailEvent.id }}</p>
+          <p><strong>标题：</strong>{{ manageDetailEvent.title }}</p>
           <p><strong>event_key：</strong>{{ manageDetailEvent.codename }}</p>
           <p><strong>来源系统：</strong>{{ manageDetailEvent.theater }}</p>
           <p><strong>可信等级：</strong>{{ severityLabel[manageDetailEvent.severity] }}</p>
@@ -2735,6 +2766,10 @@ watch(currentView, (view) => {
         <div class="panel-head">
           <h2>编辑事件</h2>
           <button class="action-btn" @click="eventEditDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>事件标题</label>
+          <input v-model="eventEditForm.title" />
         </div>
         <div class="field-block">
           <label>来源系统 / 战区</label>
@@ -2774,7 +2809,7 @@ watch(currentView, (view) => {
         </div>
         <div class="detail-grid">
           <p><strong>ID：</strong>{{ manageDetailQuestion.id }}</p>
-          <p><strong>关联事件：</strong>{{ allKnownEvents.find((item) => item.id === (manageDetailQuestion?.eventId ?? ''))?.theater ?? '未匹配事件' }}</p>
+          <p><strong>关联事件：</strong>{{ allKnownEvents.find((item) => item.id === (manageDetailQuestion?.eventId ?? ''))?.title ?? '未匹配事件' }}</p>
           <p><strong>等级：</strong>{{ manageDetailQuestion.level }}</p>
           <p><strong>状态：</strong>{{ statusLabel[manageDetailQuestion.status] }}</p>
           <p><strong>截止时间：</strong>{{ formatDate(manageDetailQuestion.deadline) }}</p>
@@ -2872,6 +2907,10 @@ watch(currentView, (view) => {
           <button class="action-btn" @click="createEventDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
+          <label>事件标题</label>
+          <input v-model="draftEvent.title" placeholder="填写事件标题" />
+        </div>
+        <div class="field-block">
           <label>来源系统 / 战区</label>
           <select v-model="draftEvent.theater">
             <option value="" disabled>请选择数据源</option>
@@ -2908,7 +2947,7 @@ watch(currentView, (view) => {
           <label>绑定事件</label>
           <select v-model="selectedEventId">
             <option v-for="eventItem in allKnownEvents" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
-              {{ eventItem.theater }}
+              {{ eventItem.title }}（{{ eventItem.theater }}）
             </option>
           </select>
         </div>

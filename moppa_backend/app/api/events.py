@@ -15,6 +15,7 @@ def to_event_list_item(entity: EventEntity) -> EventListItemModel:
     return EventListItemModel(
         id=str(entity.id),
         event_key=entity.event_key,
+        title=entity.title,
         content=entity.content,
         source_system=entity.source_system,
         credibility_level=entity.credibility_level,
