@@ -1206,7 +1206,7 @@ watch(currentView, (view) => {
       <section class="left-column">
         <article class="panel">
           <div class="panel-head">
-            <h2>1) 事件监看</h2>
+            <h2>事件监看</h2>
             <span>每页 3 条，可分页</span>
           </div>
           <ul class="event-list">
@@ -1242,7 +1242,7 @@ watch(currentView, (view) => {
 
         <article class="panel">
           <div class="panel-head">
-            <h2>5) 模型排行榜</h2>
+            <h2>模型排行榜</h2>
             <span>等级筛选</span>
           </div>
           <div class="level-switch">
@@ -1282,7 +1282,7 @@ watch(currentView, (view) => {
       <section class="right-column">
         <article class="panel">
           <div class="panel-head">
-            <h2>3) 自动生成问题</h2>
+            <h2>自动生成问题</h2>
             <span>{{ selectedEvent?.theater ?? '未选择事件' }}</span>
           </div>
           <div class="question-grid">
@@ -1304,7 +1304,7 @@ watch(currentView, (view) => {
 
         <article v-if="selectedQuestion" class="panel">
           <div class="panel-head">
-            <h2>6) 问题详情</h2>
+            <h2>问题详情</h2>
             <span>{{ selectedQuestion.id }}</span>
           </div>
 
@@ -1316,7 +1316,7 @@ watch(currentView, (view) => {
 
           <div class="split-grid">
             <section class="subpanel">
-              <h3>4) 模型答案与分析</h3>
+              <h3>模型答案与分析</h3>
               <div v-for="item in selectedQuestionAnswers" :key="item.model" class="answer-card">
                 <div class="row-between">
                   <strong>{{ item.model }}</strong>
@@ -1329,7 +1329,7 @@ watch(currentView, (view) => {
             </section>
 
             <section class="subpanel">
-              <h3>7) 专家答案与互评</h3>
+              <h3>专家答案与互评</h3>
               <div class="expert-inputs">
                 <input v-model="draftExpert.name" placeholder="专家姓名" />
                 <textarea v-model="draftExpert.answer" rows="2" placeholder="专家答案"></textarea>
@@ -1359,7 +1359,7 @@ watch(currentView, (view) => {
           </div>
 
           <section class="subpanel">
-            <h3>8) 问题讨论区</h3>
+            <h3>问题讨论区</h3>
             <div class="comment-list">
               <p v-for="comment in selectedQuestionComments" :key="comment.id">
                 <span>{{ comment.author }}:</span> {{ comment.content }}
