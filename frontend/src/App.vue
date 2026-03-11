@@ -15,14 +15,6 @@ interface EventItem {
   timestamp: string
 }
 
-interface TemplateItem {
-  level: Level
-  objective: string
-  constraints: string
-  outputFormat: string
-  qualityRule: string
-}
-
 interface QuestionItem {
   id: string
   eventId: string
@@ -200,6 +192,42 @@ interface BackendFilterRuleItem {
   updated_at: string
 }
 
+interface QuestionTemplateItem {
+  id: string
+  name: string
+  level: number
+  category: string
+  templateContent: string
+  variables: unknown[]
+  generationConfig: Record<string, unknown>
+  verificationConditions: Record<string, unknown>
+  duplicateCheckWindow: string
+  maxDuplicateRate: number
+  status: 'active' | 'inactive' | 'archived'
+  version: string
+  usageCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+interface BackendQuestionTemplateItem {
+  id: string
+  name: string
+  level: number
+  category: string | null
+  template_content: string
+  variables: unknown[]
+  generation_config: Record<string, unknown>
+  verification_conditions: Record<string, unknown>
+  duplicate_check_window: string
+  max_duplicate_rate: number
+  status: QuestionTemplateItem['status']
+  version: string
+  usage_count: number
+  created_at: string
+  updated_at: string
+}
+
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
 
 const homeEvents = ref<EventItem[]>([
@@ -234,37 +262,6 @@ const homeEvents = ref<EventItem[]>([
     timestamp: '2026-03-10T01:45:00Z',
   },
 ])
-
-const templateState = reactive<Record<Level, TemplateItem>>({
-  L1: {
-    level: 'L1',
-    objective: '识别未来 24 小时的趋势方向。',
-    constraints: '最多使用 3 个可观测因子，并说明因果关系。',
-    outputFormat: '单行预测 + 置信度 + 触发条件。',
-    qualityRule: '结论必须可证伪且具备明确时间边界。',
-  },
-  L2: {
-    level: 'L2',
-    objective: '估计未来 72 小时战术机动发生概率。',
-    constraints: '包含一个替代场景并标注不确定性来源。',
-    outputFormat: '概率区间 + 时间线 + 关键依赖。',
-    qualityRule: '禁止使用“可能/大概”等无数值范围的模糊表达。',
-  },
-  L3: {
-    level: 'L3',
-    objective: '预测通信受扰条件下的作战影响。',
-    constraints: '对比两个战略假设并给出证据权重。',
-    outputFormat: '主假设 + 次假设 + 风险矩阵。',
-    qualityRule: '推理链必须包含假设校验点。',
-  },
-  L4: {
-    level: 'L4',
-    objective: '评估多战区耦合下的战役级结果。',
-    constraints: '建模长尾风险与二阶效应。',
-    outputFormat: '结果分布 + 置信驱动因素 + 注意事项。',
-    qualityRule: '必须提供供人工审阅的可解释说明。',
-  },
-})
 
 const questions = ref<QuestionItem[]>([
   {
@@ -396,7 +393,6 @@ const rankingRows = ref<RankRow[]>([
 ])
 
 const selectedEventId = ref(homeEvents.value[0]?.id ?? '')
-const selectedLevel = ref<Level>('L1')
 const selectedQuestionId = ref(questions.value[0]?.id ?? '')
 const rankingLevel = ref<'ALL' | Level>('ALL')
 const currentView = ref<AppView>('home')
@@ -425,6 +421,7 @@ const questionDetailDialogOpen = ref(false)
 const questionEditDialogOpen = ref(false)
 const templateEditDialogOpen = ref(false)
 const templateDetailDialogOpen = ref(false)
+const createTemplateDialogOpen = ref(false)
 const eventEditForm = reactive({
   id: '',
   title: '',
@@ -434,9 +431,41 @@ const eventEditForm = reactive({
   filterStatus: '',
 })
 const questionEditForm = reactive({ id: '', title: '', deadline: '', status: 'collecting' as QuestionItem['status'] })
-const templateEditForm = reactive({ objective: '', constraints: '', outputFormat: '', qualityRule: '' })
-const templateEditLevel = ref<Level>('L1')
-const selectedTemplateLevel = ref<Level | null>(null)
+const templateEditForm = reactive({
+  id: '',
+  name: '',
+  level: 2,
+  category: '',
+  templateContent: '',
+  duplicateCheckWindow: '7 days',
+  maxDuplicateRate: 5,
+  status: 'active' as QuestionTemplateItem['status'],
+  version: 'v1.0',
+  variablesJson: '[]',
+  generationConfigJson: '{}',
+  verificationConditionsJson: '{}',
+})
+const createTemplateForm = reactive({
+  name: '',
+  level: 2,
+  category: '',
+  templateContent: '',
+  duplicateCheckWindow: '7 days',
+  maxDuplicateRate: 5,
+  status: 'active' as QuestionTemplateItem['status'],
+  version: 'v1.0',
+  variablesJson: '[]',
+  generationConfigJson: '{}',
+  verificationConditionsJson: '{}',
+})
+const selectedTemplate = ref<QuestionTemplateItem | null>(null)
+const templates = ref<QuestionTemplateItem[]>([])
+const templateManagePage = ref(1)
+const templateManagePageSize = ref(6)
+const templateManageJumpPage = ref('1')
+const templateManageTotal = ref(0)
+const templateManageSearchKeyword = ref('')
+const selectedManageTemplateIds = ref<string[]>([])
 const homeEventPage = ref(1)
 const homeEventPageSize = 3
 const homeEventTotal = ref(homeEvents.value.length)
@@ -541,9 +570,7 @@ const editFilterRuleForm = reactive({
 })
 
 const selectedEvent = computed(() => homeEvents.value.find((eventItem) => eventItem.id === selectedEventId.value))
-const selectedTemplateDetail = computed(() =>
-  selectedTemplateLevel.value ? templateState[selectedTemplateLevel.value] : null,
-)
+const selectedTemplateDetail = computed(() => selectedTemplate.value)
 const selectedQuestion = computed(() => questions.value.find((question) => question.id === selectedQuestionId.value))
 
 const filteredQuestions = computed(() =>
@@ -603,6 +630,11 @@ const pagedManageQuestions = computed(() => {
 })
 const allQuestionsOnPageSelected = computed(() =>
   pagedManageQuestions.value.length > 0 && pagedManageQuestions.value.every((item) => selectedManageQuestionIds.value.includes(item.id)),
+)
+
+const templateManageTotalPages = computed(() => Math.max(1, Math.ceil(templateManageTotal.value / templateManagePageSize.value)))
+const allTemplatesOnPageSelected = computed(
+  () => templates.value.length > 0 && templates.value.every((item) => selectedManageTemplateIds.value.includes(item.id)),
 )
 const allKnownEvents = computed(() => {
   const map = new Map<string, EventItem>()
@@ -1371,6 +1403,186 @@ async function deleteSelectedFilterRulesBatch(): Promise<void> {
   }
 }
 
+async function fetchTemplates(page = 1): Promise<void> {
+  const keyword = encodeURIComponent(templateManageSearchKeyword.value.trim())
+  const pageData = await fetchJson<BackendPage<BackendQuestionTemplateItem>>(
+    `/question-templates?keyword=${keyword}&page=${page}&page_size=${templateManagePageSize.value}`,
+  )
+  templates.value = pageData.items.map(toQuestionTemplateItem)
+  if (selectedTemplate.value) {
+    selectedTemplate.value = templates.value.find((item) => item.id === selectedTemplate.value?.id) ?? null
+  }
+  templateManageTotal.value = pageData.total
+  templateManagePage.value = pageData.page
+  templateManageJumpPage.value = String(pageData.page)
+  selectedManageTemplateIds.value = []
+}
+
+function openTemplateDetail(item: QuestionTemplateItem): void {
+  selectedTemplate.value = item
+  templateDetailDialogOpen.value = true
+}
+
+function openTemplateEdit(item: QuestionTemplateItem): void {
+  selectedTemplate.value = item
+  templateEditForm.id = item.id
+  templateEditForm.name = item.name
+  templateEditForm.level = item.level
+  templateEditForm.category = item.category
+  templateEditForm.templateContent = item.templateContent
+  templateEditForm.duplicateCheckWindow = item.duplicateCheckWindow
+  templateEditForm.maxDuplicateRate = item.maxDuplicateRate
+  templateEditForm.status = item.status
+  templateEditForm.version = item.version
+  templateEditForm.variablesJson = JSON.stringify(item.variables, null, 2)
+  templateEditForm.generationConfigJson = JSON.stringify(item.generationConfig, null, 2)
+  templateEditForm.verificationConditionsJson = JSON.stringify(item.verificationConditions, null, 2)
+  templateEditDialogOpen.value = true
+}
+
+function toggleManageTemplateSelection(id: string): void {
+  if (selectedManageTemplateIds.value.includes(id)) {
+    selectedManageTemplateIds.value = selectedManageTemplateIds.value.filter((item) => item !== id)
+    return
+  }
+  selectedManageTemplateIds.value = [...selectedManageTemplateIds.value, id]
+}
+
+function toggleSelectAllTemplatesOnPage(): void {
+  if (allTemplatesOnPageSelected.value) {
+    selectedManageTemplateIds.value = []
+    return
+  }
+  selectedManageTemplateIds.value = templates.value.map((item) => item.id)
+}
+
+function setTemplateManagePageSize(size: number): void {
+  templateManagePageSize.value = size
+  templateManagePage.value = 1
+  templateManageJumpPage.value = '1'
+  selectedManageTemplateIds.value = []
+  if (backendOnline.value) {
+    void fetchTemplates(1)
+  }
+}
+
+function goTemplateManagePage(delta: number): void {
+  const next = templateManagePage.value + delta
+  if (next < 1 || next > templateManageTotalPages.value) {
+    return
+  }
+  goToTemplateManagePage(next)
+}
+
+function goToTemplateManagePage(page: number): void {
+  if (page < 1 || page > templateManageTotalPages.value) {
+    return
+  }
+  templateManagePage.value = page
+  templateManageJumpPage.value = String(page)
+  selectedManageTemplateIds.value = []
+  if (backendOnline.value) {
+    void fetchTemplates(page)
+  }
+}
+
+function jumpToTemplatePageFromInput(): void {
+  const page = Number(templateManageJumpPage.value)
+  if (!Number.isFinite(page)) {
+    return
+  }
+  goToTemplateManagePage(Math.min(Math.max(1, Math.trunc(page)), templateManageTotalPages.value))
+}
+
+async function submitCreateTemplate(): Promise<void> {
+  try {
+    await sendJson('/question-templates', 'POST', {
+      name: createTemplateForm.name.trim(),
+      level: createTemplateForm.level,
+      category: createTemplateForm.category.trim() || null,
+      template_content: createTemplateForm.templateContent.trim(),
+      variables: parseJsonArray(createTemplateForm.variablesJson),
+      generation_config: parseJsonObject(createTemplateForm.generationConfigJson),
+      verification_conditions: parseJsonObject(createTemplateForm.verificationConditionsJson),
+      duplicate_check_window: createTemplateForm.duplicateCheckWindow.trim(),
+      max_duplicate_rate: createTemplateForm.maxDuplicateRate,
+      status: createTemplateForm.status,
+      version: createTemplateForm.version.trim(),
+    })
+    await fetchTemplates(1)
+    backendStatus.value = '问题模板新增成功'
+    createTemplateDialogOpen.value = false
+    createTemplateForm.name = ''
+    createTemplateForm.level = 2
+    createTemplateForm.category = ''
+    createTemplateForm.templateContent = ''
+    createTemplateForm.duplicateCheckWindow = '7 days'
+    createTemplateForm.maxDuplicateRate = 5
+    createTemplateForm.status = 'active'
+    createTemplateForm.version = 'v1.0'
+    createTemplateForm.variablesJson = '[]'
+    createTemplateForm.generationConfigJson = '{}'
+    createTemplateForm.verificationConditionsJson = '{}'
+  } catch {
+    backendStatus.value = '问题模板新增失败：请检查字段与后端接口'
+  }
+}
+
+async function submitEditTemplate(): Promise<void> {
+  try {
+    await sendJson(`/question-templates/${templateEditForm.id}`, 'PATCH', {
+      name: templateEditForm.name.trim(),
+      level: templateEditForm.level,
+      category: templateEditForm.category.trim() || null,
+      template_content: templateEditForm.templateContent.trim(),
+      variables: parseJsonArray(templateEditForm.variablesJson),
+      generation_config: parseJsonObject(templateEditForm.generationConfigJson),
+      verification_conditions: parseJsonObject(templateEditForm.verificationConditionsJson),
+      duplicate_check_window: templateEditForm.duplicateCheckWindow.trim(),
+      max_duplicate_rate: templateEditForm.maxDuplicateRate,
+      status: templateEditForm.status,
+      version: templateEditForm.version.trim(),
+    })
+    await fetchTemplates(templateManagePage.value)
+    backendStatus.value = '问题模板更新成功'
+    templateEditDialogOpen.value = false
+    if (selectedTemplate.value && selectedTemplate.value.id === templateEditForm.id) {
+      selectedTemplate.value = templates.value.find((item) => item.id === templateEditForm.id) ?? null
+    }
+  } catch {
+    backendStatus.value = '问题模板更新失败：请检查字段与后端接口'
+  }
+}
+
+async function deleteTemplateInEditDialog(): Promise<void> {
+  try {
+    await sendJson('/question-templates', 'DELETE', { ids: [templateEditForm.id] })
+    await fetchTemplates(templateManagePage.value)
+    backendStatus.value = '问题模板删除成功'
+    templateEditDialogOpen.value = false
+    if (selectedTemplate.value?.id === templateEditForm.id) {
+      selectedTemplate.value = null
+    }
+  } catch {
+    backendStatus.value = '问题模板删除失败：请检查后端接口'
+  }
+}
+
+async function deleteSelectedTemplatesBatch(): Promise<void> {
+  if (selectedManageTemplateIds.value.length === 0) {
+    backendStatus.value = '请先勾选要删除的问题模板'
+    return
+  }
+  try {
+    const count = selectedManageTemplateIds.value.length
+    await sendJson('/question-templates', 'DELETE', { ids: selectedManageTemplateIds.value })
+    await fetchTemplates(templateManagePage.value)
+    backendStatus.value = `问题模板批量删除成功（${count} 条）`
+  } catch {
+    backendStatus.value = '问题模板批量删除失败：请检查后端接口'
+  }
+}
+
 async function deleteSelectedEventsBatch(): Promise<void> {
   if (selectedManageEventIds.value.length === 0) {
     backendStatus.value = '请先勾选要删除的事件'
@@ -1519,43 +1731,6 @@ async function submitEventEdit(): Promise<void> {
 async function deleteEventInEditDialog(): Promise<void> {
   await deleteSelectedEvent()
   eventEditDialogOpen.value = false
-}
-
-function openTemplateEdit(level: Level): void {
-  selectedLevel.value = level
-  selectedTemplateLevel.value = level
-  templateEditLevel.value = level
-  const current = templateState[level]
-  templateEditForm.objective = current.objective
-  templateEditForm.constraints = current.constraints
-  templateEditForm.outputFormat = current.outputFormat
-  templateEditForm.qualityRule = current.qualityRule
-  templateEditDialogOpen.value = true
-}
-
-function openTemplateDetail(level: Level): void {
-  selectedTemplateLevel.value = level
-  templateDetailDialogOpen.value = true
-}
-
-function openTemplateEditFromDetail(): void {
-  if (!selectedTemplateLevel.value) {
-    return
-  }
-  templateDetailDialogOpen.value = false
-  openTemplateEdit(selectedTemplateLevel.value)
-}
-
-function saveTemplate(): void {
-  const level = templateEditLevel.value
-  templateState[level] = {
-    ...templateState[level],
-    objective: templateEditForm.objective.trim(),
-    constraints: templateEditForm.constraints.trim(),
-    outputFormat: templateEditForm.outputFormat.trim(),
-    qualityRule: templateEditForm.qualityRule.trim(),
-  }
-  templateEditDialogOpen.value = false
 }
 
 function addQuestionComment(): void {
@@ -1738,6 +1913,26 @@ function toFilterRuleItem(item: BackendFilterRuleItem): FilterRuleItem {
   }
 }
 
+function toQuestionTemplateItem(item: BackendQuestionTemplateItem): QuestionTemplateItem {
+  return {
+    id: item.id,
+    name: item.name,
+    level: item.level,
+    category: item.category ?? '',
+    templateContent: item.template_content,
+    variables: item.variables ?? [],
+    generationConfig: item.generation_config ?? {},
+    verificationConditions: item.verification_conditions ?? {},
+    duplicateCheckWindow: item.duplicate_check_window,
+    maxDuplicateRate: item.max_duplicate_rate,
+    status: item.status,
+    version: item.version,
+    usageCount: item.usage_count,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }
+}
+
 function parseJsonObject(text: string): Record<string, unknown> {
   const trimmed = text.trim()
   if (!trimmed) {
@@ -1748,6 +1943,18 @@ function parseJsonObject(text: string): Record<string, unknown> {
     return parsed as Record<string, unknown>
   }
   throw new Error('JSON must be an object')
+}
+
+function parseJsonArray(text: string): unknown[] {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    return []
+  }
+  const parsed = JSON.parse(trimmed)
+  if (Array.isArray(parsed)) {
+    return parsed
+  }
+  throw new Error('JSON must be an array')
 }
 
 async function fetchSourceSystemOptions(): Promise<void> {
@@ -2137,6 +2344,17 @@ watch(currentView, (view) => {
       selectedManageQuestionIds.value = []
     }
   }
+  if (view === 'templates') {
+    if (backendOnline.value) {
+      void fetchTemplates(1)
+    } else {
+      templates.value = []
+      templateManageTotal.value = 0
+      templateManagePage.value = 1
+      templateManageJumpPage.value = '1'
+      selectedManageTemplateIds.value = []
+    }
+  }
   if (view === 'tasks') {
     if (backendOnline.value) {
       void fetchTasks(1)
@@ -2212,6 +2430,16 @@ watch(questionManageSearchKeyword, () => {
   }, 250)
 })
 
+watch(templateManageSearchKeyword, () => {
+  templateManagePage.value = 1
+  templateManageJumpPage.value = '1'
+  selectedManageTemplateIds.value = []
+  if (!backendOnline.value || currentView.value !== 'templates') {
+    return
+  }
+  void fetchTemplates(1)
+})
+
 watch(questionEventSearch, (keyword) => {
   if (!createQuestionDialogOpen.value || !backendOnline.value) {
     return
@@ -2230,6 +2458,9 @@ watch(backendOnline, (online) => {
   }
   if (online && currentView.value === 'questions') {
     void fetchManageQuestions(1)
+  }
+  if (online && currentView.value === 'templates') {
+    void fetchTemplates(1)
   }
   if (online && createQuestionDialogOpen.value) {
     void fetchQuestionEventOptions(questionEventSearch.value)
@@ -2569,26 +2800,56 @@ watch(backendOnline, (online) => {
       <article class="panel list-panel">
         <div class="panel-head">
           <h2>模板配置列表</h2>
-          <span>按等级选择</span>
+          <span>第 {{ templateManagePage }} / {{ templateManageTotalPages }} 页</span>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="createTemplateDialogOpen = true">新增模板</button>
+          <button class="action-btn" @click="toggleSelectAllTemplatesOnPage">
+            {{ allTemplatesOnPageSelected ? '取消全选本页' : '全选本页' }}
+          </button>
+          <button class="action-btn danger" @click="deleteSelectedTemplatesBatch">批量删除所选</button>
+          <input v-model="templateManageSearchKeyword" placeholder="搜索名称/分类/内容" />
+          <small>匹配 {{ templateManageTotal }} 条</small>
         </div>
         <ul class="event-list">
           <li
-            v-for="level in levels"
-            :key="`template-${level}`"
-            :class="['question-card', { active: level === selectedTemplateLevel }]"
-            @click="openTemplateDetail(level)"
+            v-for="item in templates"
+            :key="`template-${item.id}`"
+            :class="['question-card', { active: selectedTemplate?.id === item.id }]"
+            @click="openTemplateDetail(item)"
           >
             <div class="row-between">
-              <strong>{{ level }}</strong>
-              <span class="badge">模板配置</span>
+              <label class="select-row" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="selectedManageTemplateIds.includes(item.id)"
+                  @change="toggleManageTemplateSelection(item.id)"
+                />
+                <span>选择</span>
+              </label>
+              <strong>{{ item.name }}</strong>
+              <div class="tag-group">
+                <span class="badge">L{{ item.level }}</span>
+                <span class="badge">{{ item.status }}</span>
+              </div>
             </div>
-            <p>{{ templateState[level].objective }}</p>
-            <small>{{ templateState[level].qualityRule }}</small>
+            <p>{{ item.category || '未分类' }}</p>
+            <small>{{ item.templateContent }}</small>
             <div class="action-row action-right">
-              <button class="action-btn" @click.stop="openTemplateEdit(level)">编辑</button>
+              <button class="action-btn" @click.stop="openTemplateEdit(item)">编辑</button>
             </div>
           </li>
         </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <button :class="['level-btn', { active: templateManagePageSize === 3 }]" @click="setTemplateManagePageSize(3)">3</button>
+          <button :class="['level-btn', { active: templateManagePageSize === 6 }]" @click="setTemplateManagePageSize(6)">6</button>
+          <button :class="['level-btn', { active: templateManagePageSize === 10 }]" @click="setTemplateManagePageSize(10)">10</button>
+          <button class="action-btn" @click="goTemplateManagePage(-1)">上一页</button>
+          <input v-model="templateManageJumpPage" class="jump-input" placeholder="页码" />
+          <button class="action-btn" @click="jumpToTemplatePageFromInput">跳转</button>
+          <button class="action-btn" @click="goTemplateManagePage(1)">下一页</button>
+        </div>
       </article>
 
     </main>
@@ -3168,24 +3429,30 @@ watch(backendOnline, (online) => {
     </div>
 
     <div
-      v-if="templateDetailDialogOpen && selectedTemplateLevel && selectedTemplateDetail"
+      v-if="templateDetailDialogOpen && selectedTemplateDetail"
       class="dialog-backdrop"
       @click.self="templateDetailDialogOpen = false"
     >
       <section class="dialog-panel">
         <div class="panel-head">
-          <h2>模板详情（{{ selectedTemplateLevel }}）</h2>
+          <h2>模板详情</h2>
           <div class="action-row">
-            <button class="action-btn" @click="openTemplateEditFromDetail">编辑</button>
+            <button class="action-btn" @click="openTemplateEdit(selectedTemplateDetail)">编辑</button>
             <button class="action-btn" @click="templateDetailDialogOpen = false">关闭</button>
           </div>
         </div>
         <div class="detail-grid">
-          <p><strong>等级：</strong>{{ selectedTemplateLevel }}</p>
-          <p><strong>目标：</strong>{{ selectedTemplateDetail.objective }}</p>
-          <p><strong>约束：</strong>{{ selectedTemplateDetail.constraints }}</p>
-          <p><strong>输出格式：</strong>{{ selectedTemplateDetail.outputFormat }}</p>
-          <p><strong>质量规则：</strong>{{ selectedTemplateDetail.qualityRule }}</p>
+          <p><strong>ID：</strong>{{ selectedTemplateDetail.id }}</p>
+          <p><strong>名称：</strong>{{ selectedTemplateDetail.name }}</p>
+          <p><strong>等级：</strong>L{{ selectedTemplateDetail.level }}</p>
+          <p><strong>分类：</strong>{{ selectedTemplateDetail.category || '未分类' }}</p>
+          <p><strong>状态：</strong>{{ selectedTemplateDetail.status }}</p>
+          <p><strong>版本：</strong>{{ selectedTemplateDetail.version }}</p>
+          <p><strong>去重窗口：</strong>{{ selectedTemplateDetail.duplicateCheckWindow }}</p>
+          <p><strong>最大重复率：</strong>{{ selectedTemplateDetail.maxDuplicateRate }}%</p>
+          <p><strong>使用次数：</strong>{{ selectedTemplateDetail.usageCount }}</p>
+          <p><strong>更新时间：</strong>{{ formatDate(selectedTemplateDetail.updatedAt) }}</p>
+          <p><strong>模板内容：</strong>{{ selectedTemplateDetail.templateContent }}</p>
         </div>
       </section>
     </div>
@@ -3193,27 +3460,130 @@ watch(backendOnline, (online) => {
     <div v-if="templateEditDialogOpen" class="dialog-backdrop" @click.self="templateEditDialogOpen = false">
       <section class="dialog-panel">
         <div class="panel-head">
-          <h2>编辑模板（{{ templateEditLevel }}）</h2>
+          <h2>编辑模板</h2>
           <button class="action-btn" @click="templateEditDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
-          <label>目标</label>
-          <textarea v-model="templateEditForm.objective" rows="3"></textarea>
+          <label>名称</label>
+          <input v-model="templateEditForm.name" />
         </div>
         <div class="field-block">
-          <label>约束</label>
-          <textarea v-model="templateEditForm.constraints" rows="3"></textarea>
+          <label>等级</label>
+          <select v-model="templateEditForm.level">
+            <option :value="1">L1</option>
+            <option :value="2">L2</option>
+            <option :value="3">L3</option>
+            <option :value="4">L4</option>
+          </select>
         </div>
         <div class="field-block">
-          <label>输出格式</label>
-          <textarea v-model="templateEditForm.outputFormat" rows="3"></textarea>
+          <label>分类</label>
+          <input v-model="templateEditForm.category" />
         </div>
         <div class="field-block">
-          <label>质量规则</label>
-          <textarea v-model="templateEditForm.qualityRule" rows="3"></textarea>
+          <label>模板内容</label>
+          <textarea v-model="templateEditForm.templateContent" rows="4"></textarea>
         </div>
-        <div class="action-row action-right">
-          <button class="action-btn" @click="saveTemplate">保存模板（模拟）</button>
+        <div class="field-block">
+          <label>去重窗口</label>
+          <input v-model="templateEditForm.duplicateCheckWindow" placeholder="7 days" />
+        </div>
+        <div class="field-block">
+          <label>最大重复率（0-100）</label>
+          <input v-model.number="templateEditForm.maxDuplicateRate" type="number" min="0" max="100" step="0.1" />
+        </div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="templateEditForm.status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="archived">archived</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>版本</label>
+          <input v-model="templateEditForm.version" />
+        </div>
+        <div class="field-block">
+          <label>变量（JSON 数组）</label>
+          <textarea v-model="templateEditForm.variablesJson" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>生成配置（JSON 对象）</label>
+          <textarea v-model="templateEditForm.generationConfigJson" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>校验条件（JSON 对象）</label>
+          <textarea v-model="templateEditForm.verificationConditionsJson" rows="3"></textarea>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="submitEditTemplate">保存修改</button>
+          <button class="action-btn danger" @click="deleteTemplateInEditDialog">删除该模板</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="createTemplateDialogOpen" class="dialog-backdrop" @click.self="createTemplateDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>新增模板</h2>
+          <button class="action-btn" @click="createTemplateDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>名称</label>
+          <input v-model="createTemplateForm.name" />
+        </div>
+        <div class="field-block">
+          <label>等级</label>
+          <select v-model="createTemplateForm.level">
+            <option :value="1">L1</option>
+            <option :value="2">L2</option>
+            <option :value="3">L3</option>
+            <option :value="4">L4</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>分类</label>
+          <input v-model="createTemplateForm.category" />
+        </div>
+        <div class="field-block">
+          <label>模板内容</label>
+          <textarea v-model="createTemplateForm.templateContent" rows="4"></textarea>
+        </div>
+        <div class="field-block">
+          <label>去重窗口</label>
+          <input v-model="createTemplateForm.duplicateCheckWindow" placeholder="7 days" />
+        </div>
+        <div class="field-block">
+          <label>最大重复率（0-100）</label>
+          <input v-model.number="createTemplateForm.maxDuplicateRate" type="number" min="0" max="100" step="0.1" />
+        </div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="createTemplateForm.status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="archived">archived</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>版本</label>
+          <input v-model="createTemplateForm.version" />
+        </div>
+        <div class="field-block">
+          <label>变量（JSON 数组）</label>
+          <textarea v-model="createTemplateForm.variablesJson" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>生成配置（JSON 对象）</label>
+          <textarea v-model="createTemplateForm.generationConfigJson" rows="3"></textarea>
+        </div>
+        <div class="field-block">
+          <label>校验条件（JSON 对象）</label>
+          <textarea v-model="createTemplateForm.verificationConditionsJson" rows="3"></textarea>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" @click="submitCreateTemplate">提交模板</button>
         </div>
       </section>
     </div>
