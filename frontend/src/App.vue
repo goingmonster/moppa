@@ -445,6 +445,7 @@ const eventManagePage = ref(1)
 const eventManagePageSize = ref(6)
 const eventManageJumpPage = ref('1')
 const eventManageSearchKeyword = ref('')
+const eventManageFilterStatus = ref('')
 const eventManageSearchLoading = ref(false)
 const eventManageSearchSeq = ref(0)
 let eventManageSearchTimer: number | undefined
@@ -552,10 +553,14 @@ const previewEvents = computed(() => homeEvents.value)
 const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.value / homeEventPageSize)))
 const localFilteredManageEvents = computed(() => {
   const keyword = eventManageSearchKeyword.value.trim().toLowerCase()
-  if (!keyword) {
-    return manageEvents.value
-  }
+  const status = eventManageFilterStatus.value.trim()
   return manageEvents.value.filter((item) => {
+    if (status && item.filterStatus !== status) {
+      return false
+    }
+    if (!keyword) {
+      return true
+    }
     const haystack = `${item.title}\n${item.summary}\n${item.theater}`.toLowerCase()
     return haystack.includes(keyword)
   })
@@ -701,6 +706,7 @@ function openManageDetail(eventItem: EventItem): void {
 }
 
 function openEventEdit(eventItem: EventItem): void {
+  void fetchSourceSystemOptions()
   selectedEventId.value = eventItem.id
   eventEditForm.id = eventItem.id
   eventEditForm.title = eventItem.title
@@ -1858,8 +1864,9 @@ async function fetchManageEvents(page: number): Promise<void> {
 
   try {
     const keyword = encodeURIComponent(eventManageSearchKeyword.value.trim())
+    const status = encodeURIComponent(eventManageFilterStatus.value.trim())
     const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-      `/events/search?keyword=${keyword}&page=${page}&page_size=${eventManagePageSize.value}`,
+      `/events/search?keyword=${keyword}&filter_status=${status}&page=${page}&page_size=${eventManagePageSize.value}`,
     )
     if (requestSeq !== eventManageSearchSeq.value) {
       return
@@ -2180,6 +2187,16 @@ watch(eventManageSearchKeyword, () => {
   }, 250)
 })
 
+watch(eventManageFilterStatus, () => {
+  eventManagePage.value = 1
+  eventManageJumpPage.value = '1'
+  selectedManageEventIds.value = []
+  if (!backendOnline.value || currentView.value !== 'events') {
+    return
+  }
+  void fetchManageEvents(1)
+})
+
 watch(questionManageSearchKeyword, () => {
   questionManagePage.value = 1
   questionManageJumpPage.value = '1'
@@ -2439,6 +2456,14 @@ watch(backendOnline, (online) => {
           </button>
           <button class="action-btn danger" @click="deleteSelectedEventsBatch">批量删除所选</button>
           <input v-model="eventManageSearchKeyword" placeholder="搜索事件标题/内容" />
+          <select v-model="eventManageFilterStatus">
+            <option value="">全部状态</option>
+            <option value="pending">pending</option>
+            <option value="passed">passed</option>
+            <option value="filtered">filtered</option>
+            <option value="reviewing">reviewing</option>
+            <option value="blocked">blocked</option>
+          </select>
           <small>{{ eventManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? manageEventTotal : localFilteredManageEvents.length} 条` }}</small>
         </div>
         <ul class="event-list">
@@ -3043,7 +3068,18 @@ watch(backendOnline, (online) => {
         </div>
         <div class="field-block">
           <label>来源系统 / 战区</label>
-          <input v-model="eventEditForm.theater" />
+          <select v-model="eventEditForm.theater">
+            <option value="" disabled>请选择数据源</option>
+            <option
+              v-if="eventEditForm.theater && !sourceSystemOptions.includes(eventEditForm.theater)"
+              :value="eventEditForm.theater"
+            >
+              {{ eventEditForm.theater }}
+            </option>
+            <option v-for="source in sourceSystemOptions" :key="`event-edit-source-${source}`" :value="source">
+              {{ source }}
+            </option>
+          </select>
         </div>
         <div class="field-block">
           <label>事件内容</label>
@@ -3059,7 +3095,19 @@ watch(backendOnline, (online) => {
         </div>
         <div class="field-block">
           <label>filter_status</label>
-          <input v-model="eventEditForm.filterStatus" placeholder="passed/reviewing/blocked" />
+          <select v-model="eventEditForm.filterStatus">
+            <option value="" disabled>请选择状态</option>
+            <option
+              v-if="eventEditForm.filterStatus && !['pending', 'passed', 'reviewing', 'blocked'].includes(eventEditForm.filterStatus)"
+              :value="eventEditForm.filterStatus"
+            >
+              {{ eventEditForm.filterStatus }}
+            </option>
+            <option value="pending">pending</option>
+            <option value="passed">passed</option>
+            <option value="reviewing">reviewing</option>
+            <option value="blocked">blocked</option>
+          </select>
         </div>
         <div class="action-row">
           <button class="action-btn" @click="submitEventEdit">保存修改</button>

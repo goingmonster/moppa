@@ -44,7 +44,13 @@ class EventRepository:
         )
         return items, int(total or 0)
 
-    def search_paginated(self, keyword: str, page: int, page_size: int) -> tuple[list[EventEntity], int]:
+    def search_paginated(
+        self,
+        keyword: str,
+        filter_status: str,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[EventEntity], int]:
         offset = (page - 1) * page_size
         base_query = select(EventEntity).where(EventEntity.deleted_at.is_(None))
         count_query = select(func.count()).select_from(EventEntity).where(EventEntity.deleted_at.is_(None))
@@ -59,6 +65,11 @@ class EventRepository:
             )
             base_query = base_query.where(condition)
             count_query = count_query.where(condition)
+
+        status = filter_status.strip()
+        if status:
+            base_query = base_query.where(EventEntity.filter_status == status)
+            count_query = count_query.where(EventEntity.filter_status == status)
 
         items = list(
             self.db.scalars(

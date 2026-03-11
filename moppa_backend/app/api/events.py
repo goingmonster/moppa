@@ -47,12 +47,18 @@ def list_events(
 @router.get("/search", summary="Search events by title/content")
 def search_events(
     keyword: str = Query(default=""),
+    filter_status: str = Query(default=""),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> EventPaginationResponse:
     service = EventService(db)
-    rows, total = service.search_paginated(keyword=keyword, page=page, page_size=page_size)
+    rows, total = service.search_paginated(
+        keyword=keyword,
+        filter_status=filter_status,
+        page=page,
+        page_size=page_size,
+    )
     items = [to_event_list_item(row) for row in rows]
     return EventPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
