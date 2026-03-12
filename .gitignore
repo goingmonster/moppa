@@ -16,7 +16,6 @@ Thumbs.db
 
 # Node.js (Frontend)
 frontend/node_modules/
-frontend/dist/
 frontend/.local
 frontend/.output
 front/.nuxt
@@ -126,6 +125,8 @@ frontend/.vite/
 
 # Rollup.js default build output
 dist/
+!frontend/dist/
+!frontend/dist/**
 
 # Storybook build outputs
 .out

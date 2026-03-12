@@ -1,0 +1,61 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-moppa}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./install/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-moppa}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./moppa_backend
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      HOST: 0.0.0.0
+      PORT: 8000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-moppa}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      SOURCE_DB_HOST: ${SOURCE_DB_HOST:-host.docker.internal}
+      SOURCE_DB_PORT: ${SOURCE_DB_PORT:-5432}
+      SOURCE_DB_NAME: ${SOURCE_DB_NAME:-news_event}
+      SOURCE_DB_SCHEMA: ${SOURCE_DB_SCHEMA:-public}
+      SOURCE_DB_USER: ${SOURCE_DB_USER:-postgres}
+      SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:-postgres}
+      SOURCE_SYSTEM_NAME: ${SOURCE_SYSTEM_NAME:-news_event_crawler}
+      SOURCE_FETCH_LIMIT: ${SOURCE_FETCH_LIMIT:-200}
+      SOURCE_BOOTSTRAP_LIMIT: ${SOURCE_BOOTSTRAP_LIMIT:-500}
+      SOURCE_OVERLAP_MINUTES: ${SOURCE_OVERLAP_MINUTES:-10}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:18081}
+      SCHEDULER_ENABLED: ${SCHEDULER_ENABLED:-true}
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    depends_on:
+      - backend
+    ports:
+      - "${MOPPA_PUBLIC_PORT:-18081}:80"
+
+volumes:
+  postgres_data:
