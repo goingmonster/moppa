@@ -194,15 +194,13 @@ interface BackendFilterRuleItem {
 
 interface QuestionTemplateItem {
   id: string
-  name: string
-  level: number
-  category: string
-  templateContent: string
-  variables: unknown[]
-  generationConfig: Record<string, unknown>
-  verificationConditions: Record<string, unknown>
-  duplicateCheckWindow: string
-  maxDuplicateRate: number
+  questionTemplate: string
+  majorTopic: string
+  minorTopic: string
+  difficultyLevel: Level
+  constructionRationale: string
+  candidateAnswers: string
+  answerDeadline: string
   status: 'active' | 'inactive' | 'archived'
   version: string
   usageCount: number
@@ -212,15 +210,13 @@ interface QuestionTemplateItem {
 
 interface BackendQuestionTemplateItem {
   id: string
-  name: string
-  level: number
-  category: string | null
-  template_content: string
-  variables: unknown[]
-  generation_config: Record<string, unknown>
-  verification_conditions: Record<string, unknown>
-  duplicate_check_window: string
-  max_duplicate_rate: number
+  question_template: string
+  major_topic: string
+  minor_topic: string
+  difficulty_level: Level
+  construction_rationale: string
+  candidate_answers: string
+  answer_deadline: string
   status: QuestionTemplateItem['status']
   version: string
   usage_count: number
@@ -433,30 +429,26 @@ const eventEditForm = reactive({
 const questionEditForm = reactive({ id: '', title: '', deadline: '', status: 'collecting' as QuestionItem['status'] })
 const templateEditForm = reactive({
   id: '',
-  name: '',
-  level: 2,
-  category: '',
-  templateContent: '',
-  duplicateCheckWindow: '7 days',
-  maxDuplicateRate: 5,
+  questionTemplate: '',
+  majorTopic: '',
+  minorTopic: '',
+  difficultyLevel: 'L2' as Level,
+  constructionRationale: '',
+  candidateAnswers: '',
+  answerDeadline: '',
   status: 'active' as QuestionTemplateItem['status'],
   version: 'v1.0',
-  variablesJson: '[]',
-  generationConfigJson: '{}',
-  verificationConditionsJson: '{}',
 })
 const createTemplateForm = reactive({
-  name: '',
-  level: 2,
-  category: '',
-  templateContent: '',
-  duplicateCheckWindow: '7 days',
-  maxDuplicateRate: 5,
+  questionTemplate: '',
+  majorTopic: '',
+  minorTopic: '',
+  difficultyLevel: 'L2' as Level,
+  constructionRationale: '',
+  candidateAnswers: '',
+  answerDeadline: '',
   status: 'active' as QuestionTemplateItem['status'],
   version: 'v1.0',
-  variablesJson: '[]',
-  generationConfigJson: '{}',
-  verificationConditionsJson: '{}',
 })
 const selectedTemplate = ref<QuestionTemplateItem | null>(null)
 const templates = ref<QuestionTemplateItem[]>([])
@@ -716,6 +708,19 @@ function formatDate(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function toDateTimeLocalValue(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+  const year = String(date.getFullYear())
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hour}:${minute}`
 }
 
 function selectEvent(id: string): void {
@@ -1426,17 +1431,15 @@ function openTemplateDetail(item: QuestionTemplateItem): void {
 function openTemplateEdit(item: QuestionTemplateItem): void {
   selectedTemplate.value = item
   templateEditForm.id = item.id
-  templateEditForm.name = item.name
-  templateEditForm.level = item.level
-  templateEditForm.category = item.category
-  templateEditForm.templateContent = item.templateContent
-  templateEditForm.duplicateCheckWindow = item.duplicateCheckWindow
-  templateEditForm.maxDuplicateRate = item.maxDuplicateRate
+  templateEditForm.questionTemplate = item.questionTemplate
+  templateEditForm.majorTopic = item.majorTopic
+  templateEditForm.minorTopic = item.minorTopic
+  templateEditForm.difficultyLevel = item.difficultyLevel
+  templateEditForm.constructionRationale = item.constructionRationale
+  templateEditForm.candidateAnswers = item.candidateAnswers
+  templateEditForm.answerDeadline = toDateTimeLocalValue(item.answerDeadline)
   templateEditForm.status = item.status
   templateEditForm.version = item.version
-  templateEditForm.variablesJson = JSON.stringify(item.variables, null, 2)
-  templateEditForm.generationConfigJson = JSON.stringify(item.generationConfig, null, 2)
-  templateEditForm.verificationConditionsJson = JSON.stringify(item.verificationConditions, null, 2)
   templateEditDialogOpen.value = true
 }
 
@@ -1496,33 +1499,35 @@ function jumpToTemplatePageFromInput(): void {
 
 async function submitCreateTemplate(): Promise<void> {
   try {
+    const parsedDeadline = new Date(createTemplateForm.answerDeadline)
+    if (Number.isNaN(parsedDeadline.getTime())) {
+      backendStatus.value = '问题模板新增失败：截止时间格式无效'
+      return
+    }
+
     await sendJson('/question-templates', 'POST', {
-      name: createTemplateForm.name.trim(),
-      level: createTemplateForm.level,
-      category: createTemplateForm.category.trim() || null,
-      template_content: createTemplateForm.templateContent.trim(),
-      variables: parseJsonArray(createTemplateForm.variablesJson),
-      generation_config: parseJsonObject(createTemplateForm.generationConfigJson),
-      verification_conditions: parseJsonObject(createTemplateForm.verificationConditionsJson),
-      duplicate_check_window: createTemplateForm.duplicateCheckWindow.trim(),
-      max_duplicate_rate: createTemplateForm.maxDuplicateRate,
+      question_template: createTemplateForm.questionTemplate.trim(),
+      major_topic: createTemplateForm.majorTopic.trim(),
+      minor_topic: createTemplateForm.minorTopic.trim(),
+      difficulty_level: createTemplateForm.difficultyLevel,
+      construction_rationale: createTemplateForm.constructionRationale.trim(),
+      candidate_answers: createTemplateForm.candidateAnswers.trim(),
+      answer_deadline: parsedDeadline.toISOString(),
       status: createTemplateForm.status,
       version: createTemplateForm.version.trim(),
     })
     await fetchTemplates(1)
     backendStatus.value = '问题模板新增成功'
     createTemplateDialogOpen.value = false
-    createTemplateForm.name = ''
-    createTemplateForm.level = 2
-    createTemplateForm.category = ''
-    createTemplateForm.templateContent = ''
-    createTemplateForm.duplicateCheckWindow = '7 days'
-    createTemplateForm.maxDuplicateRate = 5
+    createTemplateForm.questionTemplate = ''
+    createTemplateForm.majorTopic = ''
+    createTemplateForm.minorTopic = ''
+    createTemplateForm.difficultyLevel = 'L2'
+    createTemplateForm.constructionRationale = ''
+    createTemplateForm.candidateAnswers = ''
+    createTemplateForm.answerDeadline = ''
     createTemplateForm.status = 'active'
     createTemplateForm.version = 'v1.0'
-    createTemplateForm.variablesJson = '[]'
-    createTemplateForm.generationConfigJson = '{}'
-    createTemplateForm.verificationConditionsJson = '{}'
   } catch {
     backendStatus.value = '问题模板新增失败：请检查字段与后端接口'
   }
@@ -1530,16 +1535,20 @@ async function submitCreateTemplate(): Promise<void> {
 
 async function submitEditTemplate(): Promise<void> {
   try {
+    const parsedDeadline = new Date(templateEditForm.answerDeadline)
+    if (Number.isNaN(parsedDeadline.getTime())) {
+      backendStatus.value = '问题模板更新失败：截止时间格式无效'
+      return
+    }
+
     await sendJson(`/question-templates/${templateEditForm.id}`, 'PATCH', {
-      name: templateEditForm.name.trim(),
-      level: templateEditForm.level,
-      category: templateEditForm.category.trim() || null,
-      template_content: templateEditForm.templateContent.trim(),
-      variables: parseJsonArray(templateEditForm.variablesJson),
-      generation_config: parseJsonObject(templateEditForm.generationConfigJson),
-      verification_conditions: parseJsonObject(templateEditForm.verificationConditionsJson),
-      duplicate_check_window: templateEditForm.duplicateCheckWindow.trim(),
-      max_duplicate_rate: templateEditForm.maxDuplicateRate,
+      question_template: templateEditForm.questionTemplate.trim(),
+      major_topic: templateEditForm.majorTopic.trim(),
+      minor_topic: templateEditForm.minorTopic.trim(),
+      difficulty_level: templateEditForm.difficultyLevel,
+      construction_rationale: templateEditForm.constructionRationale.trim(),
+      candidate_answers: templateEditForm.candidateAnswers.trim(),
+      answer_deadline: parsedDeadline.toISOString(),
       status: templateEditForm.status,
       version: templateEditForm.version.trim(),
     })
@@ -1916,15 +1925,13 @@ function toFilterRuleItem(item: BackendFilterRuleItem): FilterRuleItem {
 function toQuestionTemplateItem(item: BackendQuestionTemplateItem): QuestionTemplateItem {
   return {
     id: item.id,
-    name: item.name,
-    level: item.level,
-    category: item.category ?? '',
-    templateContent: item.template_content,
-    variables: item.variables ?? [],
-    generationConfig: item.generation_config ?? {},
-    verificationConditions: item.verification_conditions ?? {},
-    duplicateCheckWindow: item.duplicate_check_window,
-    maxDuplicateRate: item.max_duplicate_rate,
+    questionTemplate: item.question_template,
+    majorTopic: item.major_topic,
+    minorTopic: item.minor_topic,
+    difficultyLevel: item.difficulty_level,
+    constructionRationale: item.construction_rationale,
+    candidateAnswers: item.candidate_answers,
+    answerDeadline: item.answer_deadline,
     status: item.status,
     version: item.version,
     usageCount: item.usage_count,
@@ -1943,18 +1950,6 @@ function parseJsonObject(text: string): Record<string, unknown> {
     return parsed as Record<string, unknown>
   }
   throw new Error('JSON must be an object')
-}
-
-function parseJsonArray(text: string): unknown[] {
-  const trimmed = text.trim()
-  if (!trimmed) {
-    return []
-  }
-  const parsed = JSON.parse(trimmed)
-  if (Array.isArray(parsed)) {
-    return parsed
-  }
-  throw new Error('JSON must be an array')
 }
 
 async function fetchSourceSystemOptions(): Promise<void> {
@@ -2808,7 +2803,7 @@ watch(backendOnline, (online) => {
             {{ allTemplatesOnPageSelected ? '取消全选本页' : '全选本页' }}
           </button>
           <button class="action-btn danger" @click="deleteSelectedTemplatesBatch">批量删除所选</button>
-          <input v-model="templateManageSearchKeyword" placeholder="搜索名称/分类/内容" />
+          <input v-model="templateManageSearchKeyword" placeholder="搜索模板/主题/理由/候选答案" />
           <small>匹配 {{ templateManageTotal }} 条</small>
         </div>
         <ul class="event-list">
@@ -2827,14 +2822,14 @@ watch(backendOnline, (online) => {
                 />
                 <span>选择</span>
               </label>
-              <strong>{{ item.name }}</strong>
+              <strong>{{ item.questionTemplate }}</strong>
               <div class="tag-group">
-                <span class="badge">L{{ item.level }}</span>
+                <span class="badge">{{ item.difficultyLevel }}</span>
                 <span class="badge">{{ item.status }}</span>
               </div>
             </div>
-            <p>{{ item.category || '未分类' }}</p>
-            <small>{{ item.templateContent }}</small>
+            <p>{{ item.majorTopic }} / {{ item.minorTopic }}</p>
+            <small>{{ item.candidateAnswers }}</small>
             <div class="action-row action-right">
               <button class="action-btn" @click.stop="openTemplateEdit(item)">编辑</button>
             </div>
@@ -3443,16 +3438,17 @@ watch(backendOnline, (online) => {
         </div>
         <div class="detail-grid">
           <p><strong>ID：</strong>{{ selectedTemplateDetail.id }}</p>
-          <p><strong>名称：</strong>{{ selectedTemplateDetail.name }}</p>
-          <p><strong>等级：</strong>L{{ selectedTemplateDetail.level }}</p>
-          <p><strong>分类：</strong>{{ selectedTemplateDetail.category || '未分类' }}</p>
+          <p><strong>问题模板：</strong>{{ selectedTemplateDetail.questionTemplate }}</p>
+          <p><strong>大类主题：</strong>{{ selectedTemplateDetail.majorTopic }}</p>
+          <p><strong>小类主题：</strong>{{ selectedTemplateDetail.minorTopic }}</p>
+          <p><strong>难度等级：</strong>{{ selectedTemplateDetail.difficultyLevel }}</p>
+          <p><strong>构题依据：</strong>{{ selectedTemplateDetail.constructionRationale }}</p>
+          <p><strong>候选答案：</strong>{{ selectedTemplateDetail.candidateAnswers }}</p>
+          <p><strong>答题截止：</strong>{{ formatDate(selectedTemplateDetail.answerDeadline) }}</p>
           <p><strong>状态：</strong>{{ selectedTemplateDetail.status }}</p>
           <p><strong>版本：</strong>{{ selectedTemplateDetail.version }}</p>
-          <p><strong>去重窗口：</strong>{{ selectedTemplateDetail.duplicateCheckWindow }}</p>
-          <p><strong>最大重复率：</strong>{{ selectedTemplateDetail.maxDuplicateRate }}%</p>
           <p><strong>使用次数：</strong>{{ selectedTemplateDetail.usageCount }}</p>
           <p><strong>更新时间：</strong>{{ formatDate(selectedTemplateDetail.updatedAt) }}</p>
-          <p><strong>模板内容：</strong>{{ selectedTemplateDetail.templateContent }}</p>
         </div>
       </section>
     </div>
@@ -3464,33 +3460,37 @@ watch(backendOnline, (online) => {
           <button class="action-btn" @click="templateEditDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
-          <label>名称</label>
-          <input v-model="templateEditForm.name" />
+          <label>问题模板</label>
+          <textarea v-model="templateEditForm.questionTemplate" rows="3"></textarea>
         </div>
         <div class="field-block">
-          <label>等级</label>
-          <select v-model="templateEditForm.level">
-            <option :value="1">L1</option>
-            <option :value="2">L2</option>
-            <option :value="3">L3</option>
-            <option :value="4">L4</option>
+          <label>大类主题</label>
+          <input v-model="templateEditForm.majorTopic" />
+        </div>
+        <div class="field-block">
+          <label>小类主题</label>
+          <input v-model="templateEditForm.minorTopic" />
+        </div>
+        <div class="field-block">
+          <label>难度等级</label>
+          <select v-model="templateEditForm.difficultyLevel">
+            <option value="L1">L1</option>
+            <option value="L2">L2</option>
+            <option value="L3">L3</option>
+            <option value="L4">L4</option>
           </select>
         </div>
         <div class="field-block">
-          <label>分类</label>
-          <input v-model="templateEditForm.category" />
+          <label>构题依据</label>
+          <textarea v-model="templateEditForm.constructionRationale" rows="3"></textarea>
         </div>
         <div class="field-block">
-          <label>模板内容</label>
-          <textarea v-model="templateEditForm.templateContent" rows="4"></textarea>
+          <label>候选答案</label>
+          <textarea v-model="templateEditForm.candidateAnswers" rows="3"></textarea>
         </div>
         <div class="field-block">
-          <label>去重窗口</label>
-          <input v-model="templateEditForm.duplicateCheckWindow" placeholder="7 days" />
-        </div>
-        <div class="field-block">
-          <label>最大重复率（0-100）</label>
-          <input v-model.number="templateEditForm.maxDuplicateRate" type="number" min="0" max="100" step="0.1" />
+          <label>答题截止时间</label>
+          <input v-model="templateEditForm.answerDeadline" type="datetime-local" />
         </div>
         <div class="field-block">
           <label>状态</label>
@@ -3503,18 +3503,6 @@ watch(backendOnline, (online) => {
         <div class="field-block">
           <label>版本</label>
           <input v-model="templateEditForm.version" />
-        </div>
-        <div class="field-block">
-          <label>变量（JSON 数组）</label>
-          <textarea v-model="templateEditForm.variablesJson" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>生成配置（JSON 对象）</label>
-          <textarea v-model="templateEditForm.generationConfigJson" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>校验条件（JSON 对象）</label>
-          <textarea v-model="templateEditForm.verificationConditionsJson" rows="3"></textarea>
         </div>
         <div class="action-row">
           <button class="action-btn" @click="submitEditTemplate">保存修改</button>
@@ -3530,33 +3518,37 @@ watch(backendOnline, (online) => {
           <button class="action-btn" @click="createTemplateDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
-          <label>名称</label>
-          <input v-model="createTemplateForm.name" />
+          <label>问题模板</label>
+          <textarea v-model="createTemplateForm.questionTemplate" rows="3"></textarea>
         </div>
         <div class="field-block">
-          <label>等级</label>
-          <select v-model="createTemplateForm.level">
-            <option :value="1">L1</option>
-            <option :value="2">L2</option>
-            <option :value="3">L3</option>
-            <option :value="4">L4</option>
+          <label>大类主题</label>
+          <input v-model="createTemplateForm.majorTopic" />
+        </div>
+        <div class="field-block">
+          <label>小类主题</label>
+          <input v-model="createTemplateForm.minorTopic" />
+        </div>
+        <div class="field-block">
+          <label>难度等级</label>
+          <select v-model="createTemplateForm.difficultyLevel">
+            <option value="L1">L1</option>
+            <option value="L2">L2</option>
+            <option value="L3">L3</option>
+            <option value="L4">L4</option>
           </select>
         </div>
         <div class="field-block">
-          <label>分类</label>
-          <input v-model="createTemplateForm.category" />
+          <label>构题依据</label>
+          <textarea v-model="createTemplateForm.constructionRationale" rows="3"></textarea>
         </div>
         <div class="field-block">
-          <label>模板内容</label>
-          <textarea v-model="createTemplateForm.templateContent" rows="4"></textarea>
+          <label>候选答案</label>
+          <textarea v-model="createTemplateForm.candidateAnswers" rows="3"></textarea>
         </div>
         <div class="field-block">
-          <label>去重窗口</label>
-          <input v-model="createTemplateForm.duplicateCheckWindow" placeholder="7 days" />
-        </div>
-        <div class="field-block">
-          <label>最大重复率（0-100）</label>
-          <input v-model.number="createTemplateForm.maxDuplicateRate" type="number" min="0" max="100" step="0.1" />
+          <label>答题截止时间</label>
+          <input v-model="createTemplateForm.answerDeadline" type="datetime-local" />
         </div>
         <div class="field-block">
           <label>状态</label>
@@ -3569,18 +3561,6 @@ watch(backendOnline, (online) => {
         <div class="field-block">
           <label>版本</label>
           <input v-model="createTemplateForm.version" />
-        </div>
-        <div class="field-block">
-          <label>变量（JSON 数组）</label>
-          <textarea v-model="createTemplateForm.variablesJson" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>生成配置（JSON 对象）</label>
-          <textarea v-model="createTemplateForm.generationConfigJson" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>校验条件（JSON 对象）</label>
-          <textarea v-model="createTemplateForm.verificationConditionsJson" rows="3"></textarea>
         </div>
         <div class="action-row">
           <button class="action-btn" @click="submitCreateTemplate">提交模板</button>

@@ -245,15 +245,13 @@ CREATE TABLE IF NOT EXISTS event_filter_rule (
 -- S2 阶段问题生成模板表
 CREATE TABLE IF NOT EXISTS question_template (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(120) NOT NULL,
-    level SMALLINT NOT NULL REFERENCES rule_level_config(level),
-    category VARCHAR(100),
-    template_content TEXT NOT NULL,
-    variables JSONB NOT NULL DEFAULT '[]'::jsonb,
-    generation_config JSONB NOT NULL DEFAULT '{}'::jsonb,
-    verification_conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
-    duplicate_check_window INTERVAL NOT NULL DEFAULT INTERVAL '7 days',
-    max_duplicate_rate NUMERIC(5,2) NOT NULL DEFAULT 5.00 CHECK (max_duplicate_rate BETWEEN 0 AND 100),
+    question_template TEXT NOT NULL,
+    major_topic VARCHAR(100) NOT NULL,
+    minor_topic VARCHAR(100) NOT NULL,
+    difficulty_level VARCHAR(2) NOT NULL CHECK (difficulty_level IN ('L1', 'L2', 'L3', 'L4')),
+    construction_rationale TEXT NOT NULL,
+    candidate_answers TEXT NOT NULL,
+    answer_deadline TIMESTAMPTZ NOT NULL,
     status record_status NOT NULL DEFAULT 'active',
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
     created_by UUID REFERENCES app_user(id),
@@ -262,7 +260,7 @@ CREATE TABLE IF NOT EXISTS question_template (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
-    UNIQUE (name, version)
+    UNIQUE (question_template, answer_deadline, version)
 );
 
 -- S6 阶段评分规则版本表；通过唯一索引保证仅一个激活版本

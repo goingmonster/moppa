@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
@@ -14,15 +14,13 @@ class QuestionTemplateRepository:
 
     def create(self, payload: QuestionTemplateCreateModel) -> QuestionTemplateEntity:
         entity = QuestionTemplateEntity(
-            name=payload.name,
-            level=payload.level,
-            category=payload.category,
-            template_content=payload.template_content,
-            variables=payload.variables,
-            generation_config=payload.generation_config,
-            verification_conditions=payload.verification_conditions,
-            duplicate_check_window=self._parse_interval(payload.duplicate_check_window),
-            max_duplicate_rate=payload.max_duplicate_rate,
+            question_template=payload.question_template,
+            major_topic=payload.major_topic,
+            minor_topic=payload.minor_topic,
+            difficulty_level=payload.difficulty_level,
+            construction_rationale=payload.construction_rationale,
+            candidate_answers=payload.candidate_answers,
+            answer_deadline=payload.answer_deadline,
             status=payload.status,
             version=payload.version,
         )
@@ -56,9 +54,11 @@ class QuestionTemplateRepository:
         escaped = keyword.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         filters = or_(
-            QuestionTemplateEntity.name.ilike(pattern, escape="\\"),
-            QuestionTemplateEntity.category.ilike(pattern, escape="\\"),
-            QuestionTemplateEntity.template_content.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.question_template.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.major_topic.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.minor_topic.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.construction_rationale.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.candidate_answers.ilike(pattern, escape="\\"),
         )
         base = select(QuestionTemplateEntity).where(QuestionTemplateEntity.deleted_at.is_(None), filters)
         items = list(
@@ -80,9 +80,11 @@ class QuestionTemplateRepository:
             pattern = f"%{escaped}%"
             query = query.where(
                 or_(
-                    QuestionTemplateEntity.name.ilike(pattern, escape="\\"),
-                    QuestionTemplateEntity.category.ilike(pattern, escape="\\"),
-                    QuestionTemplateEntity.template_content.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.question_template.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.major_topic.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.minor_topic.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.construction_rationale.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.candidate_answers.ilike(pattern, escape="\\"),
                 )
             )
         return list(self.db.scalars(query.order_by(QuestionTemplateEntity.updated_at.desc())))
@@ -92,24 +94,20 @@ class QuestionTemplateRepository:
         if entity is None:
             return None
 
-        if payload.name is not None:
-            entity.name = payload.name
-        if payload.level is not None:
-            entity.level = payload.level
-        if payload.category is not None:
-            entity.category = payload.category
-        if payload.template_content is not None:
-            entity.template_content = payload.template_content
-        if payload.variables is not None:
-            entity.variables = payload.variables
-        if payload.generation_config is not None:
-            entity.generation_config = payload.generation_config
-        if payload.verification_conditions is not None:
-            entity.verification_conditions = payload.verification_conditions
-        if payload.duplicate_check_window is not None:
-            entity.duplicate_check_window = self._parse_interval(payload.duplicate_check_window)
-        if payload.max_duplicate_rate is not None:
-            entity.max_duplicate_rate = payload.max_duplicate_rate
+        if payload.question_template is not None:
+            entity.question_template = payload.question_template
+        if payload.major_topic is not None:
+            entity.major_topic = payload.major_topic
+        if payload.minor_topic is not None:
+            entity.minor_topic = payload.minor_topic
+        if payload.difficulty_level is not None:
+            entity.difficulty_level = payload.difficulty_level
+        if payload.construction_rationale is not None:
+            entity.construction_rationale = payload.construction_rationale
+        if payload.candidate_answers is not None:
+            entity.candidate_answers = payload.candidate_answers
+        if payload.answer_deadline is not None:
+            entity.answer_deadline = payload.answer_deadline
         if payload.status is not None:
             entity.status = payload.status
         if payload.version is not None:
@@ -132,19 +130,3 @@ class QuestionTemplateRepository:
                 changed += 1
         self.db.commit()
         return changed
-
-    def _parse_interval(self, value: str) -> timedelta:
-        normalized = value.strip().lower()
-        if normalized.endswith("days"):
-            return timedelta(days=int(normalized.replace("days", "").strip()))
-        if normalized.endswith("day"):
-            return timedelta(days=int(normalized.replace("day", "").strip()))
-        if normalized.endswith("hours"):
-            return timedelta(hours=int(normalized.replace("hours", "").strip()))
-        if normalized.endswith("hour"):
-            return timedelta(hours=int(normalized.replace("hour", "").strip()))
-        if normalized.endswith("minutes"):
-            return timedelta(minutes=int(normalized.replace("minutes", "").strip()))
-        if normalized.endswith("minute"):
-            return timedelta(minutes=int(normalized.replace("minute", "").strip()))
-        return timedelta(days=7)

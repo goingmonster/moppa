@@ -1,5 +1,3 @@
-from datetime import timedelta
-
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -19,30 +17,16 @@ from app.services.question_template_service import QuestionTemplateService
 router = APIRouter(prefix="/question-templates", tags=["question-templates"])
 
 
-def _interval_to_text(value: timedelta) -> str:
-    total_seconds = int(value.total_seconds())
-    if total_seconds % 86400 == 0:
-        days = total_seconds // 86400
-        return f"{days} day" if days == 1 else f"{days} days"
-    if total_seconds % 3600 == 0:
-        hours = total_seconds // 3600
-        return f"{hours} hour" if hours == 1 else f"{hours} hours"
-    minutes = max(total_seconds // 60, 1)
-    return f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
-
-
 def to_item(entity: QuestionTemplateEntity) -> QuestionTemplateListItemModel:
     return QuestionTemplateListItemModel(
         id=str(entity.id),
-        name=entity.name,
-        level=entity.level,
-        category=entity.category,
-        template_content=entity.template_content,
-        variables=entity.variables,
-        generation_config=entity.generation_config,
-        verification_conditions=entity.verification_conditions,
-        duplicate_check_window=_interval_to_text(entity.duplicate_check_window),
-        max_duplicate_rate=float(entity.max_duplicate_rate),
+        question_template=entity.question_template,
+        major_topic=entity.major_topic,
+        minor_topic=entity.minor_topic,
+        difficulty_level=entity.difficulty_level,
+        construction_rationale=entity.construction_rationale,
+        candidate_answers=entity.candidate_answers,
+        answer_deadline=entity.answer_deadline,
         status=entity.status,
         version=entity.version,
         usage_count=entity.usage_count,
