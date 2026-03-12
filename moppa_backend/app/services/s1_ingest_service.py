@@ -114,7 +114,11 @@ class S1IngestService:
                     events.append(self._map_source_row_to_event(row, source_system=source_system))
                 except ValueError:
                     malformed += 1
-            result, metrics = self._ingest_events(events, rule_scope="db_import")
+            result, metrics = self._ingest_events(
+                events,
+                rule_scope="db_import",
+                force_pending_review=True,
+            )
             result["fetched"] = len(rows)
             result["skipped_malformed"] = malformed
             result["pull_mode"] = "latest_bootstrap" if latest_mode else "incremental"
@@ -171,6 +175,7 @@ class S1IngestService:
         self,
         events: list[S1EventInputModel],
         rule_scope: str | None = None,
+        force_pending_review: bool = False,
     ) -> tuple[dict[str, object], dict[str, object]]:
         accepted = 0
         duplicate = 0
@@ -199,7 +204,11 @@ class S1IngestService:
                 continue
 
             accepted += 1
-            status, reasons, _ = self.filter_service.evaluate(item, active_rules)
+            if force_pending_review:
+                status = "pending"
+                reasons = ["WAITING_REVIEW_SCHEDULED_IMPORT"]
+            else:
+                status, reasons, _ = self.filter_service.evaluate(item, active_rules)
             _ = self.event_repository.set_filter_result(entity.id, status=status, reasons=reasons)
             if status == "filtered":
                 filtered += 1

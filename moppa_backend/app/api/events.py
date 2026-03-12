@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
@@ -9,6 +11,23 @@ from app.models.event_model import EventCreateModel, EventListItemModel, EventPa
 from app.services.event_service import EventService
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+
+def _parse_optional_datetime(value: str | None, field_name: str) -> datetime | None:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ApiError(
+            status_code=422,
+            code="INVALID_DATETIME_QUERY",
+            message=f"{field_name} must be ISO datetime",
+            details={"field": field_name, "value": value},
+        ) from exc
 
 
 def to_event_list_item(entity: EventEntity) -> EventListItemModel:
@@ -48,14 +67,20 @@ def list_events(
 def search_events(
     keyword: str = Query(default=""),
     filter_status: str = Query(default=""),
+    event_time_from: str | None = Query(default=None),
+    event_time_to: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> EventPaginationResponse:
     service = EventService(db)
+    parsed_event_time_from = _parse_optional_datetime(event_time_from, "event_time_from")
+    parsed_event_time_to = _parse_optional_datetime(event_time_to, "event_time_to")
     rows, total = service.search_paginated(
         keyword=keyword,
         filter_status=filter_status,
+        event_time_from=parsed_event_time_from,
+        event_time_to=parsed_event_time_to,
         page=page,
         page_size=page_size,
     )

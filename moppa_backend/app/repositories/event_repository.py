@@ -48,6 +48,8 @@ class EventRepository:
         self,
         keyword: str,
         filter_status: str,
+        event_time_from: datetime | None,
+        event_time_to: datetime | None,
         page: int,
         page_size: int,
     ) -> tuple[list[EventEntity], int]:
@@ -68,8 +70,21 @@ class EventRepository:
 
         status = filter_status.strip()
         if status:
-            base_query = base_query.where(EventEntity.filter_status == status)
-            count_query = count_query.where(EventEntity.filter_status == status)
+            if status == "reviewed":
+                reviewed_statuses = ["passed", "filtered"]
+                base_query = base_query.where(EventEntity.filter_status.in_(reviewed_statuses))
+                count_query = count_query.where(EventEntity.filter_status.in_(reviewed_statuses))
+            else:
+                base_query = base_query.where(EventEntity.filter_status == status)
+                count_query = count_query.where(EventEntity.filter_status == status)
+
+        if event_time_from is not None:
+            base_query = base_query.where(EventEntity.event_time >= event_time_from)
+            count_query = count_query.where(EventEntity.event_time >= event_time_from)
+
+        if event_time_to is not None:
+            base_query = base_query.where(EventEntity.event_time <= event_time_to)
+            count_query = count_query.where(EventEntity.event_time <= event_time_to)
 
         items = list(
             self.db.scalars(

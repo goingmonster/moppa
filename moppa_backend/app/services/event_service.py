@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 from app.db.models import EventEntity
 from app.models.event_model import EventCreateModel, EventUpdateModel
@@ -19,10 +20,19 @@ class EventService:
         self,
         keyword: str,
         filter_status: str,
+        event_time_from: datetime | None,
+        event_time_to: datetime | None,
         page: int,
         page_size: int,
     ) -> tuple[list[EventEntity], int]:
-        return self.repository.search_paginated(keyword, filter_status, page, page_size)
+        return self.repository.search_paginated(
+            keyword,
+            filter_status,
+            event_time_from,
+            event_time_to,
+            page,
+            page_size,
+        )
 
     def get_by_id(self, event_id: str) -> EventEntity | None:
         return self.repository.get_by_id(event_id)

@@ -182,6 +182,10 @@ textarea {
   overflow: auto;
 }
 
+.event-list-tall {
+  max-height: 560px;
+}
+
 .event-card,
 .question-card,
 .answer-card {
@@ -299,6 +303,12 @@ textarea {
   cursor: not-allowed;
   border-color: var(--line-soft);
   background: rgba(35, 44, 33, 0.55);
+}
+
+.action-btn.compact-btn {
+  font-size: 0.76rem;
+  padding: 0.18rem 0.5rem;
+  border-radius: 5px;
 }
 
 .mini-btn {

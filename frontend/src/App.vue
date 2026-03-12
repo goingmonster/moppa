@@ -230,6 +230,7 @@ interface BackendQuestionTemplateItem {
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
 const filterRuleScopes: FilterRuleItem['ruleScope'][] = ['db_import', 'scrapy', 'document', 'use', 'other']
+const eventManagePageSizeOptions = [5, 10, 20, 50, 100]
 
 const homeEvents = ref<EventItem[]>([
   {
@@ -249,7 +250,7 @@ const homeEvents = ref<EventItem[]>([
     theater: '沿海 C2 网格',
     summary: '未标绘海底通道出现异常声呐回波。',
     severity: 'medium',
-    filterStatus: 'reviewing',
+    filterStatus: 'pending',
     timestamp: '2026-03-09T13:15:00Z',
   },
   {
@@ -259,7 +260,7 @@ const homeEvents = ref<EventItem[]>([
     theater: '极地中继枢纽',
     summary: '卫星丢包与风暴前沿及干扰信号同时出现。',
     severity: 'high',
-    filterStatus: 'blocked',
+    filterStatus: 'filtered',
     timestamp: '2026-03-10T01:45:00Z',
   },
 ])
@@ -468,16 +469,19 @@ const homeEventPageSize = 3
 const homeEventTotal = ref(homeEvents.value.length)
 const homeEventJumpPage = ref('1')
 const eventManagePage = ref(1)
-const eventManagePageSize = ref(6)
+const eventManagePageSize = ref(10)
 const eventManageJumpPage = ref('1')
 const eventManageSearchKeyword = ref('')
 const eventManageFilterStatus = ref('')
+const eventManageTimeFrom = ref('')
+const eventManageTimeTo = ref('')
 const eventManageSearchLoading = ref(false)
 const eventManageSearchSeq = ref(0)
 let eventManageSearchTimer: number | undefined
 const manageEvents = ref<EventItem[]>([])
 const manageEventTotal = ref(0)
 const selectedManageEventIds = ref<string[]>([])
+const eventReviewProcessing = ref(false)
 const questionManagePage = ref(1)
 const questionManagePageSize = ref(6)
 const questionManageJumpPage = ref('1')
@@ -577,20 +581,36 @@ const selectedQuestion = computed(() => questions.value.find((question) => quest
 const filteredQuestions = computed(() =>
   questions.value.filter((question) => !selectedEventId.value || question.eventId === selectedEventId.value),
 )
-const previewEvents = computed(() => homeEvents.value)
+const previewEvents = computed(() => homeEvents.value.filter((item) => item.filterStatus === 'passed'))
 const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.value / homeEventPageSize)))
 const localFilteredManageEvents = computed(() => {
   const keyword = eventManageSearchKeyword.value.trim().toLowerCase()
   const status = eventManageFilterStatus.value.trim()
+  const fromMs = parseLocalDateTimeToMs(eventManageTimeFrom.value)
+  const toMs = parseLocalDateTimeToMs(eventManageTimeTo.value)
   return manageEvents.value.filter((item) => {
-    if (status && item.filterStatus !== status) {
+    if (status === 'reviewed') {
+      if (!['passed', 'filtered'].includes(item.filterStatus)) {
+        return false
+      }
+    } else if (status && item.filterStatus !== status) {
       return false
     }
     if (!keyword) {
       return true
     }
     const haystack = `${item.title}\n${item.summary}\n${item.theater}`.toLowerCase()
-    return haystack.includes(keyword)
+    if (keyword && !haystack.includes(keyword)) {
+      return false
+    }
+    const eventMs = Date.parse(item.timestamp)
+    if (fromMs !== null && Number.isFinite(eventMs) && eventMs < fromMs) {
+      return false
+    }
+    if (toMs !== null && Number.isFinite(eventMs) && eventMs > toMs) {
+      return false
+    }
+    return true
   })
 })
 const eventManageTotalPages = computed(() => {
@@ -606,6 +626,12 @@ const pagedManageEvents = computed(() => {
 })
 const allEventsOnPageSelected = computed(() =>
   pagedManageEvents.value.length > 0 && pagedManageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
+)
+const selectedManageEvents = computed(() =>
+  manageEvents.value.filter((item) => selectedManageEventIds.value.includes(item.id)),
+)
+const selectedPendingManageEventIds = computed(() =>
+  selectedManageEvents.value.filter((item) => item.filterStatus === 'pending').map((item) => item.id),
 )
 
 const localFilteredManageQuestions = computed(() => {
@@ -858,7 +884,6 @@ function goToEventManagePage(page: number): void {
   }
   eventManagePage.value = page
   eventManageJumpPage.value = String(page)
-  selectedManageEventIds.value = []
   if (backendOnline.value) {
     void fetchManageEvents(page)
   }
@@ -1638,6 +1663,46 @@ async function deleteSelectedEventsBatch(): Promise<void> {
   }
 }
 
+async function reviewSelectedEvents(targetStatus: 'passed' | 'filtered'): Promise<void> {
+  const ids = [...selectedPendingManageEventIds.value]
+  if (ids.length === 0) {
+    backendStatus.value = '请先勾选待审核（pending）的事件'
+    return
+  }
+
+  eventReviewProcessing.value = true
+  try {
+    if (!backendOnline.value) {
+      for (const target of homeEvents.value) {
+        if (ids.includes(target.id)) {
+          target.filterStatus = targetStatus
+        }
+      }
+      for (const target of manageEvents.value) {
+        if (ids.includes(target.id)) {
+          target.filterStatus = targetStatus
+        }
+      }
+      backendStatus.value = `后端离线：已审核 ${ids.length} 条模拟事件 -> ${targetStatus}`
+    } else {
+      await Promise.all(
+        ids.map((id) =>
+          sendJson(`/events/${id}`, 'PATCH', {
+            filter_status: targetStatus,
+          }),
+        ),
+      )
+      await Promise.all([fetchManageEvents(eventManagePage.value), fetchHomeEvents()])
+      backendStatus.value = `事件审核完成：${ids.length} 条 -> ${targetStatus}`
+    }
+    selectedManageEventIds.value = selectedManageEventIds.value.filter((id) => !ids.includes(id))
+  } catch {
+    backendStatus.value = '事件审核失败：请检查后端接口或参数格式'
+  } finally {
+    eventReviewProcessing.value = false
+  }
+}
+
 async function deleteSelectedQuestionsBatch(): Promise<void> {
   if (selectedManageQuestionIds.value.length === 0) {
     backendStatus.value = '请先勾选要删除的问题'
@@ -1971,6 +2036,27 @@ function parseJsonObject(text: string): Record<string, unknown> {
   throw new Error('JSON must be an object')
 }
 
+function parseLocalDateTimeToMs(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+  const parsed = Date.parse(trimmed)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function toIsoFromLocalDateTime(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+  const parsed = Date.parse(trimmed)
+  if (!Number.isFinite(parsed)) {
+    return ''
+  }
+  return new Date(parsed).toISOString()
+}
+
 function normalizePromptList(prompts: string[]): string[] {
   return prompts.map((item) => item.trim()).filter((item) => item.length > 0)
 }
@@ -2151,7 +2237,7 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
 
 async function fetchHomeEvents(page = 1): Promise<void> {
   const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-    `/events?page=${page}&page_size=${homeEventPageSize}`,
+    `/events/search?keyword=&filter_status=passed&page=${page}&page_size=${homeEventPageSize}`,
   )
   if (eventPage.items.length === 0) {
     homeEvents.value = []
@@ -2181,8 +2267,16 @@ async function fetchManageEvents(page: number): Promise<void> {
   try {
     const keyword = encodeURIComponent(eventManageSearchKeyword.value.trim())
     const status = encodeURIComponent(eventManageFilterStatus.value.trim())
+    const fromIso = encodeURIComponent(toIsoFromLocalDateTime(eventManageTimeFrom.value))
+    const toIso = encodeURIComponent(toIsoFromLocalDateTime(eventManageTimeTo.value))
+    const timeQuery = [
+      fromIso ? `event_time_from=${fromIso}` : '',
+      toIso ? `event_time_to=${toIso}` : '',
+    ]
+      .filter((item) => item.length > 0)
+      .join('&')
     const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-      `/events/search?keyword=${keyword}&filter_status=${status}&page=${page}&page_size=${eventManagePageSize.value}`,
+      `/events/search?keyword=${keyword}&filter_status=${status}${timeQuery ? `&${timeQuery}` : ''}&page=${page}&page_size=${eventManagePageSize.value}`,
     )
     if (requestSeq !== eventManageSearchSeq.value) {
       return
@@ -2192,7 +2286,6 @@ async function fetchManageEvents(page: number): Promise<void> {
     manageEventTotal.value = eventPage.total
     eventManagePage.value = page
     eventManageJumpPage.value = String(page)
-    selectedManageEventIds.value = []
   } finally {
     if (requestSeq === eventManageSearchSeq.value) {
       eventManageSearchLoading.value = false
@@ -2524,6 +2617,15 @@ watch(eventManageFilterStatus, () => {
   void fetchManageEvents(1)
 })
 
+watch([eventManageTimeFrom, eventManageTimeTo], () => {
+  eventManagePage.value = 1
+  eventManageJumpPage.value = '1'
+  if (!backendOnline.value || currentView.value !== 'events') {
+    return
+  }
+  void fetchManageEvents(1)
+})
+
 watch(questionManageSearchKeyword, () => {
   questionManagePage.value = 1
   questionManageJumpPage.value = '1'
@@ -2794,19 +2896,22 @@ watch(backendOnline, (online) => {
           <button class="action-btn" @click="toggleSelectAllEventsOnPage">
             {{ allEventsOnPageSelected ? '取消全选本页' : '全选本页' }}
           </button>
-          <button class="action-btn danger" @click="deleteSelectedEventsBatch">批量删除所选</button>
+          <button class="action-btn compact-btn" :disabled="eventReviewProcessing" @click="reviewSelectedEvents('passed')">批量通过</button>
+          <button class="action-btn danger compact-btn" :disabled="eventReviewProcessing" @click="reviewSelectedEvents('filtered')">批量拒绝</button>
+          <button class="action-btn danger compact-btn" @click="deleteSelectedEventsBatch">批量删除所选</button>
           <input v-model="eventManageSearchKeyword" placeholder="搜索事件标题/内容" />
           <select v-model="eventManageFilterStatus">
             <option value="">全部状态</option>
             <option value="pending">pending</option>
             <option value="passed">passed</option>
             <option value="filtered">filtered</option>
-            <option value="reviewing">reviewing</option>
-            <option value="blocked">blocked</option>
+            <option value="reviewed">reviewed（passed + filtered）</option>
           </select>
+          <input v-model="eventManageTimeFrom" type="datetime-local" placeholder="发布时间起" />
+          <input v-model="eventManageTimeTo" type="datetime-local" placeholder="发布时间止" />
           <small>{{ eventManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? manageEventTotal : localFilteredManageEvents.length} 条` }}</small>
         </div>
-        <ul class="event-list">
+        <ul class="event-list event-list-tall">
           <li
             v-for="eventItem in pagedManageEvents"
             :key="`manage-${eventItem.id}`"
@@ -2837,9 +2942,9 @@ watch(backendOnline, (online) => {
         </ul>
         <div class="action-row pagination-row pagination-center">
           <span>每页</span>
-          <button :class="['level-btn', { active: eventManagePageSize === 3 }]" @click="setEventManagePageSize(3)">3</button>
-          <button :class="['level-btn', { active: eventManagePageSize === 6 }]" @click="setEventManagePageSize(6)">6</button>
-          <button :class="['level-btn', { active: eventManagePageSize === 10 }]" @click="setEventManagePageSize(10)">10</button>
+          <select :value="eventManagePageSize" @change="setEventManagePageSize(Number(($event.target as HTMLSelectElement).value))">
+            <option v-for="size in eventManagePageSizeOptions" :key="`event-page-size-${size}`" :value="size">{{ size }}</option>
+          </select>
           <button class="action-btn" @click="goManageEventPage(-1)">上一页</button>
           <input v-model="eventManageJumpPage" class="jump-input" placeholder="页码" />
           <button class="action-btn" @click="jumpToEventPageFromInput">跳转</button>
@@ -3532,15 +3637,14 @@ watch(backendOnline, (online) => {
           <select v-model="eventEditForm.filterStatus">
             <option value="" disabled>请选择状态</option>
             <option
-              v-if="eventEditForm.filterStatus && !['pending', 'passed', 'reviewing', 'blocked'].includes(eventEditForm.filterStatus)"
+              v-if="eventEditForm.filterStatus && !['pending', 'passed', 'filtered'].includes(eventEditForm.filterStatus)"
               :value="eventEditForm.filterStatus"
             >
               {{ eventEditForm.filterStatus }}
             </option>
             <option value="pending">pending</option>
             <option value="passed">passed</option>
-            <option value="reviewing">reviewing</option>
-            <option value="blocked">blocked</option>
+            <option value="filtered">filtered</option>
           </select>
         </div>
         <div class="action-row">
