@@ -16,7 +16,9 @@ class EventFilterRuleRepository:
         entity = EventFilterRuleEntity(
             name=payload.name,
             level=payload.level,
+            rule_scope=payload.rule_scope,
             filter_expression=payload.filter_expression,
+            filter_prompts=payload.filter_prompts,
             filter_config=payload.filter_config,
             priority=payload.priority,
             status=payload.status,
@@ -28,32 +30,42 @@ class EventFilterRuleRepository:
         self.db.refresh(entity)
         return entity
 
-    def list_paginated(self, page: int, page_size: int) -> tuple[list[EventFilterRuleEntity], int]:
+    def list_paginated(self, page: int, page_size: int, rule_scope: str | None = None) -> tuple[list[EventFilterRuleEntity], int]:
         offset = (page - 1) * page_size
+        query = (
+            select(EventFilterRuleEntity)
+            .where(EventFilterRuleEntity.deleted_at == None)
+            .order_by(EventFilterRuleEntity.priority.desc(), EventFilterRuleEntity.created_at.desc())
+        )
+        count_query = select(func.count()).select_from(EventFilterRuleEntity).where(EventFilterRuleEntity.deleted_at == None)
+        if rule_scope is not None:
+            query = query.where(EventFilterRuleEntity.rule_scope == rule_scope)
+            count_query = count_query.where(EventFilterRuleEntity.rule_scope == rule_scope)
+
         items = list(
             self.db.scalars(
-                select(EventFilterRuleEntity)
-                .where(EventFilterRuleEntity.deleted_at.is_(None))
-                .order_by(EventFilterRuleEntity.priority.desc(), EventFilterRuleEntity.created_at.desc())
+                query
                 .offset(offset)
                 .limit(page_size)
             )
         )
-        total = self.db.scalar(
-            select(func.count()).select_from(EventFilterRuleEntity).where(EventFilterRuleEntity.deleted_at.is_(None))
-        )
+        total = self.db.scalar(count_query)
         return items, int(total or 0)
 
-    def list_active_rules(self) -> list[EventFilterRuleEntity]:
-        return list(
-            self.db.scalars(
-                select(EventFilterRuleEntity)
-                .where(
-                    EventFilterRuleEntity.deleted_at.is_(None),
-                    EventFilterRuleEntity.status == "active",
-                )
-                .order_by(EventFilterRuleEntity.priority.desc(), EventFilterRuleEntity.created_at.asc())
+    def list_active_rules(self, rule_scope: str | None = None) -> list[EventFilterRuleEntity]:
+        query = (
+            select(EventFilterRuleEntity)
+            .where(
+                EventFilterRuleEntity.deleted_at == None,
+                EventFilterRuleEntity.status == "active",
             )
+            .order_by(EventFilterRuleEntity.priority.desc(), EventFilterRuleEntity.created_at.asc())
+        )
+        if rule_scope is not None:
+            query = query.where(EventFilterRuleEntity.rule_scope == rule_scope)
+
+        return list(
+            self.db.scalars(query)
         )
 
     def get_by_id(self, rule_id: str) -> EventFilterRuleEntity | None:
@@ -71,8 +83,12 @@ class EventFilterRuleRepository:
             entity.name = payload.name
         if payload.level is not None:
             entity.level = payload.level
+        if payload.rule_scope is not None:
+            entity.rule_scope = payload.rule_scope
         if payload.filter_expression is not None:
             entity.filter_expression = payload.filter_expression
+        if payload.filter_prompts is not None:
+            entity.filter_prompts = payload.filter_prompts
         if payload.filter_config is not None:
             entity.filter_config = payload.filter_config
         if payload.priority is not None:

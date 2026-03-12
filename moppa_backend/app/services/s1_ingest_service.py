@@ -114,7 +114,7 @@ class S1IngestService:
                     events.append(self._map_source_row_to_event(row, source_system=source_system))
                 except ValueError:
                     malformed += 1
-            result, metrics = self._ingest_events(events)
+            result, metrics = self._ingest_events(events, rule_scope="db_import")
             result["fetched"] = len(rows)
             result["skipped_malformed"] = malformed
             result["pull_mode"] = "latest_bootstrap" if latest_mode else "incremental"
@@ -167,13 +167,17 @@ class S1IngestService:
             rules_applied_count=applied,
         )
 
-    def _ingest_events(self, events: list[S1EventInputModel]) -> tuple[dict[str, object], dict[str, object]]:
+    def _ingest_events(
+        self,
+        events: list[S1EventInputModel],
+        rule_scope: str | None = None,
+    ) -> tuple[dict[str, object], dict[str, object]]:
         accepted = 0
         duplicate = 0
         filtered = 0
         skipped = 0
         filtered_reason_stats: dict[str, int] = {}
-        active_rules = self.rule_service.list_active_rules()
+        active_rules = self.rule_service.list_active_rules(rule_scope=rule_scope)
 
         for item in events:
             if not self.data_source_repository.exists_active_source_system(item.source_system):

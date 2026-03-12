@@ -12,11 +12,11 @@ class EventFilterRuleService:
     def create(self, payload: EventFilterRuleCreateModel) -> EventFilterRuleEntity:
         return self.repository.create(payload)
 
-    def list_paginated(self, page: int, page_size: int) -> tuple[list[EventFilterRuleEntity], int]:
-        return self.repository.list_paginated(page, page_size)
+    def list_paginated(self, page: int, page_size: int, rule_scope: str | None = None) -> tuple[list[EventFilterRuleEntity], int]:
+        return self.repository.list_paginated(page, page_size, rule_scope)
 
-    def list_active_rules(self) -> list[EventFilterRuleEntity]:
-        return self.repository.list_active_rules()
+    def list_active_rules(self, rule_scope: str | None = None) -> list[EventFilterRuleEntity]:
+        return self.repository.list_active_rules(rule_scope)
 
     def get_by_id(self, rule_id: str) -> EventFilterRuleEntity | None:
         return self.repository.get_by_id(rule_id)

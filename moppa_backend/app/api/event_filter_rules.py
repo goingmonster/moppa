@@ -21,7 +21,9 @@ def to_item(entity: EventFilterRuleEntity) -> EventFilterRuleListItemModel:
         id=str(entity.id),
         name=entity.name,
         level=entity.level,
+        rule_scope=entity.rule_scope,
         filter_expression=entity.filter_expression,
+        filter_prompts=entity.filter_prompts,
         filter_config=entity.filter_config,
         priority=entity.priority,
         status=entity.status,
@@ -41,10 +43,11 @@ def create_rule(payload: EventFilterRuleCreateModel, db: Session = Depends(get_d
 def list_rules(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    rule_scope: str | None = Query(default=None, pattern="^(db_import|scrapy|document|use|other)$"),
     db: Session = Depends(get_db),
 ) -> EventFilterRulePaginationResponse:
     service = EventFilterRuleService(db)
-    rows, total = service.list_paginated(page=page, page_size=page_size)
+    rows, total = service.list_paginated(page=page, page_size=page_size, rule_scope=rule_scope)
     return EventFilterRulePaginationResponse(
         page=page,
         page_size=page_size,

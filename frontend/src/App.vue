@@ -170,7 +170,9 @@ interface FilterRuleItem {
   id: string
   name: string
   level: number
+  ruleScope: 'db_import' | 'scrapy' | 'document' | 'use' | 'other'
   filterExpression: string
+  filterPrompts: string[]
   filterConfig: Record<string, unknown>
   priority: number
   status: 'active' | 'inactive' | 'archived'
@@ -183,7 +185,9 @@ interface BackendFilterRuleItem {
   id: string
   name: string
   level: number
+  rule_scope: FilterRuleItem['ruleScope']
   filter_expression: string
+  filter_prompts: string[]
   filter_config: Record<string, unknown>
   priority: number
   status: FilterRuleItem['status']
@@ -225,6 +229,7 @@ interface BackendQuestionTemplateItem {
 }
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
+const filterRuleScopes: FilterRuleItem['ruleScope'][] = ['db_import', 'scrapy', 'document', 'use', 'other']
 
 const homeEvents = ref<EventItem[]>([
   {
@@ -544,8 +549,10 @@ const editFilterRuleDialogOpen = ref(false)
 const createFilterRuleForm = reactive({
   name: '',
   level: 1,
+  ruleScope: 'db_import' as FilterRuleItem['ruleScope'],
   filterExpression: 'keyword_exclude',
-  filterConfig: '{"keywords":["rumor"]}',
+  filterPrompts: [''],
+  filterConfigItems: [{ key: 'keywords', value: '["rumor"]' }],
   priority: 100,
   status: 'active' as FilterRuleItem['status'],
   version: 'v1.0',
@@ -554,8 +561,10 @@ const editFilterRuleForm = reactive({
   id: '',
   name: '',
   level: 1,
+  ruleScope: 'db_import' as FilterRuleItem['ruleScope'],
   filterExpression: 'keyword_exclude',
-  filterConfig: '{}',
+  filterPrompts: [''],
+  filterConfigItems: [{ key: '', value: '' }],
   priority: 0,
   status: 'active' as FilterRuleItem['status'],
   version: 'v1.0',
@@ -1280,8 +1289,10 @@ function openFilterRuleEdit(item: FilterRuleItem): void {
   editFilterRuleForm.id = item.id
   editFilterRuleForm.name = item.name
   editFilterRuleForm.level = item.level
+  editFilterRuleForm.ruleScope = item.ruleScope
   editFilterRuleForm.filterExpression = item.filterExpression
-  editFilterRuleForm.filterConfig = JSON.stringify(item.filterConfig, null, 2)
+  editFilterRuleForm.filterPrompts = item.filterPrompts.length > 0 ? [...item.filterPrompts] : ['']
+  editFilterRuleForm.filterConfigItems = toFilterConfigItems(item.filterConfig)
   editFilterRuleForm.priority = item.priority
   editFilterRuleForm.status = item.status
   editFilterRuleForm.version = item.version
@@ -1347,8 +1358,10 @@ async function submitCreateFilterRule(): Promise<void> {
     await sendJson('/event-filter-rules', 'POST', {
       name: createFilterRuleForm.name.trim(),
       level: createFilterRuleForm.level,
+      rule_scope: createFilterRuleForm.ruleScope,
       filter_expression: createFilterRuleForm.filterExpression.trim(),
-      filter_config: parseJsonObject(createFilterRuleForm.filterConfig),
+      filter_prompts: normalizePromptList(createFilterRuleForm.filterPrompts),
+      filter_config: buildFilterConfigObject(createFilterRuleForm.filterConfigItems),
       priority: createFilterRuleForm.priority,
       status: createFilterRuleForm.status,
       version: createFilterRuleForm.version.trim(),
@@ -1357,7 +1370,9 @@ async function submitCreateFilterRule(): Promise<void> {
     backendStatus.value = '过滤规则新增成功'
     createFilterRuleDialogOpen.value = false
     createFilterRuleForm.name = ''
-    createFilterRuleForm.filterConfig = '{"keywords":["rumor"]}'
+    createFilterRuleForm.ruleScope = 'db_import'
+    createFilterRuleForm.filterPrompts = ['']
+    createFilterRuleForm.filterConfigItems = [{ key: 'keywords', value: '["rumor"]' }]
   } catch {
     backendStatus.value = '过滤规则新增失败：请检查字段与后端接口'
   }
@@ -1368,8 +1383,10 @@ async function submitEditFilterRule(): Promise<void> {
     await sendJson(`/event-filter-rules/${editFilterRuleForm.id}`, 'PATCH', {
       name: editFilterRuleForm.name.trim(),
       level: editFilterRuleForm.level,
+      rule_scope: editFilterRuleForm.ruleScope,
       filter_expression: editFilterRuleForm.filterExpression.trim(),
-      filter_config: parseJsonObject(editFilterRuleForm.filterConfig),
+      filter_prompts: normalizePromptList(editFilterRuleForm.filterPrompts),
+      filter_config: buildFilterConfigObject(editFilterRuleForm.filterConfigItems),
       priority: editFilterRuleForm.priority,
       status: editFilterRuleForm.status,
       version: editFilterRuleForm.version.trim(),
@@ -1912,7 +1929,9 @@ function toFilterRuleItem(item: BackendFilterRuleItem): FilterRuleItem {
     id: item.id,
     name: item.name,
     level: item.level,
+    ruleScope: item.rule_scope,
     filterExpression: item.filter_expression,
+    filterPrompts: item.filter_prompts ?? [],
     filterConfig: item.filter_config ?? {},
     priority: item.priority,
     status: item.status,
@@ -1950,6 +1969,97 @@ function parseJsonObject(text: string): Record<string, unknown> {
     return parsed as Record<string, unknown>
   }
   throw new Error('JSON must be an object')
+}
+
+function normalizePromptList(prompts: string[]): string[] {
+  return prompts.map((item) => item.trim()).filter((item) => item.length > 0)
+}
+
+function toFilterConfigItems(config: Record<string, unknown>): Array<{ key: string; value: string }> {
+  const entries = Object.entries(config)
+  if (entries.length === 0) {
+    return [{ key: '', value: '' }]
+  }
+  return entries.map(([key, value]) => ({ key, value: formatFilterConfigValue(value) }))
+}
+
+function formatFilterConfigValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function parseFilterConfigValue(raw: string): unknown {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return ''
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function buildFilterConfigObject(items: Array<{ key: string; value: string }>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const item of items) {
+    const key = item.key.trim()
+    if (!key) {
+      continue
+    }
+    result[key] = parseFilterConfigValue(item.value)
+  }
+  return result
+}
+
+function addCreateFilterPromptRow(): void {
+  createFilterRuleForm.filterPrompts.push('')
+}
+
+function removeCreateFilterPromptRow(index: number): void {
+  createFilterRuleForm.filterPrompts.splice(index, 1)
+  if (createFilterRuleForm.filterPrompts.length === 0) {
+    createFilterRuleForm.filterPrompts.push('')
+  }
+}
+
+function addEditFilterPromptRow(): void {
+  editFilterRuleForm.filterPrompts.push('')
+}
+
+function removeEditFilterPromptRow(index: number): void {
+  editFilterRuleForm.filterPrompts.splice(index, 1)
+  if (editFilterRuleForm.filterPrompts.length === 0) {
+    editFilterRuleForm.filterPrompts.push('')
+  }
+}
+
+function addCreateFilterConfigRow(): void {
+  createFilterRuleForm.filterConfigItems.push({ key: '', value: '' })
+}
+
+function removeCreateFilterConfigRow(index: number): void {
+  createFilterRuleForm.filterConfigItems.splice(index, 1)
+  if (createFilterRuleForm.filterConfigItems.length === 0) {
+    createFilterRuleForm.filterConfigItems.push({ key: '', value: '' })
+  }
+}
+
+function addEditFilterConfigRow(): void {
+  editFilterRuleForm.filterConfigItems.push({ key: '', value: '' })
+}
+
+function removeEditFilterConfigRow(index: number): void {
+  editFilterRuleForm.filterConfigItems.splice(index, 1)
+  if (editFilterRuleForm.filterConfigItems.length === 0) {
+    editFilterRuleForm.filterConfigItems.push({ key: '', value: '' })
+  }
 }
 
 async function fetchSourceSystemOptions(): Promise<void> {
@@ -2986,6 +3096,7 @@ watch(backendOnline, (online) => {
               </label>
               <div class="tag-group">
                 <span class="badge">{{ item.filterExpression }}</span>
+                <span class="badge">{{ item.ruleScope }}</span>
                 <span class="badge">{{ item.status }}</span>
               </div>
             </div>
@@ -3190,6 +3301,8 @@ watch(backendOnline, (online) => {
           <p><strong>名称：</strong>{{ selectedFilterRule.name }}</p>
           <p><strong>等级：</strong>{{ selectedFilterRule.level }}</p>
           <p><strong>表达式：</strong>{{ selectedFilterRule.filterExpression }}</p>
+          <p><strong>规则归属：</strong>{{ selectedFilterRule.ruleScope }}</p>
+          <p><strong>提示词列表：</strong>{{ selectedFilterRule.filterPrompts.join(' | ') || '-' }}</p>
           <p><strong>配置：</strong>{{ JSON.stringify(selectedFilterRule.filterConfig) }}</p>
           <p><strong>优先级：</strong>{{ selectedFilterRule.priority }}</p>
           <p><strong>状态：</strong>{{ selectedFilterRule.status }}</p>
@@ -3209,6 +3322,12 @@ watch(backendOnline, (online) => {
         <div class="field-block"><label>名称</label><input v-model="createFilterRuleForm.name" /></div>
         <div class="field-block"><label>等级</label><input v-model.number="createFilterRuleForm.level" type="number" min="1" max="4" /></div>
         <div class="field-block">
+          <label>规则归属</label>
+          <select v-model="createFilterRuleForm.ruleScope">
+            <option v-for="scope in filterRuleScopes" :key="scope" :value="scope">{{ scope }}</option>
+          </select>
+        </div>
+        <div class="field-block">
           <label>表达式</label>
           <select v-model="createFilterRuleForm.filterExpression">
             <option value="keyword_include">keyword_include</option>
@@ -3218,7 +3337,27 @@ watch(backendOnline, (online) => {
             <option value="content_length_min">content_length_min</option>
           </select>
         </div>
-        <div class="field-block"><label>规则配置(JSON)</label><textarea v-model="createFilterRuleForm.filterConfig" rows="4"></textarea></div>
+        <div class="field-block">
+          <label>提示词列表（可空）</label>
+          <div v-for="(_, index) in createFilterRuleForm.filterPrompts" :key="`create-prompt-${index}`" class="prompt-row">
+            <input v-model="createFilterRuleForm.filterPrompts[index]" placeholder="输入一条提示词" />
+            <button class="action-btn" @click="removeCreateFilterPromptRow(index)">-</button>
+          </div>
+          <button class="action-btn" @click="addCreateFilterPromptRow">+ 添加提示词</button>
+        </div>
+        <div class="field-block">
+          <label>规则配置（键值，可空）</label>
+          <div
+            v-for="(item, index) in createFilterRuleForm.filterConfigItems"
+            :key="`create-config-${index}`"
+            class="prompt-row"
+          >
+            <input v-model="item.key" placeholder="key，如 keywords" />
+            <input v-model="item.value" placeholder="value，可写文本或 JSON（如 [rumor]）" />
+            <button class="action-btn" @click="removeCreateFilterConfigRow(index)">-</button>
+          </div>
+          <button class="action-btn" @click="addCreateFilterConfigRow">+ 添加配置项</button>
+        </div>
         <div class="field-block"><label>优先级</label><input v-model.number="createFilterRuleForm.priority" type="number" /></div>
         <div class="field-block">
           <label>状态</label>
@@ -3244,6 +3383,12 @@ watch(backendOnline, (online) => {
         <div class="field-block"><label>名称</label><input v-model="editFilterRuleForm.name" /></div>
         <div class="field-block"><label>等级</label><input v-model.number="editFilterRuleForm.level" type="number" min="1" max="4" /></div>
         <div class="field-block">
+          <label>规则归属</label>
+          <select v-model="editFilterRuleForm.ruleScope">
+            <option v-for="scope in filterRuleScopes" :key="scope" :value="scope">{{ scope }}</option>
+          </select>
+        </div>
+        <div class="field-block">
           <label>表达式</label>
           <select v-model="editFilterRuleForm.filterExpression">
             <option value="keyword_include">keyword_include</option>
@@ -3253,7 +3398,27 @@ watch(backendOnline, (online) => {
             <option value="content_length_min">content_length_min</option>
           </select>
         </div>
-        <div class="field-block"><label>规则配置(JSON)</label><textarea v-model="editFilterRuleForm.filterConfig" rows="4"></textarea></div>
+        <div class="field-block">
+          <label>提示词列表（可空）</label>
+          <div v-for="(_, index) in editFilterRuleForm.filterPrompts" :key="`edit-prompt-${index}`" class="prompt-row">
+            <input v-model="editFilterRuleForm.filterPrompts[index]" placeholder="输入一条提示词" />
+            <button class="action-btn" @click="removeEditFilterPromptRow(index)">-</button>
+          </div>
+          <button class="action-btn" @click="addEditFilterPromptRow">+ 添加提示词</button>
+        </div>
+        <div class="field-block">
+          <label>规则配置（键值，可空）</label>
+          <div
+            v-for="(item, index) in editFilterRuleForm.filterConfigItems"
+            :key="`edit-config-${index}`"
+            class="prompt-row"
+          >
+            <input v-model="item.key" placeholder="key，如 keywords" />
+            <input v-model="item.value" placeholder="value，可写文本或 JSON（如 [rumor]）" />
+            <button class="action-btn" @click="removeEditFilterConfigRow(index)">-</button>
+          </div>
+          <button class="action-btn" @click="addEditFilterConfigRow">+ 添加配置项</button>
+        </div>
         <div class="field-block"><label>优先级</label><input v-model.number="editFilterRuleForm.priority" type="number" /></div>
         <div class="field-block">
           <label>状态</label>

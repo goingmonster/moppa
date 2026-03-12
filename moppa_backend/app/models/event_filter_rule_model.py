@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 class EventFilterRuleCreateModel(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     level: int = Field(ge=1, le=4)
+    rule_scope: str = Field(default="db_import", pattern="^(db_import|scrapy|document|use|other)$")
     filter_expression: str = Field(min_length=1)
+    filter_prompts: list[str] = Field(default_factory=list)
     filter_config: dict[str, object] = Field(default_factory=dict)
     priority: int = 0
     status: str = Field(default="active", pattern="^(active|inactive|archived)$")
@@ -16,7 +18,9 @@ class EventFilterRuleCreateModel(BaseModel):
 class EventFilterRuleUpdateModel(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     level: int | None = Field(default=None, ge=1, le=4)
+    rule_scope: str | None = Field(default=None, pattern="^(db_import|scrapy|document|use|other)$")
     filter_expression: str | None = Field(default=None, min_length=1)
+    filter_prompts: list[str] | None = None
     filter_config: dict[str, object] | None = None
     priority: int | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive|archived)$")
@@ -27,7 +31,9 @@ class EventFilterRuleListItemModel(BaseModel):
     id: str
     name: str
     level: int
+    rule_scope: str = Field(pattern="^(db_import|scrapy|document|use|other)$")
     filter_expression: str
+    filter_prompts: list[str]
     filter_config: dict[str, object]
     priority: int
     status: str
