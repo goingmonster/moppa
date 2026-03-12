@@ -2018,6 +2018,10 @@ function buildFilterConfigObject(items: Array<{ key: string; value: string }>): 
   return result
 }
 
+function filterConfigDisplayEntries(config: Record<string, unknown>): Array<{ key: string; value: string }> {
+  return Object.entries(config).map(([key, value]) => ({ key, value: formatFilterConfigValue(value) }))
+}
+
 function addCreateFilterPromptRow(): void {
   createFilterRuleForm.filterPrompts.push('')
 }
@@ -3303,7 +3307,16 @@ watch(backendOnline, (online) => {
           <p><strong>表达式：</strong>{{ selectedFilterRule.filterExpression }}</p>
           <p><strong>规则归属：</strong>{{ selectedFilterRule.ruleScope }}</p>
           <p><strong>提示词列表：</strong>{{ selectedFilterRule.filterPrompts.join(' | ') || '-' }}</p>
-          <p><strong>配置：</strong>{{ JSON.stringify(selectedFilterRule.filterConfig) }}</p>
+          <div>
+            <strong>配置：</strong>
+            <div v-if="filterConfigDisplayEntries(selectedFilterRule.filterConfig).length === 0">-</div>
+            <div
+              v-for="(entry, index) in filterConfigDisplayEntries(selectedFilterRule.filterConfig)"
+              :key="`detail-config-${index}`"
+            >
+              {{ entry.key }} = {{ entry.value }}
+            </div>
+          </div>
           <p><strong>优先级：</strong>{{ selectedFilterRule.priority }}</p>
           <p><strong>状态：</strong>{{ selectedFilterRule.status }}</p>
           <p><strong>版本：</strong>{{ selectedFilterRule.version }}</p>
