@@ -1925,10 +1925,21 @@ function levelToNumber(value: Level): number {
 }
 
 function makeTraceId(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+    return cryptoApi.randomUUID()
   }
-  return `${Date.now()}-${Math.random()}`
+  if (cryptoApi && typeof cryptoApi.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16)
+    cryptoApi.getRandomValues(bytes)
+    const byte6 = bytes[6] ?? 0
+    const byte8 = bytes[8] ?? 0
+    bytes[6] = (byte6 & 0x0f) | 0x40
+    bytes[8] = (byte8 & 0x3f) | 0x80
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+  }
+  return '00000000-0000-4000-8000-000000000000'
 }
 
 function toEventItem(item: BackendEventItem): EventItem {
