@@ -54,6 +54,41 @@ class QuestionEventEntity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CommunityPredictionEntity(Base):
+    __tablename__ = "community_prediction"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    question_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    prediction_content: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(nullable=True)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FeedbackEntity(Base):
+    __tablename__ = "feedback"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    feedback_type: Mapped[str] = mapped_column(String(20))
+    target_type: Mapped[str] = mapped_column(String(20))
+    target_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    user_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    content: Mapped[str] = mapped_column(Text)
+    attachments: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), server_default=text("'open'"))
+    priority: Mapped[str] = mapped_column(String(20), server_default=text("'normal'"))
+    assigned_to: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class TaskExecutionEntity(Base):
     __tablename__ = "task_execution"
 

@@ -235,6 +235,50 @@ interface BackendQuestionTemplateItem {
   updated_at: string
 }
 
+interface CommunityPredictionItem {
+  id: string
+  questionId: string
+  userId: string
+  username: string
+  predictionContent: string
+  confidence: number | null
+  reasoning: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface BackendCommunityPredictionItem {
+  id: string
+  question_id: string
+  user_id: string
+  username: string
+  prediction_content: string
+  confidence: number | null
+  reasoning: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface QuestionCommentItem {
+  id: string
+  questionId: string
+  userId: string
+  username: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface BackendQuestionCommentItem {
+  id: string
+  question_id: string
+  user_id: string
+  username: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
 const filterRuleScopes: FilterRuleItem['ruleScope'][] = ['db_import', 'scrapy', 'document', 'use', 'other']
 const eventManagePageSizeOptions = [5, 10, 20, 50, 100]
@@ -449,6 +493,13 @@ const questionFeedLoading = ref(false)
 const questionFeedHasMore = ref(true)
 const selectedManageQuestionIds = ref<string[]>([])
 const manageDetailQuestion = ref<QuestionItem | null>(null)
+const questionPredictions = ref<Record<string, CommunityPredictionItem[]>>({})
+const questionComments = ref<Record<string, QuestionCommentItem[]>>({})
+const questionInteractionLoading = ref(false)
+const predictionSubmitting = ref(false)
+const commentSubmitting = ref(false)
+const predictionForm = reactive({ predictionContent: '', confidence: '', reasoning: '' })
+const commentDraft = ref('')
 const tasks = ref<TaskItem[]>([])
 const taskManagePage = ref(1)
 const taskManagePageSize = ref(10)
@@ -636,6 +687,28 @@ const allKnownEvents = computed(() => {
   }
   return Array.from(map.values())
 })
+const activeQuestionPredictions = computed(() => {
+  const questionId = manageDetailQuestion.value?.id
+  if (!questionId) {
+    return []
+  }
+  return questionPredictions.value[questionId] ?? []
+})
+const activeQuestionComments = computed(() => {
+  const questionId = manageDetailQuestion.value?.id
+  if (!questionId) {
+    return []
+  }
+  return questionComments.value[questionId] ?? []
+})
+const myCurrentPrediction = computed(() => {
+  const userId = authUser.value?.id
+  if (!userId) {
+    return null
+  }
+  return activeQuestionPredictions.value.find((item) => item.userId === userId) ?? null
+})
+const canCurrentQuestionInteract = computed(() => canInteractWithQuestion(manageDetailQuestion.value))
 const localFilteredKnownEventsForQuestion = computed(() => {
   const passedEvents = allKnownEvents.value.filter((item) => item.filterStatus === 'passed')
   const keyword = questionEventSearch.value.trim().toLowerCase()
@@ -794,6 +867,8 @@ function openManageQuestionDetail(questionItem: QuestionItem): void {
   selectedQuestionId.value = questionItem.id
   manageDetailQuestion.value = questionItem
   void ensureQuestionEventOptionsByIds(questionItem.eventIds)
+  commentDraft.value = ''
+  void loadQuestionInteractions(questionItem.id)
   questionDetailDialogOpen.value = true
 }
 
@@ -2144,6 +2219,51 @@ function toQuestionTemplateItem(item: BackendQuestionTemplateItem): QuestionTemp
   }
 }
 
+function toCommunityPredictionItem(item: BackendCommunityPredictionItem): CommunityPredictionItem {
+  return {
+    id: item.id,
+    questionId: item.question_id,
+    userId: item.user_id,
+    username: item.username,
+    predictionContent: item.prediction_content,
+    confidence: item.confidence,
+    reasoning: item.reasoning,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }
+}
+
+function toQuestionCommentItem(item: BackendQuestionCommentItem): QuestionCommentItem {
+  return {
+    id: item.id,
+    questionId: item.question_id,
+    userId: item.user_id,
+    username: item.username,
+    content: item.content,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+  }
+}
+
+function isQuestionCollecting(question: QuestionItem): boolean {
+  return question.status === 'collecting'
+}
+
+function isQuestionBeforeDeadline(question: QuestionItem): boolean {
+  const deadline = new Date(question.deadline)
+  if (Number.isNaN(deadline.getTime())) {
+    return false
+  }
+  return deadline.getTime() > Date.now()
+}
+
+function canInteractWithQuestion(question: QuestionItem | null): boolean {
+  if (!question) {
+    return false
+  }
+  return isQuestionCollecting(question) && isQuestionBeforeDeadline(question)
+}
+
 function parseJsonObject(text: string): Record<string, unknown> {
   const trimmed = text.trim()
   if (!trimmed) {
@@ -2471,6 +2591,113 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
     shouldAttachAuth,
     true,
   )
+}
+
+function applyPredictionFormFromMine(questionId: string): void {
+  const mine = (questionPredictions.value[questionId] ?? []).find((item) => item.userId === authUser.value?.id)
+  predictionForm.predictionContent = mine?.predictionContent ?? ''
+  predictionForm.confidence = mine?.confidence !== null && mine?.confidence !== undefined ? String(mine.confidence) : ''
+  predictionForm.reasoning = mine?.reasoning ?? ''
+}
+
+async function loadQuestionInteractions(questionId: string): Promise<void> {
+  if (!backendOnline.value || !isAuthenticated.value) {
+    return
+  }
+  questionInteractionLoading.value = true
+  try {
+    const [predictionResult, commentResult] = await Promise.all([
+      fetchJson<{ items: BackendCommunityPredictionItem[] }>(
+        `/community-predictions?question_id=${encodeURIComponent(questionId)}`,
+      ),
+      fetchJson<{ items: BackendQuestionCommentItem[] }>(`/question-comments?question_id=${encodeURIComponent(questionId)}`),
+    ])
+    questionPredictions.value = {
+      ...questionPredictions.value,
+      [questionId]: predictionResult.items.map(toCommunityPredictionItem),
+    }
+    questionComments.value = {
+      ...questionComments.value,
+      [questionId]: commentResult.items.map(toQuestionCommentItem),
+    }
+    applyPredictionFormFromMine(questionId)
+  } catch {
+    backendStatus.value = '问题互动加载失败：请检查预测和评论接口'
+  } finally {
+    questionInteractionLoading.value = false
+  }
+}
+
+async function submitMyPrediction(): Promise<void> {
+  const question = manageDetailQuestion.value
+  if (!question || !backendOnline.value || !isAuthenticated.value) {
+    return
+  }
+  if (!canInteractWithQuestion(question)) {
+    backendStatus.value = '仅在问题收集中且截止前可提交或修改预测'
+    return
+  }
+  const predictionContent = predictionForm.predictionContent.trim()
+  if (!predictionContent) {
+    backendStatus.value = '预测内容不能为空'
+    return
+  }
+  let parsedConfidence: number | null = null
+  if (predictionForm.confidence.trim()) {
+    const numeric = Number(predictionForm.confidence)
+    if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) {
+      backendStatus.value = '置信度必须在 0-100 之间'
+      return
+    }
+    parsedConfidence = Number(numeric.toFixed(2))
+  }
+
+  predictionSubmitting.value = true
+  try {
+    await sendJson<BackendCommunityPredictionItem>('/community-predictions', 'POST', {
+      question_id: question.id,
+      prediction_content: predictionContent,
+      confidence: parsedConfidence,
+      reasoning: predictionForm.reasoning.trim() || null,
+    })
+    await loadQuestionInteractions(question.id)
+    pushToast('预测已保存', 'success')
+  } catch {
+    backendStatus.value = '预测提交失败：请确认问题状态、截止时间与权限'
+  } finally {
+    predictionSubmitting.value = false
+  }
+}
+
+async function submitQuestionComment(): Promise<void> {
+  const question = manageDetailQuestion.value
+  if (!question || !backendOnline.value || !isAuthenticated.value) {
+    return
+  }
+  if (!canInteractWithQuestion(question)) {
+    backendStatus.value = '仅在问题收集中且截止前可发表评论'
+    return
+  }
+  const content = commentDraft.value.trim()
+  if (!content) {
+    backendStatus.value = '评论内容不能为空'
+    return
+  }
+
+  commentSubmitting.value = true
+  try {
+    await sendJson<BackendQuestionCommentItem>('/question-comments', 'POST', {
+      question_id: question.id,
+      content,
+    })
+    commentDraft.value = ''
+    await loadQuestionInteractions(question.id)
+    pushToast('评论已发布', 'success')
+  } catch {
+    backendStatus.value = '评论发布失败：请确认问题状态、截止时间与权限'
+  } finally {
+    commentSubmitting.value = false
+  }
 }
 
 async function bootstrapAuthSession(): Promise<void> {
@@ -2931,6 +3158,29 @@ async function hydrateFromBackend(): Promise<void> {
     backendOnline.value = false
   }
 }
+
+watch(
+  () => manageDetailQuestion.value?.id,
+  (questionId) => {
+    if (!questionId) {
+      predictionForm.predictionContent = ''
+      predictionForm.confidence = ''
+      predictionForm.reasoning = ''
+      commentDraft.value = ''
+      return
+    }
+    applyPredictionFormFromMine(questionId)
+  },
+)
+
+watch(myCurrentPrediction, (mine) => {
+  if (!mine) {
+    return
+  }
+  predictionForm.predictionContent = mine.predictionContent
+  predictionForm.confidence = mine.confidence !== null && mine.confidence !== undefined ? String(mine.confidence) : ''
+  predictionForm.reasoning = mine.reasoning ?? ''
+})
 
 onMounted(() => {
   void (async () => {
@@ -3875,6 +4125,88 @@ watch(backendStatus, (status, prev) => {
           <p><strong>答案范围：</strong>{{ manageDetailQuestion.answerSpace || '未填写' }}</p>
           <p><strong>假设：</strong>{{ manageDetailQuestion.hypothesis }}</p>
           <p><strong>真实结果：</strong>{{ manageDetailQuestion.groundTruth }}</p>
+        </div>
+
+        <div class="field-block">
+          <label>社区预测</label>
+          <small>
+            {{ canCurrentQuestionInteract ? '当前可预测：问题收集中且未到截止时间' : '当前不可预测：仅收集中且截止前可提交或修改' }}
+          </small>
+          <div v-if="questionInteractionLoading" class="item-subtle">互动数据加载中...</div>
+          <div v-else-if="activeQuestionPredictions.length === 0" class="item-subtle">暂无社区预测</div>
+          <div v-else class="question-event-multi-select">
+            <p v-for="item in activeQuestionPredictions" :key="`prediction-${item.id}`" class="item-meta">
+              <strong>{{ item.username }}</strong>
+              <span v-if="item.userId === authUser?.id">（我的预测）</span>
+              ：{{ item.predictionContent }}
+              <span v-if="item.confidence !== null">（置信度 {{ item.confidence }}）</span>
+            </p>
+          </div>
+          <div class="field-block">
+            <label>我的预测内容</label>
+            <textarea
+              v-model="predictionForm.predictionContent"
+              rows="3"
+              :disabled="!canCurrentQuestionInteract || predictionSubmitting"
+              placeholder="输入你对该问题的预测"
+            ></textarea>
+          </div>
+          <div class="dialog-inline-grid">
+            <div class="field-block">
+              <label>置信度（0-100，可空）</label>
+              <input
+                v-model="predictionForm.confidence"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                :disabled="!canCurrentQuestionInteract || predictionSubmitting"
+              />
+            </div>
+            <div class="field-block">
+              <label>预测依据（可空）</label>
+              <input
+                v-model="predictionForm.reasoning"
+                :disabled="!canCurrentQuestionInteract || predictionSubmitting"
+                placeholder="可填写简短理由"
+              />
+            </div>
+          </div>
+          <div class="action-row action-right">
+            <button
+              class="action-btn"
+              :disabled="!canCurrentQuestionInteract || predictionSubmitting"
+              @click="submitMyPrediction"
+            >
+              {{ predictionSubmitting ? '提交中...' : '保存我的预测' }}
+            </button>
+          </div>
+        </div>
+
+        <div class="field-block">
+          <label>问题评论</label>
+          <div v-if="questionInteractionLoading" class="item-subtle">评论加载中...</div>
+          <div v-else-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</div>
+          <div v-else class="question-event-multi-select">
+            <p v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`" class="item-meta">
+              <strong>{{ comment.username }}</strong>：{{ comment.content }}
+            </p>
+          </div>
+          <textarea
+            v-model="commentDraft"
+            rows="2"
+            :disabled="!canCurrentQuestionInteract || commentSubmitting"
+            placeholder="输入评论内容"
+          ></textarea>
+          <div class="action-row action-right">
+            <button
+              class="action-btn"
+              :disabled="!canCurrentQuestionInteract || commentSubmitting"
+              @click="submitQuestionComment"
+            >
+              {{ commentSubmitting ? '发布中...' : '发布评论' }}
+            </button>
+          </div>
         </div>
       </section>
     </div>

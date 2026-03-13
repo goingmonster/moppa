@@ -1,0 +1,98 @@
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from sqlalchemy.orm import Session
+
+from app.core import ApiError
+from app.db.models import CommunityPredictionEntity
+from app.models.community_prediction_model import CommunityPredictionCreateModel, CommunityPredictionUpdateModel
+from app.repositories.community_prediction_repository import CommunityPredictionRepository
+from app.repositories.question_repository import QuestionRepository
+
+
+class CommunityPredictionService:
+    def __init__(self, db: Session) -> None:
+        self.repository = CommunityPredictionRepository(db)
+        self.question_repository = QuestionRepository(db)
+
+    def list_by_question(self, question_id: str) -> list[tuple[CommunityPredictionEntity, str]]:
+        question_uuid = self._parse_uuid(question_id, "question_id")
+        return self.repository.list_by_question(question_uuid)
+
+    def upsert_for_user(self, payload: CommunityPredictionCreateModel, user_id: UUID) -> CommunityPredictionEntity:
+        question_uuid = self._parse_uuid(payload.question_id, "question_id")
+        question = self.question_repository.get_by_id(str(question_uuid))
+        if question is None:
+            raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
+        self._validate_question_open(question.status, question.deadline)
+
+        prediction_content = payload.prediction_content.strip()
+        if not prediction_content:
+            raise ApiError(status_code=422, code="INVALID_PREDICTION_CONTENT", message="Prediction content cannot be empty")
+        reasoning = payload.reasoning.strip() if payload.reasoning is not None else None
+        existing = self.repository.get_by_question_user(question_uuid, user_id)
+        if existing is None:
+            return self.repository.create(
+                question_id=question_uuid,
+                user_id=user_id,
+                prediction_content=prediction_content,
+                confidence=payload.confidence,
+                reasoning=reasoning,
+                trace_id=uuid4(),
+            )
+
+        return self.repository.update(
+            existing,
+            prediction_content=prediction_content,
+            confidence=payload.confidence,
+            reasoning=reasoning,
+        )
+
+    def update_mine(self, prediction_id: str, payload: CommunityPredictionUpdateModel, user_id: UUID) -> CommunityPredictionEntity:
+        prediction_uuid = self._parse_uuid(prediction_id, "prediction_id")
+        entity = self.repository.get_by_id(prediction_uuid)
+        if entity is None:
+            raise ApiError(status_code=404, code="PREDICTION_NOT_FOUND", message="Prediction not found")
+        if entity.user_id != user_id:
+            raise ApiError(status_code=403, code="FORBIDDEN", message="You can only edit your own prediction")
+
+        question = self.question_repository.get_by_id(str(entity.question_id))
+        if question is None:
+            raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
+        self._validate_question_open(question.status, question.deadline)
+
+        next_content = payload.prediction_content.strip() if payload.prediction_content is not None else entity.prediction_content
+        if not next_content:
+            raise ApiError(status_code=422, code="INVALID_PREDICTION_CONTENT", message="Prediction content cannot be empty")
+        next_reasoning = payload.reasoning.strip() if payload.reasoning is not None else entity.reasoning
+        next_confidence = payload.confidence if payload.confidence is not None else entity.confidence
+
+        return self.repository.update(
+            entity,
+            prediction_content=next_content,
+            confidence=next_confidence,
+            reasoning=next_reasoning,
+        )
+
+    @staticmethod
+    def _validate_question_open(status: str, deadline: datetime) -> None:
+        normalized = status.strip()
+        if normalized not in {"draft", "collecting"}:
+            raise ApiError(status_code=409, code="QUESTION_NOT_COLLECTING", message="Question is not collecting predictions")
+
+        now = datetime.now(timezone.utc)
+        effective_deadline = deadline if deadline.tzinfo is not None else deadline.replace(tzinfo=timezone.utc)
+        if effective_deadline <= now:
+            raise ApiError(status_code=409, code="QUESTION_DEADLINE_PASSED", message="Question deadline has passed")
+
+    @staticmethod
+    def _parse_uuid(raw: str, field_name: str) -> UUID:
+        try:
+            return UUID(raw)
+        except ValueError as exc:
+            raise ApiError(
+                status_code=422,
+                code="INVALID_UUID",
+                message=f"{field_name} must be UUID",
+                details={"field": field_name, "value": raw},
+            ) from exc
