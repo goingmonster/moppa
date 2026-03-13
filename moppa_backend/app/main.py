@@ -13,6 +13,10 @@ from app.api.tasks import router as tasks_router
 from app.config import settings
 from app.core import register_exception_handlers
 from app.jobs.s1_scheduler import start_s1_scheduler, stop_s1_scheduler
+from app.logging_config import configure_logging
+
+
+configure_logging(settings.log_level)
 
 
 def root() -> dict[str, str]:

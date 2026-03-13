@@ -11,6 +11,7 @@ from app.models.s1_ingest_model import (
     S1PushRequestModel,
     S1TaskResponseModel,
 )
+from app.services.s1_auto_review_service import S1AutoReviewService
 from app.services.s1_ingest_service import S1IngestService
 
 
@@ -27,6 +28,12 @@ def push_events(payload: S1PushRequestModel, db: Session = Depends(get_db)) -> S
 def pull_now(payload: S1PullNowRequestModel, db: Session = Depends(get_db)) -> S1TaskResponseModel:
     service = S1IngestService(db)
     return service.run_pull_job(payload)
+
+
+@router.post("/jobs/auto-review-now", summary="Trigger S1 auto review job now")
+def auto_review_now(db: Session = Depends(get_db)) -> S1TaskResponseModel:
+    service = S1AutoReviewService(db)
+    return service.run_review_job(force_run=True)
 
 
 @router.get("/jobs/{task_id}", summary="Get S1 job detail")

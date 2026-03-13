@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import BigInteger, DateTime, Integer, String, Text, func, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,8 +20,12 @@ class EventEntity(Base):
     source_system: Mapped[str] = mapped_column(String(100))
     credibility_level: Mapped[int] = mapped_column(Integer)
     event_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    metadata_: Mapped[dict[str, object]] = mapped_column("metadata", JSONB, server_default=text("'{}'::jsonb"))
     filter_status: Mapped[str] = mapped_column(String(20))
+    filter_reasons: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
     trace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

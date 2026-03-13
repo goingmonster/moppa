@@ -39,6 +39,7 @@ def to_event_list_item(entity: EventEntity) -> EventListItemModel:
         source_system=entity.source_system,
         credibility_level=entity.credibility_level,
         event_time=entity.event_time.isoformat(),
+        tags=entity.tags,
         filter_status=entity.filter_status,
         trace_id=str(entity.trace_id),
     )

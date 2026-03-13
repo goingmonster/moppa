@@ -22,6 +22,7 @@ class EventListItemModel(BaseModel):
     source_system: str
     credibility_level: int
     event_time: str
+    tags: list[str]
     filter_status: str
     trace_id: str
 

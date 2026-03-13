@@ -10,6 +10,7 @@ interface EventItem {
   title: string
   theater: string
   summary: string
+  tags: string[]
   severity: 'low' | 'medium' | 'high'
   filterStatus: string
   timestamp: string
@@ -75,6 +76,7 @@ interface BackendEventItem {
   source_system: string
   credibility_level: number
   event_time: string
+  tags: string[]
   filter_status: string
   trace_id: string
 }
@@ -239,6 +241,7 @@ const homeEvents = ref<EventItem[]>([
     title: '边境补给车队改道异常',
     theater: '边境 A7 扇区',
     summary: '在争议走廊附近监测到补给车队改道。',
+    tags: ['大国博弈与战略竞争'],
     severity: 'high',
     filterStatus: 'passed',
     timestamp: '2026-03-08T05:20:00Z',
@@ -249,6 +252,7 @@ const homeEvents = ref<EventItem[]>([
     title: '未标绘海底通道声呐异常',
     theater: '沿海 C2 网格',
     summary: '未标绘海底通道出现异常声呐回波。',
+    tags: [],
     severity: 'medium',
     filterStatus: 'pending',
     timestamp: '2026-03-09T13:15:00Z',
@@ -259,6 +263,7 @@ const homeEvents = ref<EventItem[]>([
     title: '极地中继丢包与干扰并发',
     theater: '极地中继枢纽',
     summary: '卫星丢包与风暴前沿及干扰信号同时出现。',
+    tags: ['亚太军事与安全'],
     severity: 'high',
     filterStatus: 'filtered',
     timestamp: '2026-03-10T01:45:00Z',
@@ -502,6 +507,7 @@ const selectedManageTaskIds = ref<string[]>([])
 const createTaskDialogOpen = ref(false)
 const taskDetailDialogOpen = ref(false)
 const triggerPullDialogOpen = ref(false)
+const autoReviewProcessing = ref(false)
 const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
 const createTaskForm = reactive({ taskType: 's1_ingest_pull', idempotencyKey: '', traceId: '' })
@@ -1133,6 +1139,28 @@ async function triggerPullNow(): Promise<void> {
     }
   } catch {
     backendStatus.value = '烽火事件拉取触发失败：请检查后端接口或参数格式'
+  }
+}
+
+async function triggerAutoReviewNow(): Promise<void> {
+  if (!backendOnline.value) {
+    backendStatus.value = '后端离线：无法触发自动评审'
+    return
+  }
+
+  autoReviewProcessing.value = true
+  try {
+    const result = await sendJson<S1TaskResponse>('/s1/jobs/auto-review-now', 'POST', {})
+    backendStatus.value = `自动评审已触发：${result.task_id}`
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = '自动评审触发失败：请检查后端接口或参数格式'
+  } finally {
+    autoReviewProcessing.value = false
   }
 }
 
@@ -1949,6 +1977,7 @@ function toEventItem(item: BackendEventItem): EventItem {
     title: item.title,
     theater: item.source_system,
     summary: item.content,
+    tags: item.tags ?? [],
     severity: severityFromCredibility(item.credibility_level),
     filterStatus: item.filter_status,
     timestamp: item.event_time,
@@ -2353,6 +2382,7 @@ async function createEvent(): Promise<void> {
         title,
         theater,
         summary,
+        tags: [],
         severity: draftEvent.severity,
         filterStatus: 'mock_new',
         timestamp: new Date().toISOString(),
@@ -2747,6 +2777,11 @@ watch(backendOnline, (online) => {
               </div>
               <p>{{ eventItem.theater }}</p>
               <small>{{ eventItem.summary }}</small>
+              <div v-if="eventItem.tags.length > 0" class="tag-group">
+                <span v-for="tag in eventItem.tags" :key="`home-tag-${eventItem.id}-${tag}`" class="badge">
+                  {{ tag }}
+                </span>
+              </div>
               <span class="time">{{ formatDate(eventItem.timestamp) }}</span>
               <div class="action-row action-right">
                 <button class="action-btn mini-btn" @click.stop="openHomeDetail(eventItem)">详情</button>
@@ -2946,6 +2981,11 @@ watch(backendOnline, (online) => {
             </div>
             <p>{{ eventItem.theater }}</p>
             <small>{{ eventItem.summary }}</small>
+            <div v-if="eventItem.tags.length > 0" class="tag-group">
+              <span v-for="tag in eventItem.tags" :key="`manage-tag-${eventItem.id}-${tag}`" class="badge">
+                {{ tag }}
+              </span>
+            </div>
             <div class="action-row">
               <button class="action-btn" @click.stop="openEventEdit(eventItem)">编辑</button>
             </div>
@@ -3087,6 +3127,9 @@ watch(backendOnline, (online) => {
         </div>
         <div class="action-row">
           <button class="action-btn" @click="triggerPullDialogOpen = true; void fetchSourceSystemOptions()">拉取烽火事件</button>
+          <button class="action-btn" :disabled="autoReviewProcessing" @click="triggerAutoReviewNow">
+            {{ autoReviewProcessing ? '评审中...' : '一键评审' }}
+          </button>
           <button class="action-btn" @click="createTaskDialogOpen = true">新增任务</button>
           <button class="action-btn" @click="toggleSelectAllTasksOnPage">
             {{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}
@@ -3578,6 +3621,7 @@ watch(backendOnline, (online) => {
           <p><strong>来源系统：</strong>{{ homeDetailEvent.theater }}</p>
           <p><strong>可信等级：</strong>{{ severityLabel[homeDetailEvent.severity] }}</p>
           <p><strong>filter_status：</strong>{{ homeDetailEvent.filterStatus }}</p>
+          <p><strong>tags：</strong>{{ homeDetailEvent.tags.length > 0 ? homeDetailEvent.tags.join(', ') : '-' }}</p>
           <p><strong>事件时间：</strong>{{ formatDate(homeDetailEvent.timestamp) }}</p>
           <p><strong>内容：</strong>{{ homeDetailEvent.summary }}</p>
         </div>
@@ -3600,6 +3644,7 @@ watch(backendOnline, (online) => {
           <p><strong>来源系统：</strong>{{ manageDetailEvent.theater }}</p>
           <p><strong>可信等级：</strong>{{ severityLabel[manageDetailEvent.severity] }}</p>
           <p><strong>filter_status：</strong>{{ manageDetailEvent.filterStatus }}</p>
+          <p><strong>tags：</strong>{{ manageDetailEvent.tags.length > 0 ? manageDetailEvent.tags.join(', ') : '-' }}</p>
           <p><strong>事件时间：</strong>{{ formatDate(manageDetailEvent.timestamp) }}</p>
           <p><strong>内容：</strong>{{ manageDetailEvent.summary }}</p>
         </div>

@@ -44,6 +44,19 @@ class EventRepository:
         )
         return items, int(total or 0)
 
+    def list_pending_for_auto_review(self, limit: int) -> list[EventEntity]:
+        return list(
+            self.db.scalars(
+                select(EventEntity)
+                .where(
+                    EventEntity.deleted_at.is_(None),
+                    EventEntity.filter_status == "pending",
+                )
+                .order_by(EventEntity.created_at.asc())
+                .limit(limit)
+            )
+        )
+
     def search_paginated(
         self,
         keyword: str,
@@ -155,6 +168,39 @@ class EventRepository:
             ),
             {
                 "status": status,
+                "reasons": reasons,
+                "updated_at": datetime.now(timezone.utc),
+                "event_id": str(event_id),
+            },
+        )
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
+
+    def apply_auto_review_result(
+        self,
+        event_id: UUID,
+        status: str,
+        tags: list[str],
+        reasons: list[str],
+    ) -> EventEntity | None:
+        entity = self.db.get(EventEntity, event_id)
+        if entity is None:
+            return None
+        _ = self.db.execute(
+            text(
+                """
+                UPDATE event
+                SET filter_status = :status,
+                    tags = :tags,
+                    filter_reasons = :reasons,
+                    updated_at = :updated_at
+                WHERE id = :event_id
+                """
+            ),
+            {
+                "status": status,
+                "tags": tags,
                 "reasons": reasons,
                 "updated_at": datetime.now(timezone.utc),
                 "event_id": str(event_id),
