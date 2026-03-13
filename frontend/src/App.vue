@@ -6,11 +6,12 @@ import ManageFilterRulesPanel from './components/ManageFilterRulesPanel.vue'
 import ManageQuestionsPanel from './components/ManageQuestionsPanel.vue'
 import ManageTasksPanel from './components/ManageTasksPanel.vue'
 import ManageTemplatesPanel from './components/ManageTemplatesPanel.vue'
+import QuestionFeedPanel from './components/QuestionFeedPanel.vue'
 import SidebarNav from './components/SidebarNav.vue'
 import TopbarPanel from './components/TopbarPanel.vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
-type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
+type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
 type ToastKind = 'success' | 'error' | 'info'
 
 interface ToastItem {
@@ -418,6 +419,11 @@ const questionManageSearchSeq = ref(0)
 let questionManageSearchTimer: number | undefined
 const manageQuestions = ref<QuestionItem[]>([])
 const questionManageTotal = ref(questions.value.length)
+const questionFeedItems = ref<QuestionItem[]>([])
+const questionFeedPage = ref(0)
+const questionFeedTotal = ref(0)
+const questionFeedLoading = ref(false)
+const questionFeedHasMore = ref(true)
 const selectedManageQuestionIds = ref<string[]>([])
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const tasks = ref<TaskItem[]>([])
@@ -2495,6 +2501,50 @@ async function fetchManageQuestions(page: number): Promise<void> {
   }
 }
 
+function resetQuestionFeed(): void {
+  questionFeedItems.value = []
+  questionFeedPage.value = 0
+  questionFeedTotal.value = 0
+  questionFeedHasMore.value = true
+}
+
+async function loadQuestionFeedNextPage(): Promise<void> {
+  if (questionFeedLoading.value || !questionFeedHasMore.value) {
+    return
+  }
+
+  questionFeedLoading.value = true
+  try {
+    const nextPage = questionFeedPage.value + 1
+    if (!backendOnline.value) {
+      const source = [...questions.value].sort(
+        (a, b) => new Date(b.deadline).getTime() - new Date(a.deadline).getTime(),
+      )
+      const start = (nextPage - 1) * 10
+      const batch = source.slice(start, start + 10)
+      questionFeedItems.value = [...questionFeedItems.value, ...batch]
+      questionFeedPage.value = nextPage
+      questionFeedTotal.value = source.length
+      questionFeedHasMore.value = questionFeedItems.value.length < source.length && batch.length > 0
+      return
+    }
+
+    const pageData = await fetchJson<BackendPage<BackendQuestionItem>>(
+      `/questions/search?keyword=&page=${nextPage}&page_size=10`,
+    )
+    const batch = pageData.items.map(toQuestionItem)
+    questionFeedItems.value = [...questionFeedItems.value, ...batch]
+    questionFeedPage.value = nextPage
+    questionFeedTotal.value = pageData.total
+    questionFeedHasMore.value = questionFeedItems.value.length < pageData.total && batch.length > 0
+  } catch {
+    backendStatus.value = '问题社区加载失败：请检查后端问题搜索接口'
+    questionFeedHasMore.value = false
+  } finally {
+    questionFeedLoading.value = false
+  }
+}
+
 async function createEvent(): Promise<void> {
   try {
     const title = draftEvent.title.trim()
@@ -2740,6 +2790,10 @@ watch(currentView, (view) => {
       selectedManageQuestionIds.value = []
     }
   }
+  if (view === 'questionStream') {
+    resetQuestionFeed()
+    void loadQuestionFeedNextPage()
+  }
   if (view === 'templates') {
     if (backendOnline.value) {
       void fetchTemplates(1)
@@ -2864,6 +2918,10 @@ watch(backendOnline, (online) => {
   }
   if (online && currentView.value === 'questions') {
     void fetchManageQuestions(1)
+  }
+  if (currentView.value === 'questionStream') {
+    resetQuestionFeed()
+    void loadQuestionFeedNextPage()
   }
   if (online && currentView.value === 'templates') {
     void fetchTemplates(1)
@@ -3044,6 +3102,17 @@ watch(backendStatus, (status, prev) => {
       @go-page="goManageQuestionPage"
       @update:jump-page="questionManageJumpPage = $event"
       @jump-to-page="jumpToQuestionPageFromInput"
+    />
+
+    <QuestionFeedPanel
+      v-if="currentView === 'questionStream'"
+      :items="questionFeedItems"
+      :loading="questionFeedLoading"
+      :has-more="questionFeedHasMore"
+      :backend-online="backendOnline"
+      :all-known-events="allKnownEvents"
+      @load-more="loadQuestionFeedNextPage"
+      @open-question="openManageQuestionDetail"
     />
 
     <ManageTemplatesPanel

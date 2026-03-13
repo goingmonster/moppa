@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
+type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
 
 defineProps<{
   currentView: AppView
@@ -24,6 +24,7 @@ const emit = defineEmits<{
         <p class="nav-group-title">核心管理</p>
         <button type="button" :class="['level-btn', { active: currentView === 'events' }]" :aria-pressed="currentView === 'events'" @click="emit('update:view', 'events')">事件管理</button>
         <button type="button" :class="['level-btn', { active: currentView === 'questions' }]" :aria-pressed="currentView === 'questions'" @click="emit('update:view', 'questions')">问题管理</button>
+        <button type="button" :class="['level-btn', { active: currentView === 'questionStream' }]" :aria-pressed="currentView === 'questionStream'" @click="emit('update:view', 'questionStream')">问题社区</button>
         <button type="button" :class="['level-btn', { active: currentView === 'templates' }]" :aria-pressed="currentView === 'templates'" @click="emit('update:view', 'templates')">模板配置</button>
         <button type="button" :class="['level-btn', { active: currentView === 'tasks' }]" :aria-pressed="currentView === 'tasks'" @click="emit('update:view', 'tasks')">任务管理</button>
       </div>
