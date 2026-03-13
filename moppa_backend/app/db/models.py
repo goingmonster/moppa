@@ -37,10 +37,20 @@ class QuestionEntity(Base):
     event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     level: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
+    answer_space: Mapped[str | None] = mapped_column(Text, nullable=True)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20))
     trace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class QuestionEventEntity(Base):
+    __tablename__ = "question_event"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    question_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

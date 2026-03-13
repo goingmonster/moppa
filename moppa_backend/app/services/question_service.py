@@ -26,3 +26,9 @@ class QuestionService:
 
     def batch_delete(self, ids: list[str]) -> int:
         return self.repository.batch_soft_delete(ids)
+
+    def get_event_ids_map(self, question_ids: list[str]) -> dict[str, list[str]]:
+        return self.repository.get_event_ids_map(question_ids)
+
+    def get_event_ids(self, question_id: str) -> list[str]:
+        return self.repository.get_event_ids(question_id)

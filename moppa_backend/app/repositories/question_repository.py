@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import QuestionEntity
+from app.db.models import QuestionEntity, QuestionEventEntity
 from app.models.question_model import QuestionCreateModel, QuestionUpdateModel
 
 
@@ -13,16 +13,22 @@ class QuestionRepository:
         self.db = db
 
     def create(self, payload: QuestionCreateModel) -> str:
+        event_ids = self._resolve_event_ids(payload.event_ids, payload.event_id)
+        if not event_ids:
+            raise ValueError("event_ids is required")
+
         entity = QuestionEntity(
-            event_id=payload.event_id,
+            event_id=event_ids[0],
             level=payload.level,
             content=payload.content,
+            answer_space=payload.answer_space,
             deadline=payload.deadline,
             trace_id=payload.trace_id,
             status="draft",
         )
         self.db.add(entity)
         self.db.flush()
+        self._replace_question_events(entity.id, event_ids)
         self.db.commit()
         return str(entity.id)
 
@@ -76,12 +82,22 @@ class QuestionRepository:
         if entity is None:
             return None
 
+        if payload.level is not None:
+            entity.level = payload.level
         if payload.content is not None:
             entity.content = payload.content
+        if payload.answer_space is not None:
+            entity.answer_space = payload.answer_space
         if payload.deadline is not None:
             entity.deadline = payload.deadline
         if payload.status is not None:
-            entity.status = payload.status
+            entity.status = self._normalize_status(payload.status)
+        if payload.event_ids is not None:
+            event_ids = self._resolve_event_ids(payload.event_ids, None)
+            if not event_ids:
+                raise ValueError("event_ids cannot be empty")
+            entity.event_id = event_ids[0]
+            self._replace_question_events(entity.id, event_ids)
 
         self.db.commit()
         self.db.refresh(entity)
@@ -98,3 +114,58 @@ class QuestionRepository:
                 changed += 1
         self.db.commit()
         return changed
+
+    def get_event_ids_map(self, question_ids: list[str]) -> dict[str, list[str]]:
+        if not question_ids:
+            return {}
+        uuid_ids = [UUID(value) for value in question_ids]
+        rows = list(
+            self.db.execute(
+                select(QuestionEventEntity.question_id, QuestionEventEntity.event_id).where(
+                    QuestionEventEntity.question_id.in_(uuid_ids)
+                )
+            )
+        )
+        result: dict[str, list[str]] = {value: [] for value in question_ids}
+        for question_id, event_id in rows:
+            result.setdefault(str(question_id), []).append(str(event_id))
+        return result
+
+    def get_event_ids(self, question_id: str) -> list[str]:
+        rows = list(
+            self.db.scalars(
+                select(QuestionEventEntity.event_id).where(QuestionEventEntity.question_id == UUID(question_id))
+            )
+        )
+        return [str(value) for value in rows]
+
+    def _replace_question_events(self, question_id: UUID, event_ids: list[UUID]) -> None:
+        self.db.execute(delete(QuestionEventEntity).where(QuestionEventEntity.question_id == question_id))
+        for event_id in event_ids:
+            self.db.add(QuestionEventEntity(question_id=question_id, event_id=event_id))
+
+    @staticmethod
+    def _resolve_event_ids(event_ids: list[UUID] | None, fallback_event_id: UUID | None) -> list[UUID]:
+        if event_ids and len(event_ids) > 0:
+            return list(dict.fromkeys(event_ids))
+        if fallback_event_id is not None:
+            return [fallback_event_id]
+        return []
+
+    @staticmethod
+    def _normalize_status(value: str) -> str:
+        normalized = value.strip()
+        mapping = {
+            "collecting": "draft",
+            "locked": "pending_review",
+            "resolved": "closed",
+            "draft": "draft",
+            "pending_review": "pending_review",
+            "published": "published",
+            "closed": "closed",
+            "expired": "expired",
+        }
+        resolved = mapping.get(normalized)
+        if resolved is None:
+            raise ValueError(f"invalid question status: {value}")
+        return resolved

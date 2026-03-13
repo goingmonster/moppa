@@ -312,7 +312,7 @@ CREATE TABLE IF NOT EXISTS question (
     template_id UUID REFERENCES question_template(id),
     level SMALLINT NOT NULL REFERENCES rule_level_config(level),
     content TEXT NOT NULL,
-    answer_space JSONB,
+    answer_space TEXT,
     verification_conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
     deadline TIMESTAMPTZ NOT NULL,
     status question_status NOT NULL DEFAULT 'draft',
@@ -326,6 +326,14 @@ CREATE TABLE IF NOT EXISTS question (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
     CONSTRAINT ck_question_deadline_after_created CHECK (deadline >= created_at)
+);
+
+CREATE TABLE IF NOT EXISTS question_event (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    question_id UUID NOT NULL REFERENCES question(id) ON DELETE CASCADE,
+    event_id UUID NOT NULL REFERENCES event(id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (question_id, event_id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_question_duplicate_hash_active
@@ -594,6 +602,8 @@ CREATE INDEX IF NOT EXISTS idx_question_trace_id ON question(trace_id);
 CREATE INDEX IF NOT EXISTS idx_question_status_deadline ON question(status, deadline)
 WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_question_level ON question(level);
+CREATE INDEX IF NOT EXISTS idx_question_event_question_id ON question_event(question_id);
+CREATE INDEX IF NOT EXISTS idx_question_event_event_id ON question_event(event_id);
 
 CREATE INDEX IF NOT EXISTS idx_prediction_trace_id ON prediction(trace_id);
 CREATE INDEX IF NOT EXISTS idx_prediction_model ON prediction(model_id, status)

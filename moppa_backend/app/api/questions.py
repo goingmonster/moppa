@@ -11,12 +11,15 @@ from app.services.question_service import QuestionService
 router = APIRouter(prefix="/questions", tags=["questions"])
 
 
-def to_question_list_item(entity: QuestionEntity) -> QuestionListItemModel:
+def to_question_list_item(entity: QuestionEntity, event_ids: list[str] | None = None) -> QuestionListItemModel:
+    resolved_event_ids = event_ids if event_ids is not None else [str(entity.event_id)]
     return QuestionListItemModel(
         id=str(entity.id),
         event_id=str(entity.event_id),
+        event_ids=resolved_event_ids,
         level=entity.level,
         content=entity.content,
+        answer_space=entity.answer_space,
         deadline=entity.deadline.isoformat(),
         status=entity.status,
         trace_id=str(entity.trace_id),
@@ -26,7 +29,10 @@ def to_question_list_item(entity: QuestionEntity) -> QuestionListItemModel:
 @router.post("", summary="Create question")
 def create_question(payload: QuestionCreateModel, db: Session = Depends(get_db)) -> dict[str, str]:
     service = QuestionService(db)
-    question_id = service.create(payload)
+    try:
+        question_id = service.create(payload)
+    except ValueError as exc:
+        raise ApiError(status_code=422, code="INVALID_EVENT_IDS", message=str(exc)) from exc
     return {"id": question_id}
 
 
@@ -38,7 +44,8 @@ def list_questions(
 ) -> QuestionPaginationResponse:
     service = QuestionService(db)
     rows, total = service.list_paginated(page=page, page_size=page_size)
-    items = [to_question_list_item(row) for row in rows]
+    event_map = service.get_event_ids_map([str(row.id) for row in rows])
+    items = [to_question_list_item(row, event_map.get(str(row.id), [str(row.event_id)])) for row in rows]
     return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
 
@@ -51,7 +58,8 @@ def search_questions(
 ) -> QuestionPaginationResponse:
     service = QuestionService(db)
     rows, total = service.search_paginated(keyword=keyword, page=page, page_size=page_size)
-    items = [to_question_list_item(row) for row in rows]
+    event_map = service.get_event_ids_map([str(row.id) for row in rows])
+    items = [to_question_list_item(row, event_map.get(str(row.id), [str(row.event_id)])) for row in rows]
     return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
 
@@ -68,7 +76,8 @@ def get_question(question_id: str, db: Session = Depends(get_db)) -> QuestionLis
     entity = service.get_by_id(question_id)
     if entity is None:
         raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
-    return to_question_list_item(entity)
+    event_ids = service.get_event_ids(question_id)
+    return to_question_list_item(entity, event_ids if event_ids else [str(entity.event_id)])
 
 
 @router.patch("/{question_id}", summary="Update question")
@@ -76,7 +85,14 @@ def update_question(question_id: str, payload: QuestionUpdateModel, db: Session 
     service = QuestionService(db)
     if not payload.model_dump(exclude_none=True):
         raise ApiError(status_code=400, code="EMPTY_UPDATE_PAYLOAD", message="No fields to update")
-    entity = service.update(question_id, payload)
+    try:
+        entity = service.update(question_id, payload)
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith("invalid question status"):
+            raise ApiError(status_code=422, code="INVALID_QUESTION_STATUS", message=message) from exc
+        raise ApiError(status_code=422, code="INVALID_EVENT_IDS", message=message) from exc
     if entity is None:
         raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
-    return to_question_list_item(entity)
+    event_ids = service.get_event_ids(question_id)
+    return to_question_list_item(entity, event_ids if event_ids else [str(entity.event_id)])

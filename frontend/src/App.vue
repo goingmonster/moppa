@@ -1,8 +1,23 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import ManageDataSourcesPanel from './components/ManageDataSourcesPanel.vue'
+import ManageEventsPanel from './components/ManageEventsPanel.vue'
+import ManageFilterRulesPanel from './components/ManageFilterRulesPanel.vue'
+import ManageQuestionsPanel from './components/ManageQuestionsPanel.vue'
+import ManageTasksPanel from './components/ManageTasksPanel.vue'
+import ManageTemplatesPanel from './components/ManageTemplatesPanel.vue'
+import SidebarNav from './components/SidebarNav.vue'
+import TopbarPanel from './components/TopbarPanel.vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
 type AppView = 'home' | 'events' | 'questions' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
+type ToastKind = 'success' | 'error' | 'info'
+
+interface ToastItem {
+  id: number
+  kind: ToastKind
+  message: string
+}
 
 interface EventItem {
   id: string
@@ -18,41 +33,14 @@ interface EventItem {
 
 interface QuestionItem {
   id: string
-  eventId: string
+  eventIds: string[]
   level: Level
   title: string
+  answerSpace: string
   hypothesis: string
   deadline: string
   status: 'collecting' | 'locked' | 'resolved'
   groundTruth: string
-}
-
-interface ModelAnswer {
-  model: string
-  answer: string
-  confidence: number
-  reason: string
-  latencyMs: number
-}
-
-interface ExpertComment {
-  id: string
-  author: string
-  content: string
-}
-
-interface ExpertAnswer {
-  id: string
-  expert: string
-  answer: string
-  reason: string
-  comments: ExpertComment[]
-}
-
-interface QuestionComment {
-  id: string
-  author: string
-  content: string
 }
 
 interface RankRow {
@@ -83,9 +71,11 @@ interface BackendEventItem {
 
 interface BackendQuestionItem {
   id: string
-  event_id: string
+  event_id?: string
+  event_ids?: string[]
   level: number
   content: string
+  answer_space?: string | null
   deadline: string
   status: string
   trace_id: string
@@ -273,9 +263,10 @@ const homeEvents = ref<EventItem[]>([
 const questions = ref<QuestionItem[]>([
   {
     id: 'q-101',
-    eventId: 'evt-001',
+    eventIds: ['evt-001'],
     level: 'L2',
     title: 'A7 走廊车队流量会在 72 小时内上升吗？',
+    answerSpace: '会上升\n不会上升\n不确定',
     hypothesis: '若流量持续上升 20%，可判定存在前置部署行为。',
     deadline: '2026-03-12T00:00:00Z',
     status: 'collecting',
@@ -283,9 +274,10 @@ const questions = ref<QuestionItem[]>([
   },
   {
     id: 'q-102',
-    eventId: 'evt-002',
+    eventIds: ['evt-002'],
     level: 'L1',
     title: '声呐异常会持续到下一个潮汐周期吗？',
+    answerSpace: '会\n不会',
     hypothesis: '若异常高于基线持续 18 小时，说明来源并非环境因素。',
     deadline: '2026-03-11T06:00:00Z',
     status: 'locked',
@@ -293,101 +285,16 @@ const questions = ref<QuestionItem[]>([
   },
   {
     id: 'q-103',
-    eventId: 'evt-003',
+    eventIds: ['evt-003'],
     level: 'L3',
     title: '本周中继故障会使指挥吞吐降到 65% 以下吗？',
+    answerSpace: '',
     hypothesis: '天气与干扰叠加可能导致吞吐持续下降。',
     deadline: '2026-03-15T12:00:00Z',
     status: 'resolved',
     groundTruth: '观测平均吞吐 61.7%，已确认跌破阈值。',
   },
 ])
-
-const answersByQuestion = reactive<Record<string, ModelAnswer[]>>({
-  'q-101': [
-    {
-      model: 'Aegis-7B',
-      answer: '是，预计机动增幅约 +24%，置信度 0.71。',
-      confidence: 71,
-      reason: '历史上，油料补给峰值与路线去冲突通信常先于车队激增出现。',
-      latencyMs: 1020,
-    },
-    {
-      model: 'Falcon-13',
-      answer: '增幅不确定，可能在 +8% 到 +18% 之间。',
-      confidence: 58,
-      reason: '信号存在冲突，天气扰动可能压缩可机动窗口。',
-      latencyMs: 1440,
-    },
-  ],
-  'q-102': [
-    {
-      model: 'Aegis-7B',
-      answer: '异常会在最后一次潮位切换前衰减至基线以下。',
-      confidence: 64,
-      reason: '该模式更符合历史温跃层反射，不像主动平台运动。',
-      latencyMs: 910,
-    },
-    {
-      model: 'Orion-XL',
-      answer: '预计会持续，但会间歇性掉线。',
-      confidence: 67,
-      reason: '频率谐波中存在人工脉冲间隔特征。',
-      latencyMs: 1780,
-    },
-  ],
-  'q-103': [
-    {
-      model: 'Falcon-13',
-      answer: '吞吐可能降至 60-63%，并维持在低位。',
-      confidence: 76,
-      reason: '相关干扰脉冲与天气导致的中继不稳定时段高度重合。',
-      latencyMs: 1260,
-    },
-    {
-      model: 'Orion-XL',
-      answer: '大约降至 68%，但 48 小时内可恢复。',
-      confidence: 61,
-      reason: '该判断基于备用路由快速切换且备链路稳定的前提。',
-      latencyMs: 2010,
-    },
-  ],
-})
-
-const expertAnswersByQuestion = reactive<Record<string, ExpertAnswer[]>>({
-  'q-103': [
-    {
-      id: 'exp-301',
-      expert: '沃斯指挥官',
-      answer: '在确认干扰源转移前，吞吐大概率持续劣化。',
-      reason: '现场日志显示干扰节奏具有自适应性，能绕过标准回退时序。',
-      comments: [
-        {
-          id: 'ec-1',
-          author: '分析员伊姆兰',
-          content: '同意节奏判断，能补充按天气单元划分的置信区间吗？',
-        },
-      ],
-    },
-  ],
-})
-
-const questionCommentsByQuestion = reactive<Record<string, QuestionComment[]>>({
-  'q-101': [
-    {
-      id: 'qc-1',
-      author: '行动联络官',
-      content: '锁定该问题前，需要交叉核验走廊视频流。',
-    },
-  ],
-  'q-103': [
-    {
-      id: 'qc-2',
-      author: '风险小组',
-      content: '真实结果已发布，请对模型分歧窗口做复盘。',
-    },
-  ],
-})
 
 const rankingRows = ref<RankRow[]>([
   { model: 'Aegis-7B', level: 'L1', score: 86.2, avgLatency: 940, accuracy: 82 },
@@ -400,17 +307,23 @@ const rankingRows = ref<RankRow[]>([
 ])
 
 const selectedEventId = ref(homeEvents.value[0]?.id ?? '')
+const selectedEventIdsForQuestion = ref<string[]>(selectedEventId.value ? [selectedEventId.value] : [])
 const selectedQuestionId = ref(questions.value[0]?.id ?? '')
 const rankingLevel = ref<'ALL' | Level>('ALL')
 const currentView = ref<AppView>('home')
 const backendStatus = ref('后端未连接，当前使用模拟数据')
 const backendOnline = ref(false)
+const toasts = ref<ToastItem[]>([])
+let toastSeed = 0
 
-const draftExpert = reactive({ name: '', answer: '', reason: '' })
-const draftExpertComments = reactive<Record<string, string>>({})
-const draftQuestionComment = ref('')
 const draftEvent = reactive({ title: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
-const draftQuestion = reactive({ title: '', level: 'L2' as Level, deadline: '', status: 'collecting' as QuestionItem['status'] })
+const draftQuestion = reactive({
+  title: '',
+  level: 'L2' as Level,
+  deadline: '',
+  status: 'collecting' as QuestionItem['status'],
+  answerSpace: '',
+})
 const homeDetailEvent = ref<EventItem | null>(null)
 const manageDetailEvent = ref<EventItem | null>(null)
 const eventEditDialogOpen = ref(false)
@@ -419,6 +332,7 @@ const homeDetailDialogOpen = ref(false)
 const createEventDialogOpen = ref(false)
 const createQuestionDialogOpen = ref(false)
 const questionEventSearch = ref('')
+const questionEditEventSearch = ref('')
 const questionEventSearchLoading = ref(false)
 const questionEventSearchTotal = ref(0)
 const questionEventOptions = ref<EventItem[]>([])
@@ -437,7 +351,15 @@ const eventEditForm = reactive({
   severity: 'medium' as EventItem['severity'],
   filterStatus: '',
 })
-const questionEditForm = reactive({ id: '', title: '', deadline: '', status: 'collecting' as QuestionItem['status'] })
+const questionEditForm = reactive({
+  id: '',
+  title: '',
+  level: 'L2' as Level,
+  answerSpace: '',
+  eventIds: [] as string[],
+  deadline: '',
+  status: 'collecting' as QuestionItem['status'],
+})
 const templateEditForm = reactive({
   id: '',
   questionTemplate: '',
@@ -580,15 +502,10 @@ const editFilterRuleForm = reactive({
   version: 'v1.0',
 })
 
-const selectedEvent = computed(() => homeEvents.value.find((eventItem) => eventItem.id === selectedEventId.value))
 const selectedTemplateDetail = computed(() => selectedTemplate.value)
-const selectedQuestion = computed(() => questions.value.find((question) => question.id === selectedQuestionId.value))
-
-const filteredQuestions = computed(() =>
-  questions.value.filter((question) => !selectedEventId.value || question.eventId === selectedEventId.value),
-)
 const previewEvents = computed(() => homeEvents.value.filter((item) => item.filterStatus === 'passed'))
 const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.value / homeEventPageSize)))
+const homeHasEvents = computed(() => previewEvents.value.length > 0)
 const localFilteredManageEvents = computed(() => {
   const keyword = eventManageSearchKeyword.value.trim().toLowerCase()
   const status = eventManageFilterStatus.value.trim()
@@ -630,6 +547,7 @@ const pagedManageEvents = computed(() => {
   const start = (eventManagePage.value - 1) * eventManagePageSize.value
   return localFilteredManageEvents.value.slice(start, start + eventManagePageSize.value)
 })
+const hasManageEvents = computed(() => pagedManageEvents.value.length > 0)
 const allEventsOnPageSelected = computed(() =>
   pagedManageEvents.value.length > 0 && pagedManageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
 )
@@ -661,9 +579,14 @@ const pagedManageQuestions = computed(() => {
   const start = (questionManagePage.value - 1) * questionManagePageSize.value
   return localFilteredManageQuestions.value.slice(start, start + questionManagePageSize.value)
 })
+const hasManageQuestions = computed(() => pagedManageQuestions.value.length > 0)
 const allQuestionsOnPageSelected = computed(() =>
   pagedManageQuestions.value.length > 0 && pagedManageQuestions.value.every((item) => selectedManageQuestionIds.value.includes(item.id)),
 )
+const hasTemplates = computed(() => templates.value.length > 0)
+const hasTasks = computed(() => tasks.value.length > 0)
+const hasDataSources = computed(() => dataSources.value.length > 0)
+const hasFilterRules = computed(() => filterRules.value.length > 0)
 
 const templateManageTotalPages = computed(() => Math.max(1, Math.ceil(templateManageTotal.value / templateManagePageSize.value)))
 const allTemplatesOnPageSelected = computed(
@@ -675,6 +598,9 @@ const allKnownEvents = computed(() => {
     map.set(item.id, item)
   }
   for (const item of manageEvents.value) {
+    map.set(item.id, item)
+  }
+  for (const item of questionEventOptions.value) {
     map.set(item.id, item)
   }
   return Array.from(map.values())
@@ -693,6 +619,16 @@ const localFilteredKnownEventsForQuestion = computed(() => {
 const filteredKnownEventsForQuestion = computed(() =>
   backendOnline.value ? questionEventOptions.value : localFilteredKnownEventsForQuestion.value,
 )
+const filteredKnownEventsForQuestionEdit = computed(() => {
+  const keyword = questionEditEventSearch.value.trim().toLowerCase()
+  if (!keyword) {
+    return allKnownEvents.value
+  }
+  return allKnownEvents.value.filter((item) => {
+    const haystack = `${item.title}\n${item.theater}\n${item.summary}`.toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
 const questionEventMatchedTotal = computed(() =>
   backendOnline.value ? questionEventSearchTotal.value : filteredKnownEventsForQuestion.value.length,
 )
@@ -717,9 +653,6 @@ const allFilterRulesOnPageSelected = computed(
     filterRules.value.every((item) => selectedManageFilterRuleIds.value.includes(item.id)),
 )
 
-const selectedQuestionAnswers = computed(() => answersByQuestion[selectedQuestionId.value] ?? [])
-const selectedExpertAnswers = computed(() => expertAnswersByQuestion[selectedQuestionId.value] ?? [])
-const selectedQuestionComments = computed(() => questionCommentsByQuestion[selectedQuestionId.value] ?? [])
 const dataSourceLabel = computed(() => (backendOnline.value ? '后端' : '模拟'))
 
 const displayedRanking = computed(() => {
@@ -729,6 +662,12 @@ const displayedRanking = computed(() => {
       : rankingRows.value.filter((row) => row.level === rankingLevel.value)
   return [...filtered].sort((a, b) => b.score - a.score)
 })
+const hasDisplayedRanking = computed(() => displayedRanking.value.length > 0)
+const totalEventCount = ref(0)
+const pendingEventCount = ref(0)
+const runningTaskCount = ref(0)
+let topMetricRefreshTimer: number | undefined
+const skeletonRows = [1, 2, 3, 4]
 
 const statusLabel: Record<QuestionItem['status'], string> = {
   collecting: '收集中',
@@ -740,6 +679,32 @@ const severityLabel: Record<EventItem['severity'], string> = {
   low: '低',
   medium: '中',
   high: '高',
+}
+
+function severityBadgeTone(value: EventItem['severity']): string {
+  if (value === 'high') {
+    return 'badge-error'
+  }
+  if (value === 'medium') {
+    return 'badge-warning'
+  }
+  return 'badge-info'
+}
+
+function eventFilterBadgeTone(status: string): string {
+  if (status === 'passed') {
+    return 'badge-success'
+  }
+  if (status === 'filtered') {
+    return 'badge-error'
+  }
+  if (status === 'pending') {
+    return 'badge-warning'
+  }
+  if (status === 'reviewed') {
+    return 'badge-info'
+  }
+  return 'badge-muted'
 }
 
 function formatDate(value: string): string {
@@ -767,7 +732,7 @@ function toDateTimeLocalValue(value: string): string {
 
 function selectEvent(id: string): void {
   selectedEventId.value = id
-  const firstQuestion = questions.value.find((question) => question.eventId === id)
+  const firstQuestion = questions.value.find((question) => question.eventIds.includes(id))
   if (firstQuestion) {
     selectedQuestionId.value = firstQuestion.id
   }
@@ -799,20 +764,27 @@ function openEventEdit(eventItem: EventItem): void {
 function openManageQuestionDetail(questionItem: QuestionItem): void {
   selectedQuestionId.value = questionItem.id
   manageDetailQuestion.value = questionItem
+  void ensureQuestionEventOptionsByIds(questionItem.eventIds)
   questionDetailDialogOpen.value = true
 }
 
 function openQuestionEdit(questionItem: QuestionItem): void {
   selectedQuestionId.value = questionItem.id
+  questionEditEventSearch.value = ''
   questionEditForm.id = questionItem.id
   questionEditForm.title = questionItem.title
-  questionEditForm.deadline = questionItem.deadline
+  questionEditForm.level = questionItem.level
+  questionEditForm.answerSpace = questionItem.answerSpace
+  questionEditForm.eventIds = [...questionItem.eventIds]
+  questionEditForm.deadline = toDateTimeLocalValue(questionItem.deadline)
   questionEditForm.status = questionItem.status
+  void ensureQuestionEventOptionsByIds(questionItem.eventIds)
   questionEditDialogOpen.value = true
 }
 
 function openCreateQuestionDialog(): void {
   questionEventSearch.value = ''
+  selectedEventIdsForQuestion.value = selectedEventId.value ? [selectedEventId.value] : []
   createQuestionDialogOpen.value = true
   if (backendOnline.value) {
     void fetchQuestionEventOptions('')
@@ -829,7 +801,64 @@ function closeCreateQuestionDialog(): void {
   questionEventSearchTotal.value = 0
   questionEventSearchLoading.value = false
   questionEventSearch.value = ''
+  selectedEventIdsForQuestion.value = []
   createQuestionDialogOpen.value = false
+}
+
+function closeAllDialogs(): void {
+  taskDetailDialogOpen.value = false
+  createTaskDialogOpen.value = false
+  triggerPullDialogOpen.value = false
+  dataSourceDetailDialogOpen.value = false
+  createDataSourceDialogOpen.value = false
+  editDataSourceDialogOpen.value = false
+  filterRuleDetailDialogOpen.value = false
+  createFilterRuleDialogOpen.value = false
+  editFilterRuleDialogOpen.value = false
+  homeDetailDialogOpen.value = false
+  eventDetailDialogOpen.value = false
+  eventEditDialogOpen.value = false
+  questionDetailDialogOpen.value = false
+  questionEditDialogOpen.value = false
+  templateDetailDialogOpen.value = false
+  templateEditDialogOpen.value = false
+  createTemplateDialogOpen.value = false
+  createEventDialogOpen.value = false
+  if (createQuestionDialogOpen.value) {
+    closeCreateQuestionDialog()
+  }
+}
+
+function hasAnyDialogOpen(): boolean {
+  return (
+    taskDetailDialogOpen.value ||
+    createTaskDialogOpen.value ||
+    triggerPullDialogOpen.value ||
+    dataSourceDetailDialogOpen.value ||
+    createDataSourceDialogOpen.value ||
+    editDataSourceDialogOpen.value ||
+    filterRuleDetailDialogOpen.value ||
+    createFilterRuleDialogOpen.value ||
+    editFilterRuleDialogOpen.value ||
+    homeDetailDialogOpen.value ||
+    eventDetailDialogOpen.value ||
+    eventEditDialogOpen.value ||
+    questionDetailDialogOpen.value ||
+    questionEditDialogOpen.value ||
+    templateDetailDialogOpen.value ||
+    templateEditDialogOpen.value ||
+    createTemplateDialogOpen.value ||
+    createEventDialogOpen.value ||
+    createQuestionDialogOpen.value
+  )
+}
+
+function handleGlobalKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !hasAnyDialogOpen()) {
+    return
+  }
+  event.preventDefault()
+  closeAllDialogs()
 }
 
 function clearQuestionEventSearch(): void {
@@ -837,6 +866,22 @@ function clearQuestionEventSearch(): void {
   if (backendOnline.value && createQuestionDialogOpen.value) {
     void fetchQuestionEventOptions('')
   }
+}
+
+function toggleQuestionEventSelection(eventId: string): void {
+  if (selectedEventIdsForQuestion.value.includes(eventId)) {
+    selectedEventIdsForQuestion.value = selectedEventIdsForQuestion.value.filter((id) => id !== eventId)
+    return
+  }
+  selectedEventIdsForQuestion.value = [...selectedEventIdsForQuestion.value, eventId]
+}
+
+function toggleQuestionEditEventSelection(eventId: string): void {
+  if (questionEditForm.eventIds.includes(eventId)) {
+    questionEditForm.eventIds = questionEditForm.eventIds.filter((id) => id !== eventId)
+    return
+  }
+  questionEditForm.eventIds = [...questionEditForm.eventIds, eventId]
 }
 
 async function submitCreateQuestionFromDialog(): Promise<void> {
@@ -1676,7 +1721,7 @@ async function deleteSelectedEventsBatch(): Promise<void> {
       manageEvents.value = manageEvents.value.filter((item) => !ids.includes(item.id))
       homeEventTotal.value = Math.max(0, homeEventTotal.value - ids.length)
       manageEventTotal.value = Math.max(0, manageEventTotal.value - ids.length)
-      questions.value = questions.value.filter((item) => !ids.includes(item.eventId))
+    questions.value = questions.value.filter((item) => !item.eventIds.some((eventId) => ids.includes(eventId)))
       backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟事件`
     } else {
       await sendJson('/events', 'DELETE', { ids })
@@ -1766,11 +1811,33 @@ async function submitQuestionEdit(): Promise<void> {
   }
 
   try {
+    const title = questionEditForm.title.trim()
+    const deadline = questionEditForm.deadline.trim()
+    const eventIds = Array.from(new Set(questionEditForm.eventIds)).filter((value) => value.trim().length > 0)
+    const answerSpace = questionEditForm.answerSpace.trim()
+    if (!title || !deadline || eventIds.length === 0) {
+      backendStatus.value = '问题更新失败：请填写标题、截止时间并至少选择一个事件'
+      return
+    }
+    if ((questionEditForm.level === 'L1' || questionEditForm.level === 'L2') && !answerSpace) {
+      backendStatus.value = '问题更新失败：L1/L2 需填写答案范围'
+      return
+    }
+    const parsedDeadline = new Date(deadline)
+    if (Number.isNaN(parsedDeadline.getTime())) {
+      backendStatus.value = '问题更新失败：截止时间格式无效'
+      return
+    }
+    const normalizedDeadline = parsedDeadline.toISOString()
+
     if (!backendOnline.value) {
       const target = questions.value.find((item) => item.id === questionEditForm.id)
       if (target) {
-        target.title = questionEditForm.title
-        target.deadline = questionEditForm.deadline
+        target.title = title
+        target.level = questionEditForm.level
+        target.answerSpace = answerSpace
+        target.eventIds = eventIds
+        target.deadline = normalizedDeadline
         target.status = questionEditForm.status
       }
       backendStatus.value = '后端离线：已更新模拟问题'
@@ -1779,13 +1846,17 @@ async function submitQuestionEdit(): Promise<void> {
     }
 
     await sendJson(`/questions/${questionEditForm.id}`, 'PATCH', {
-      content: questionEditForm.title,
-      deadline: questionEditForm.deadline,
+      level: levelToNumber(questionEditForm.level),
+      content: title,
+      answer_space: answerSpace || null,
+      event_ids: eventIds,
+      deadline: normalizedDeadline,
       status: questionEditForm.status,
     })
     await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
     backendStatus.value = '问题更新成功（后端）'
     questionEditDialogOpen.value = false
+    questionEditEventSearch.value = ''
   } catch {
     backendStatus.value = '问题更新失败：请检查后端接口或参数格式'
   }
@@ -1853,60 +1924,6 @@ async function deleteEventInEditDialog(): Promise<void> {
   eventEditDialogOpen.value = false
 }
 
-function addQuestionComment(): void {
-  if (!selectedQuestionId.value || !draftQuestionComment.value.trim()) {
-    return
-  }
-  const list = questionCommentsByQuestion[selectedQuestionId.value] ?? []
-  list.push({
-    id: `qc-${Date.now()}`,
-    author: '审阅席',
-    content: draftQuestionComment.value.trim(),
-  })
-  questionCommentsByQuestion[selectedQuestionId.value] = list
-  draftQuestionComment.value = ''
-}
-
-function addExpertAnswer(): void {
-  if (!selectedQuestionId.value || !draftExpert.name.trim() || !draftExpert.answer.trim() || !draftExpert.reason.trim()) {
-    return
-  }
-
-  const list = expertAnswersByQuestion[selectedQuestionId.value] ?? []
-  list.push({
-    id: `exp-${Date.now()}`,
-    expert: draftExpert.name.trim(),
-    answer: draftExpert.answer.trim(),
-    reason: draftExpert.reason.trim(),
-    comments: [],
-  })
-  expertAnswersByQuestion[selectedQuestionId.value] = list
-
-  draftExpert.name = ''
-  draftExpert.answer = ''
-  draftExpert.reason = ''
-}
-
-function addExpertComment(expertId: string): void {
-  const content = (draftExpertComments[expertId] ?? '').trim()
-  if (!content || !selectedQuestionId.value) {
-    return
-  }
-
-  const list = expertAnswersByQuestion[selectedQuestionId.value] ?? []
-  const target = list.find((item) => item.id === expertId)
-  if (!target) {
-    return
-  }
-
-  target.comments.push({
-    id: `ec-${Date.now()}`,
-    author: '同侪分析员',
-    content,
-  })
-  draftExpertComments[expertId] = ''
-}
-
 function normalizeLevel(value: number): Level {
   if (value <= 1) {
     return 'L1'
@@ -1918,6 +1935,33 @@ function normalizeLevel(value: number): Level {
     return 'L3'
   }
   return 'L4'
+}
+
+function inferToastKind(message: string): ToastKind {
+  if (message.includes('失败') || message.includes('错误') || message.includes('不可用')) {
+    return 'error'
+  }
+  if (message.includes('成功') || message.includes('已触发') || message.includes('已更新') || message.includes('已删除') || message.includes('已连接')) {
+    return 'success'
+  }
+  return 'info'
+}
+
+function dismissToast(id: number): void {
+  toasts.value = toasts.value.filter((item) => item.id !== id)
+}
+
+function pushToast(message: string, kind?: ToastKind): void {
+  const text = message.trim()
+  if (!text) {
+    return
+  }
+  const id = ++toastSeed
+  const resolvedKind = kind ?? inferToastKind(text)
+  toasts.value = [...toasts.value, { id, kind: resolvedKind, message: text }].slice(-4)
+  window.setTimeout(() => {
+    dismissToast(id)
+  }, 3200)
 }
 
 function severityFromCredibility(value: number): EventItem['severity'] {
@@ -1986,11 +2030,17 @@ function toEventItem(item: BackendEventItem): EventItem {
 }
 
 function toQuestionItem(item: BackendQuestionItem): QuestionItem {
+  const eventIds = Array.isArray(item.event_ids)
+    ? item.event_ids
+    : item.event_id
+      ? [item.event_id]
+      : []
   return {
     id: item.id,
-    eventId: item.event_id,
+    eventIds,
     level: normalizeLevel(item.level),
     title: item.content,
+    answerSpace: item.answer_space ?? '',
     hypothesis: '由后端问题内容导入，待补充可证伪假设。',
     deadline: item.deadline,
     status: item.status === 'resolved' ? 'resolved' : item.status === 'locked' ? 'locked' : 'collecting',
@@ -2237,6 +2287,9 @@ async function fetchQuestionEventOptions(keyword: string): Promise<void> {
     if (mapped.length > 0 && !mapped.some((item) => item.id === selectedEventId.value)) {
       selectedEventId.value = mapped[0]?.id ?? selectedEventId.value
     }
+    if (selectedEventIdsForQuestion.value.length === 0) {
+      selectedEventIdsForQuestion.value = selectedEventId.value ? [selectedEventId.value] : []
+    }
   } catch {
     if (requestSeq !== questionEventSearchSeq.value) {
       return
@@ -2249,6 +2302,37 @@ async function fetchQuestionEventOptions(keyword: string): Promise<void> {
       questionEventSearchLoading.value = false
     }
   }
+}
+
+async function ensureQuestionEventOptionsByIds(eventIds: string[]): Promise<void> {
+  if (!backendOnline.value || eventIds.length === 0) {
+    return
+  }
+  const known = new Set(allKnownEvents.value.map((item) => item.id))
+  const missing = eventIds.filter((id) => !known.has(id))
+  if (missing.length === 0) {
+    return
+  }
+  const fetched = await Promise.all(
+    missing.map(async (id) => {
+      try {
+        const item = await fetchJson<BackendEventItem>(`/events/${id}`)
+        return toEventItem(item)
+      } catch {
+        return null
+      }
+    }),
+  )
+  const merged = [...questionEventOptions.value]
+  for (const item of fetched) {
+    if (!item) {
+      continue
+    }
+    if (!merged.some((target) => target.id === item.id)) {
+      merged.push(item)
+    }
+  }
+  questionEventOptions.value = merged
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -2274,6 +2358,54 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
     return {} as T
   }
   return (await response.json()) as T
+}
+
+async function fetchEventTotalByStatus(status: string): Promise<number> {
+  const query = encodeURIComponent(status)
+  const page = await fetchJson<BackendPage<BackendEventItem>>(
+    `/events/search?keyword=&filter_status=${query}&page=1&page_size=1`,
+  )
+  return page.total
+}
+
+async function fetchTaskTotalByStatus(status: string): Promise<number> {
+  const query = encodeURIComponent(status)
+  const page = await fetchJson<BackendPage<BackendTaskItem>>(`/tasks?status=${query}&page=1&page_size=1`)
+  return page.total
+}
+
+async function refreshTopMetrics(): Promise<void> {
+  if (!backendOnline.value) {
+    totalEventCount.value = allKnownEvents.value.length
+    pendingEventCount.value = allKnownEvents.value.filter((item) => item.filterStatus === 'pending').length
+    runningTaskCount.value = tasks.value.filter((item) => item.status === 'running' || item.status === 'pending').length
+    return
+  }
+
+  try {
+    const [eventTotal, pendingTotal, runningTotal, pendingTaskTotal] = await Promise.all([
+      fetchEventTotalByStatus(''),
+      fetchEventTotalByStatus('pending'),
+      fetchTaskTotalByStatus('running'),
+      fetchTaskTotalByStatus('pending'),
+    ])
+    totalEventCount.value = eventTotal
+    pendingEventCount.value = pendingTotal
+    runningTaskCount.value = runningTotal + pendingTaskTotal
+  } catch {
+    totalEventCount.value = allKnownEvents.value.length
+    pendingEventCount.value = allKnownEvents.value.filter((item) => item.filterStatus === 'pending').length
+    runningTaskCount.value = tasks.value.filter((item) => item.status === 'running' || item.status === 'pending').length
+  }
+}
+
+function scheduleTopMetricRefresh(delayMs = 180): void {
+  if (topMetricRefreshTimer !== undefined) {
+    window.clearTimeout(topMetricRefreshTimer)
+  }
+  topMetricRefreshTimer = window.setTimeout(() => {
+    void refreshTopMetrics()
+  }, delayMs)
 }
 
 async function fetchHomeEvents(page = 1): Promise<void> {
@@ -2431,9 +2563,9 @@ async function deleteSelectedEvent(): Promise<void> {
       manageEvents.value = manageEvents.value.filter((item) => item.id !== currentId)
       homeEventTotal.value = Math.max(0, homeEventTotal.value - 1)
       manageEventTotal.value = Math.max(0, manageEventTotal.value - 1)
-      questions.value = questions.value.filter((item) => item.eventId !== currentId)
+      questions.value = questions.value.filter((item) => !item.eventIds.includes(currentId))
       selectedEventId.value = homeEvents.value[0]?.id ?? ''
-      selectedQuestionId.value = questions.value.find((item) => item.eventId === selectedEventId.value)?.id ?? ''
+      selectedQuestionId.value = questions.value.find((item) => item.eventIds.includes(selectedEventId.value))?.id ?? ''
       backendStatus.value = '后端离线：已在模拟数据中删除事件及关联问题'
       return
     }
@@ -2450,8 +2582,14 @@ async function createQuestion(): Promise<void> {
   try {
     const title = draftQuestion.title.trim()
     const deadline = draftQuestion.deadline.trim()
-    if (!selectedEventId.value || !title || !deadline) {
-      backendStatus.value = '问题新增失败：请选择事件并填写标题与截止时间'
+    const eventIds = Array.from(new Set(selectedEventIdsForQuestion.value)).filter((value) => value.trim().length > 0)
+    const answerSpace = draftQuestion.answerSpace.trim()
+    if (eventIds.length === 0 || !title || !deadline) {
+      backendStatus.value = '问题新增失败：请至少选择一个事件并填写标题与截止时间'
+      return
+    }
+    if ((draftQuestion.level === 'L1' || draftQuestion.level === 'L2') && !answerSpace) {
+      backendStatus.value = '问题新增失败：L1/L2 需填写答案范围'
       return
     }
 
@@ -2466,9 +2604,10 @@ async function createQuestion(): Promise<void> {
       const localId = `q-local-${Date.now()}`
       questions.value.unshift({
         id: localId,
-        eventId: selectedEventId.value,
+        eventIds,
         level: draftQuestion.level,
         title,
+        answerSpace,
         hypothesis: '由人工创建，待补充假设。',
         deadline: normalizedDeadline,
         status: draftQuestion.status,
@@ -2477,19 +2616,22 @@ async function createQuestion(): Promise<void> {
       selectedQuestionId.value = localId
       backendStatus.value = '后端离线：已在模拟数据中新增问题'
       draftQuestion.title = ''
+      draftQuestion.answerSpace = ''
       return
     }
 
     await sendJson<{ id: string }>('/questions', 'POST', {
-      event_id: selectedEventId.value,
+      event_ids: eventIds,
       level: levelToNumber(draftQuestion.level),
       content: title,
+      answer_space: answerSpace || null,
       deadline: normalizedDeadline,
       trace_id: makeTraceId(),
     })
     await Promise.all([hydrateFromBackend(), fetchManageQuestions(1)])
     backendStatus.value = '问题新增成功（后端）'
     draftQuestion.title = ''
+    draftQuestion.answerSpace = ''
   } catch {
     backendStatus.value = '问题新增失败：请检查后端接口或参数格式'
   }
@@ -2504,7 +2646,7 @@ async function deleteSelectedQuestion(): Promise<void> {
 
     if (!backendOnline.value) {
       questions.value = questions.value.filter((item) => item.id !== currentId)
-      selectedQuestionId.value = questions.value.find((item) => item.eventId === selectedEventId.value)?.id ?? ''
+      selectedQuestionId.value = questions.value.find((item) => item.eventIds.includes(selectedEventId.value))?.id ?? ''
       backendStatus.value = '后端离线：已在模拟数据中删除问题'
       return
     }
@@ -2541,7 +2683,7 @@ async function hydrateFromBackend(): Promise<void> {
       const mappedQuestions: QuestionItem[] = questionResult.value.items.map(toQuestionItem)
       questions.value = mappedQuestions
       questionManageTotal.value = mappedQuestions.length
-      const firstQuestion = mappedQuestions.find((question) => question.eventId === selectedEventId.value)
+      const firstQuestion = mappedQuestions.find((question) => question.eventIds.includes(selectedEventId.value))
       selectedQuestionId.value = firstQuestion?.id ?? mappedQuestions[0]?.id ?? selectedQuestionId.value
       questionManagePage.value = 1
       selectedManageQuestionIds.value = []
@@ -2563,6 +2705,16 @@ async function hydrateFromBackend(): Promise<void> {
 onMounted(() => {
   void hydrateFromBackend()
   void fetchSourceSystemOptions()
+  scheduleTopMetricRefresh(0)
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  if (topMetricRefreshTimer !== undefined) {
+    window.clearTimeout(topMetricRefreshTimer)
+    topMetricRefreshTimer = undefined
+  }
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 watch(currentView, (view) => {
@@ -2706,6 +2858,7 @@ watch(questionEventSearch, (keyword) => {
 })
 
 watch(backendOnline, (online) => {
+  scheduleTopMetricRefresh(0)
   if (online && currentView.value === 'events') {
     void fetchManageEvents(1)
   }
@@ -2719,570 +2872,273 @@ watch(backendOnline, (online) => {
     void fetchQuestionEventOptions(questionEventSearch.value)
   }
 })
+
+watch(backendStatus, (status, prev) => {
+  if (!status || status === prev) {
+    return
+  }
+  pushToast(status)
+  scheduleTopMetricRefresh()
+})
 </script>
 
 <template>
   <div class="mission-shell">
-    <header class="topbar panel">
-      <div>
-        <p class="eyebrow">MOPPA 战术控制台</p>
-        <h1>模型预测指挥甲板</h1>
-      </div>
-      <div class="status-pills">
-        <span class="chip">数据源：{{ dataSourceLabel }}</span>
-        <span class="chip">模式：训练沙盘</span>
-        <span class="chip">后端状态：{{ backendOnline ? '在线' : '离线' }}</span>
-      </div>
-    </header>
+    <TopbarPanel
+      :data-source-label="dataSourceLabel"
+      :backend-online="backendOnline"
+      :total-event-count="totalEventCount"
+      :pending-event-count="pendingEventCount"
+      :running-task-count="runningTaskCount"
+    />
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>后端接入状态</h2>
-        <span>/health + /events + /questions</span>
-      </div>
-      <p>{{ backendStatus }}</p>
-    </section>
+    <div class="workspace-shell">
+      <SidebarNav :current-view="currentView" @update:view="currentView = $event" />
 
-    <section class="panel nav-panel">
-      <div class="view-switch">
-        <button :class="['level-btn', { active: currentView === 'home' }]" @click="currentView = 'home'">首页总览</button>
-        <button :class="['level-btn', { active: currentView === 'events' }]" @click="currentView = 'events'">事件管理</button>
-        <button :class="['level-btn', { active: currentView === 'questions' }]" @click="currentView = 'questions'">问题管理</button>
-        <button :class="['level-btn', { active: currentView === 'templates' }]" @click="currentView = 'templates'">模板配置</button>
-        <button :class="['level-btn', { active: currentView === 'tasks' }]" @click="currentView = 'tasks'">任务管理</button>
-        <button :class="['level-btn', { active: currentView === 'dataSources' }]" @click="currentView = 'dataSources'">数据源管理</button>
-        <button :class="['level-btn', { active: currentView === 'filterRules' }]" @click="currentView = 'filterRules'">过滤规则管理</button>
-      </div>
-    </section>
-
-    <main v-if="currentView === 'home'" class="layout-grid">
-      <section class="left-column">
-        <article class="panel">
-          <div class="panel-head">
-            <h2>事件监看</h2>
-            <span>每页 3 条，可分页</span>
-          </div>
-          <ul class="event-list">
-            <li
-              v-for="eventItem in previewEvents"
-              :key="eventItem.id"
-              :class="['event-card', { active: eventItem.id === selectedEventId }]"
-              @click="selectEvent(eventItem.id)"
-            >
-              <div class="row-between">
-                <strong>{{ eventItem.title }}</strong>
-                <div class="tag-group">
-                  <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
-                  <span class="badge filter-badge">{{ eventItem.filterStatus }}</span>
-                </div>
-              </div>
-              <p>{{ eventItem.theater }}</p>
-              <small>{{ eventItem.summary }}</small>
-              <div v-if="eventItem.tags.length > 0" class="tag-group">
-                <span v-for="tag in eventItem.tags" :key="`home-tag-${eventItem.id}-${tag}`" class="badge">
-                  {{ tag }}
-                </span>
-              </div>
-              <span class="time">{{ formatDate(eventItem.timestamp) }}</span>
-              <div class="action-row action-right">
-                <button class="action-btn mini-btn" @click.stop="openHomeDetail(eventItem)">详情</button>
-              </div>
-            </li>
-          </ul>
-          <div class="action-row pagination-row pagination-center mini-pagination">
-            <button class="action-btn mini-btn" @click="goHomeEventPage(-1)">上一页</button>
-            <span>{{ homeEventPage }} / {{ homeEventTotalPages }}</span>
-            <input v-model="homeEventJumpPage" class="jump-input mini-jump-input" placeholder="页码" />
-            <button class="action-btn mini-btn" @click="jumpToHomeEventPageFromInput">跳转</button>
-            <button class="action-btn mini-btn" @click="goHomeEventPage(1)">下一页</button>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-head">
-            <h2>模型排行榜</h2>
-            <span>等级筛选</span>
-          </div>
-          <div class="level-switch">
-            <button
-              :class="['level-btn', { active: rankingLevel === 'ALL' }]"
-              @click="rankingLevel = 'ALL'"
-            >
-              全部
-            </button>
-            <button
-              v-for="level in levels"
-              :key="`rank-${level}`"
-              :class="['level-btn', { active: rankingLevel === level }]"
-              @click="rankingLevel = level"
-            >
-              {{ level }}
-            </button>
-          </div>
-
-          <div class="rank-table">
-            <div class="rank-head">
-              <span>模型</span>
-              <span>分数</span>
-              <span>准确率%</span>
-              <span>耗时</span>
+      <div class="workspace-main">
+        <main v-if="currentView === 'home'" class="home-stack">
+          <article class="panel">
+            <div class="panel-head">
+              <h2>事件监看</h2>
             </div>
-            <div v-for="row in displayedRanking" :key="`${row.model}-${row.level}`" class="rank-row">
-              <span>{{ row.model }} ({{ row.level }})</span>
-              <span>{{ row.score.toFixed(1) }}</span>
-              <span>{{ row.accuracy }}</span>
-              <span>{{ row.avgLatency }}ms</span>
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section class="right-column">
-        <article class="panel">
-          <div class="panel-head">
-            <h2>自动生成问题</h2>
-            <span>{{ selectedEvent?.theater ?? '未选择事件' }}</span>
-          </div>
-          <div class="question-grid">
-            <div
-              v-for="question in filteredQuestions"
-              :key="question.id"
-              :class="['question-card', { active: question.id === selectedQuestionId }]"
-              @click="selectedQuestionId = question.id"
-            >
-              <div class="row-between">
-                <strong>{{ question.level }}</strong>
-                <span class="status">{{ statusLabel[question.status] }}</span>
-              </div>
-              <p>{{ question.title }}</p>
-              <small>截止时间：{{ formatDate(question.deadline) }}</small>
-            </div>
-          </div>
-        </article>
-
-        <article v-if="selectedQuestion" class="panel">
-          <div class="panel-head">
-            <h2>问题详情</h2>
-            <span>{{ selectedQuestion.id }}</span>
-          </div>
-
-          <div class="detail-block">
-            <h3>{{ selectedQuestion.title }}</h3>
-            <p>{{ selectedQuestion.hypothesis }}</p>
-            <p class="truth">真实结果：{{ selectedQuestion.groundTruth }}</p>
-          </div>
-
-          <div class="split-grid">
-            <section class="subpanel">
-              <h3>模型答案与分析</h3>
-              <div v-for="item in selectedQuestionAnswers" :key="item.model" class="answer-card">
+            <div v-if="!homeHasEvents" class="empty-state">暂无事件数据</div>
+            <ul v-else class="event-list home-event-grid">
+              <li
+                v-for="eventItem in previewEvents"
+                :key="eventItem.id"
+                :class="['event-card', { active: eventItem.id === selectedEventId }]"
+                @click="selectEvent(eventItem.id)"
+              >
                 <div class="row-between">
-                  <strong>{{ item.model }}</strong>
-                  <span>置信度 {{ item.confidence }}%</span>
+                  <strong>{{ eventItem.title }}</strong>
+                  <div class="tag-group">
+                    <span :class="['badge', severityBadgeTone(eventItem.severity)]">{{ severityLabel[eventItem.severity] }}</span>
+                    <span :class="['badge', eventFilterBadgeTone(eventItem.filterStatus)]">{{ eventItem.filterStatus }}</span>
+                  </div>
                 </div>
-                <p>{{ item.answer }}</p>
-                <small>原因：{{ item.reason }}</small>
-                <span class="time">推理耗时：{{ item.latencyMs }}ms</span>
-              </div>
-            </section>
-
-            <section class="subpanel">
-              <h3>专家答案与互评</h3>
-              <div class="expert-inputs">
-                <input v-model="draftExpert.name" placeholder="专家姓名" />
-                <textarea v-model="draftExpert.answer" rows="2" placeholder="专家答案"></textarea>
-                <textarea v-model="draftExpert.reason" rows="3" placeholder="专家推理过程"></textarea>
-                <button class="action-btn" @click="addExpertAnswer">提交专家答案</button>
-              </div>
-
-              <div v-for="expert in selectedExpertAnswers" :key="expert.id" class="answer-card">
-                <strong>{{ expert.expert }}</strong>
-                <p>{{ expert.answer }}</p>
-                <small>推理：{{ expert.reason }}</small>
-
-                <div class="comment-list">
-                  <p v-for="comment in expert.comments" :key="comment.id">
-                    <span>{{ comment.author }}:</span> {{ comment.content }}
-                  </p>
+                <p>{{ eventItem.theater }}</p>
+                <small>{{ eventItem.summary }}</small>
+                <div v-if="eventItem.tags.length > 0" class="tag-group">
+                  <span v-for="tag in eventItem.tags" :key="`home-tag-${eventItem.id}-${tag}`" class="badge">
+                    {{ tag }}
+                  </span>
                 </div>
-                <div class="inline-comment">
-                  <input
-                    v-model="draftExpertComments[expert.id]"
-                    placeholder="对该专家分析发表评论"
-                  />
-                  <button @click="addExpertComment(expert.id)">回复</button>
+                <span class="time">{{ formatDate(eventItem.timestamp) }}</span>
+                <div class="action-row action-right">
+                  <button class="action-btn mini-btn" @click.stop="openHomeDetail(eventItem)">详情</button>
                 </div>
-              </div>
-            </section>
-          </div>
+              </li>
+            </ul>
+            <div class="action-row pagination-row pagination-center mini-pagination">
+              <button class="action-btn mini-btn" @click="goHomeEventPage(-1)">上一页</button>
+              <span>{{ homeEventPage }} / {{ homeEventTotalPages }}</span>
+              <input v-model="homeEventJumpPage" class="jump-input mini-jump-input" placeholder="页码" />
+              <button class="action-btn mini-btn" @click="jumpToHomeEventPageFromInput">跳转</button>
+              <button class="action-btn mini-btn" @click="goHomeEventPage(1)">下一页</button>
+            </div>
+          </article>
 
-          <section class="subpanel">
-            <h3>问题讨论区</h3>
-            <div class="comment-list">
-              <p v-for="comment in selectedQuestionComments" :key="comment.id">
-                <span>{{ comment.author }}:</span> {{ comment.content }}
-              </p>
+          <article class="panel">
+            <div class="panel-head">
+              <h2>模型排行榜</h2>
             </div>
-            <div class="inline-comment">
-              <input v-model="draftQuestionComment" placeholder="添加问题级评论" />
-              <button @click="addQuestionComment">发布</button>
+            <div class="level-switch">
+              <button
+                :class="['level-btn', { active: rankingLevel === 'ALL' }]"
+                @click="rankingLevel = 'ALL'"
+              >
+                全部
+              </button>
+              <button
+                v-for="level in levels"
+                :key="`rank-${level}`"
+                :class="['level-btn', { active: rankingLevel === level }]"
+                @click="rankingLevel = level"
+              >
+                {{ level }}
+              </button>
             </div>
-          </section>
-        </article>
-      </section>
-    </main>
 
-    <main v-if="currentView === 'events'" class="manage-grid">
-      <article class="panel list-panel">
-        <div class="panel-head">
-          <h2>事件列表</h2>
-          <span>第 {{ eventManagePage }} / {{ eventManageTotalPages }} 页</span>
-        </div>
-        <div class="action-row">
-          <button class="action-btn" @click="createEventDialogOpen = true; void fetchSourceSystemOptions()">新增事件</button>
-          <button class="action-btn" @click="toggleSelectAllEventsOnPage">
-            {{ allEventsOnPageSelected ? '取消全选本页' : '全选本页' }}
-          </button>
-          <button class="action-btn compact-btn" :disabled="eventReviewProcessing" @click="reviewSelectedEvents('passed')">批量通过</button>
-          <button class="action-btn danger compact-btn" :disabled="eventReviewProcessing" @click="reviewSelectedEvents('filtered')">批量拒绝</button>
-          <button class="action-btn danger compact-btn" @click="deleteSelectedEventsBatch">批量删除所选</button>
-          <input v-model="eventManageSearchKeyword" placeholder="搜索事件标题/内容" />
-          <select v-model="eventManageFilterStatus">
-            <option value="">全部状态</option>
-            <option value="pending">pending</option>
-            <option value="passed">passed</option>
-            <option value="filtered">filtered</option>
-            <option value="reviewed">reviewed（passed + filtered）</option>
-          </select>
-          <input v-model="eventManageTimeFrom" type="datetime-local" placeholder="发布时间起" />
-          <input v-model="eventManageTimeTo" type="datetime-local" placeholder="发布时间止" />
-          <small>{{ eventManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? manageEventTotal : localFilteredManageEvents.length} 条` }}</small>
-        </div>
-        <ul class="event-list event-list-tall">
-          <li
-            v-for="eventItem in pagedManageEvents"
-            :key="`manage-${eventItem.id}`"
-            :class="['event-card', { active: eventItem.id === selectedEventId }]"
-            @click="selectEvent(eventItem.id); openManageDetail(eventItem)"
-          >
-            <div class="row-between">
-              <label class="select-row" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedManageEventIds.includes(eventItem.id)"
-                  @change="toggleManageEventSelection(eventItem.id)"
-                />
-                <span>选择</span>
-              </label>
-              <strong>{{ eventItem.title }}</strong>
-              <div class="tag-group">
-                <span class="badge">{{ severityLabel[eventItem.severity] }}</span>
-                <span class="badge filter-badge">{{ eventItem.filterStatus }}</span>
-              </div>
+            <div v-if="!hasDisplayedRanking" class="empty-state">暂无模型排行数据</div>
+            <div v-else class="home-rank-grid">
+              <article v-for="row in displayedRanking" :key="`${row.model}-${row.level}`" class="rank-card">
+                <div class="row-between">
+                  <strong>{{ row.model }}</strong>
+                  <span class="badge">{{ row.level }}</span>
+                </div>
+                <p class="rank-score">{{ row.score.toFixed(1) }}</p>
+                <small class="rank-meta">准确率 {{ row.accuracy }}%</small>
+                <small class="rank-meta">耗时 {{ row.avgLatency }}ms</small>
+              </article>
             </div>
-            <p>{{ eventItem.theater }}</p>
-            <small>{{ eventItem.summary }}</small>
-            <div v-if="eventItem.tags.length > 0" class="tag-group">
-              <span v-for="tag in eventItem.tags" :key="`manage-tag-${eventItem.id}-${tag}`" class="badge">
-                {{ tag }}
-              </span>
-            </div>
-            <div class="action-row">
-              <button class="action-btn" @click.stop="openEventEdit(eventItem)">编辑</button>
-            </div>
-          </li>
-        </ul>
-        <div class="action-row pagination-row pagination-center">
-          <span>每页</span>
-          <select :value="eventManagePageSize" @change="setEventManagePageSize(Number(($event.target as HTMLSelectElement).value))">
-            <option v-for="size in eventManagePageSizeOptions" :key="`event-page-size-${size}`" :value="size">{{ size }}</option>
-          </select>
-          <button class="action-btn" @click="goManageEventPage(-1)">上一页</button>
-          <input v-model="eventManageJumpPage" class="jump-input" placeholder="页码" />
-          <button class="action-btn" @click="jumpToEventPageFromInput">跳转</button>
-          <button class="action-btn" @click="goManageEventPage(1)">下一页</button>
-        </div>
-      </article>
-    </main>
+          </article>
+        </main>
 
-    <main v-if="currentView === 'questions'" class="manage-grid">
-      <article class="panel list-panel">
-        <div class="panel-head">
-          <h2>问题列表</h2>
-          <span>第 {{ questionManagePage }} / {{ questionManageTotalPages }} 页</span>
-        </div>
-        <div class="action-row">
-          <button class="action-btn" @click="openCreateQuestionDialog">新增问题</button>
-          <button class="action-btn" @click="toggleSelectAllQuestionsOnPage">
-            {{ allQuestionsOnPageSelected ? '取消全选本页' : '全选本页' }}
-          </button>
-          <button class="action-btn danger" @click="deleteSelectedQuestionsBatch">批量删除所选</button>
-          <input v-model="questionManageSearchKeyword" placeholder="搜索问题标题" />
-          <small>{{ questionManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? questionManageTotal : localFilteredManageQuestions.length} 条` }}</small>
-        </div>
-        <ul class="event-list">
-          <li
-            v-for="question in pagedManageQuestions"
-            :key="`manage-${question.id}`"
-            :class="['question-card', { active: question.id === selectedQuestionId }]"
-            @click="selectedQuestionId = question.id; openManageQuestionDetail(question)"
-          >
-            <div class="row-between">
-              <label class="select-row" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedManageQuestionIds.includes(question.id)"
-                  @change="toggleManageQuestionSelection(question.id)"
-                />
-                <span>选择</span>
-              </label>
-              <div class="tag-group">
-                <span class="badge">{{ question.level }}</span>
-                <span class="badge">{{ statusLabel[question.status] }}</span>
-              </div>
-            </div>
-            <p>{{ question.title }}</p>
-            <small>关联事件：{{ allKnownEvents.find((eventItem) => eventItem.id === question.eventId)?.title ?? '未匹配事件' }}</small>
-            <div class="action-row action-right">
-              <button class="action-btn" @click.stop="openQuestionEdit(question)">编辑</button>
-            </div>
-          </li>
-        </ul>
-        <div class="action-row pagination-row pagination-center">
-          <span>每页</span>
-          <button :class="['level-btn', { active: questionManagePageSize === 3 }]" @click="setQuestionManagePageSize(3)">3</button>
-          <button :class="['level-btn', { active: questionManagePageSize === 6 }]" @click="setQuestionManagePageSize(6)">6</button>
-          <button :class="['level-btn', { active: questionManagePageSize === 10 }]" @click="setQuestionManagePageSize(10)">10</button>
-          <button class="action-btn" @click="goManageQuestionPage(-1)">上一页</button>
-          <input v-model="questionManageJumpPage" class="jump-input" placeholder="页码" />
-          <button class="action-btn" @click="jumpToQuestionPageFromInput">跳转</button>
-          <button class="action-btn" @click="goManageQuestionPage(1)">下一页</button>
-        </div>
-      </article>
+    <ManageEventsPanel
+      v-if="currentView === 'events'"
+      :event-manage-page="eventManagePage"
+      :event-manage-total-pages="eventManageTotalPages"
+      :all-events-on-page-selected="allEventsOnPageSelected"
+      :event-review-processing="eventReviewProcessing"
+      :event-manage-search-keyword="eventManageSearchKeyword"
+      :event-manage-filter-status="eventManageFilterStatus"
+      :event-manage-time-from="eventManageTimeFrom"
+      :event-manage-time-to="eventManageTimeTo"
+      :event-manage-search-loading="eventManageSearchLoading"
+      :backend-online="backendOnline"
+      :manage-event-total="manageEventTotal"
+      :local-filtered-manage-events-length="localFilteredManageEvents.length"
+      :skeleton-rows="skeletonRows"
+      :has-manage-events="hasManageEvents"
+      :paged-manage-events="pagedManageEvents"
+      :selected-event-id="selectedEventId"
+      :selected-manage-event-ids="selectedManageEventIds"
+      :event-manage-page-size="eventManagePageSize"
+      :event-manage-page-size-options="eventManagePageSizeOptions"
+      :event-manage-jump-page="eventManageJumpPage"
+      @open-create-event="createEventDialogOpen = true; void fetchSourceSystemOptions()"
+      @toggle-select-all="toggleSelectAllEventsOnPage"
+      @review-events="reviewSelectedEvents"
+      @delete-selected-batch="deleteSelectedEventsBatch"
+      @update:search-keyword="eventManageSearchKeyword = $event"
+      @update:filter-status="eventManageFilterStatus = $event"
+      @update:time-from="eventManageTimeFrom = $event"
+      @update:time-to="eventManageTimeTo = $event"
+      @select-event="selectEvent"
+      @open-manage-detail="openManageDetail"
+      @toggle-selection="toggleManageEventSelection"
+      @open-edit="openEventEdit"
+      @set-page-size="setEventManagePageSize"
+      @go-page="goManageEventPage"
+      @update:jump-page="eventManageJumpPage = $event"
+      @jump-to-page="jumpToEventPageFromInput"
+    />
 
-    </main>
+    <ManageQuestionsPanel
+      v-if="currentView === 'questions'"
+      :question-manage-page="questionManagePage"
+      :question-manage-total-pages="questionManageTotalPages"
+      :all-questions-on-page-selected="allQuestionsOnPageSelected"
+      :question-manage-search-keyword="questionManageSearchKeyword"
+      :question-manage-search-loading="questionManageSearchLoading"
+      :backend-online="backendOnline"
+      :question-manage-total="questionManageTotal"
+      :local-filtered-manage-questions-length="localFilteredManageQuestions.length"
+      :skeleton-rows="skeletonRows"
+      :has-manage-questions="hasManageQuestions"
+      :paged-manage-questions="pagedManageQuestions"
+      :selected-question-id="selectedQuestionId"
+      :selected-manage-question-ids="selectedManageQuestionIds"
+      :question-manage-page-size="questionManagePageSize"
+      :question-manage-jump-page="questionManageJumpPage"
+      :all-known-events="allKnownEvents"
+      @open-create-question="openCreateQuestionDialog"
+      @toggle-select-all="toggleSelectAllQuestionsOnPage"
+      @delete-selected-batch="deleteSelectedQuestionsBatch"
+      @update:search-keyword="questionManageSearchKeyword = $event"
+      @select-question="selectedQuestionId = $event"
+      @open-manage-detail="openManageQuestionDetail"
+      @toggle-selection="toggleManageQuestionSelection"
+      @open-edit="openQuestionEdit"
+      @set-page-size="setQuestionManagePageSize"
+      @go-page="goManageQuestionPage"
+      @update:jump-page="questionManageJumpPage = $event"
+      @jump-to-page="jumpToQuestionPageFromInput"
+    />
 
-    <main v-if="currentView === 'templates'" class="manage-grid">
-      <article class="panel list-panel">
-        <div class="panel-head">
-          <h2>模板配置列表</h2>
-          <span>第 {{ templateManagePage }} / {{ templateManageTotalPages }} 页</span>
-        </div>
-        <div class="action-row">
-          <button class="action-btn" @click="createTemplateDialogOpen = true">新增模板</button>
-          <button class="action-btn" @click="toggleSelectAllTemplatesOnPage">
-            {{ allTemplatesOnPageSelected ? '取消全选本页' : '全选本页' }}
-          </button>
-          <button class="action-btn danger" @click="deleteSelectedTemplatesBatch">批量删除所选</button>
-          <input v-model="templateManageSearchKeyword" placeholder="搜索模板/主题/理由/候选答案" />
-          <small>匹配 {{ templateManageTotal }} 条</small>
-        </div>
-        <ul class="event-list">
-          <li
-            v-for="item in templates"
-            :key="`template-${item.id}`"
-            :class="['question-card', { active: selectedTemplate?.id === item.id }]"
-            @click="openTemplateDetail(item)"
-          >
-            <div class="row-between">
-              <label class="select-row" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedManageTemplateIds.includes(item.id)"
-                  @change="toggleManageTemplateSelection(item.id)"
-                />
-                <span>选择</span>
-              </label>
-              <strong>{{ item.questionTemplate }}</strong>
-              <div class="tag-group">
-                <span class="badge">{{ item.difficultyLevel }}</span>
-                <span class="badge">{{ item.status }}</span>
-              </div>
-            </div>
-            <p>{{ item.majorTopic }} / {{ item.minorTopic }}</p>
-            <small>{{ item.candidateAnswers }}</small>
-            <div class="action-row action-right">
-              <button class="action-btn" @click.stop="openTemplateEdit(item)">编辑</button>
-            </div>
-          </li>
-        </ul>
-        <div class="action-row pagination-row pagination-center">
-          <span>每页</span>
-          <button :class="['level-btn', { active: templateManagePageSize === 3 }]" @click="setTemplateManagePageSize(3)">3</button>
-          <button :class="['level-btn', { active: templateManagePageSize === 6 }]" @click="setTemplateManagePageSize(6)">6</button>
-          <button :class="['level-btn', { active: templateManagePageSize === 10 }]" @click="setTemplateManagePageSize(10)">10</button>
-          <button class="action-btn" @click="goTemplateManagePage(-1)">上一页</button>
-          <input v-model="templateManageJumpPage" class="jump-input" placeholder="页码" />
-          <button class="action-btn" @click="jumpToTemplatePageFromInput">跳转</button>
-          <button class="action-btn" @click="goTemplateManagePage(1)">下一页</button>
-        </div>
-      </article>
+    <ManageTemplatesPanel
+      v-if="currentView === 'templates'"
+      :template-manage-page="templateManagePage"
+      :template-manage-total-pages="templateManageTotalPages"
+      :all-templates-on-page-selected="allTemplatesOnPageSelected"
+      :template-manage-search-keyword="templateManageSearchKeyword"
+      :template-manage-total="templateManageTotal"
+      :has-templates="hasTemplates"
+      :templates="templates"
+      :selected-template-id="selectedTemplate?.id ?? ''"
+      :selected-manage-template-ids="selectedManageTemplateIds"
+      :template-manage-page-size="templateManagePageSize"
+      :template-manage-jump-page="templateManageJumpPage"
+      @open-create-template="createTemplateDialogOpen = true"
+      @toggle-select-all="toggleSelectAllTemplatesOnPage"
+      @delete-selected-batch="deleteSelectedTemplatesBatch"
+      @update:search-keyword="templateManageSearchKeyword = $event"
+      @open-detail="openTemplateDetail"
+      @toggle-selection="toggleManageTemplateSelection"
+      @open-edit="openTemplateEdit"
+      @set-page-size="setTemplateManagePageSize"
+      @go-page="goTemplateManagePage"
+      @update:jump-page="templateManageJumpPage = $event"
+      @jump-to-page="jumpToTemplatePageFromInput"
+    />
 
-    </main>
+    <ManageTasksPanel
+      v-if="currentView === 'tasks'"
+      :auto-review-processing="autoReviewProcessing"
+      :all-tasks-on-page-selected="allTasksOnPageSelected"
+      :has-tasks="hasTasks"
+      :tasks="tasks"
+      :selected-task-id="selectedTask?.id ?? ''"
+      :selected-manage-task-ids="selectedManageTaskIds"
+      :task-manage-page-size="taskManagePageSize"
+      :task-manage-jump-page="taskManageJumpPage"
+      @open-trigger-pull="triggerPullDialogOpen = true; void fetchSourceSystemOptions()"
+      @trigger-auto-review="triggerAutoReviewNow"
+      @open-create-task="createTaskDialogOpen = true"
+      @toggle-select-all="toggleSelectAllTasksOnPage"
+      @delete-selected-batch="deleteSelectedTasksBatch"
+      @open-detail="openTaskDetail"
+      @toggle-selection="toggleManageTaskSelection"
+      @set-page-size="setTaskManagePageSize"
+      @go-page="goTaskManagePage"
+      @update:jump-page="taskManageJumpPage = $event"
+      @jump-to-page="jumpToTaskPageFromInput"
+    />
 
-    <main v-if="currentView === 'tasks'" class="manage-grid">
-      <article class="panel list-panel">
-        <div class="panel-head">
-          <h2>任务执行列表</h2>
-          <span>最新执行优先</span>
-        </div>
-        <div class="action-row">
-          <button class="action-btn" @click="triggerPullDialogOpen = true; void fetchSourceSystemOptions()">拉取烽火事件</button>
-          <button class="action-btn" :disabled="autoReviewProcessing" @click="triggerAutoReviewNow">
-            {{ autoReviewProcessing ? '评审中...' : '一键评审' }}
-          </button>
-          <button class="action-btn" @click="createTaskDialogOpen = true">新增任务</button>
-          <button class="action-btn" @click="toggleSelectAllTasksOnPage">
-            {{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}
-          </button>
-          <button class="action-btn danger" @click="deleteSelectedTasksBatch">批量删除</button>
-        </div>
-        <ul class="event-list">
-          <li
-            v-for="task in tasks"
-            :key="task.id"
-            :class="['question-card', { active: selectedTask?.id === task.id }]"
-            @click="openTaskDetail(task)"
-          >
-            <div class="row-between">
-              <label class="select-row" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedManageTaskIds.includes(task.id)"
-                  @change="toggleManageTaskSelection(task.id)"
-                />
-                <span>选择</span>
-              </label>
-              <div class="tag-group">
-                <span class="badge">{{ task.taskType }}</span>
-                <span class="badge">{{ task.status }}</span>
-              </div>
-            </div>
-            <p>{{ task.idempotencyKey }}</p>
-            <small>尝试次数：{{ task.attemptCount }} | Trace: {{ task.traceId }}</small>
-          </li>
-        </ul>
-        <div class="action-row pagination-row pagination-center">
-          <span>每页</span>
-          <button :class="['level-btn', { active: taskManagePageSize === 10 }]" @click="setTaskManagePageSize(10)">10</button>
-          <button :class="['level-btn', { active: taskManagePageSize === 20 }]" @click="setTaskManagePageSize(20)">20</button>
-          <button :class="['level-btn', { active: taskManagePageSize === 50 }]" @click="setTaskManagePageSize(50)">50</button>
-          <button class="action-btn" @click="goTaskManagePage(-1)">上一页</button>
-          <input v-model="taskManageJumpPage" class="jump-input" placeholder="页码" />
-          <button class="action-btn" @click="jumpToTaskPageFromInput">跳转</button>
-          <button class="action-btn" @click="goTaskManagePage(1)">下一页</button>
-        </div>
-      </article>
-    </main>
+    <ManageDataSourcesPanel
+      v-if="currentView === 'dataSources'"
+      :all-data-sources-on-page-selected="allDataSourcesOnPageSelected"
+      :has-data-sources="hasDataSources"
+      :data-sources="dataSources"
+      :selected-data-source-id="selectedDataSource?.id ?? ''"
+      :selected-manage-data-source-ids="selectedManageDataSourceIds"
+      :data-source-manage-page-size="dataSourceManagePageSize"
+      :data-source-manage-jump-page="dataSourceManageJumpPage"
+      @open-create="createDataSourceDialogOpen = true"
+      @toggle-select-all="toggleSelectAllDataSourcesOnPage"
+      @delete-selected-batch="deleteSelectedDataSourcesBatch"
+      @open-detail="openDataSourceDetail"
+      @toggle-selection="toggleManageDataSourceSelection"
+      @open-edit="openDataSourceEdit"
+      @set-page-size="setDataSourceManagePageSize"
+      @go-page="goDataSourceManagePage"
+      @update:jump-page="dataSourceManageJumpPage = $event"
+      @jump-to-page="jumpToDataSourcePageFromInput"
+    />
 
-    <main v-if="currentView === 'dataSources'" class="manage-grid">
-      <article class="panel list-panel">
-        <div class="panel-head">
-          <h2>数据源列表</h2>
-          <span>分页 + 批量操作</span>
-        </div>
-        <div class="action-row">
-          <button class="action-btn" @click="createDataSourceDialogOpen = true">新增数据源</button>
-          <button class="action-btn" @click="toggleSelectAllDataSourcesOnPage">
-            {{ allDataSourcesOnPageSelected ? '取消全选本页' : '全选本页' }}
-          </button>
-          <button class="action-btn danger" @click="deleteSelectedDataSourcesBatch">批量删除</button>
-        </div>
-        <ul class="event-list">
-          <li
-            v-for="item in dataSources"
-            :key="item.id"
-            :class="['question-card', { active: selectedDataSource?.id === item.id }]"
-            @click="openDataSourceDetail(item)"
-          >
-            <div class="row-between">
-              <label class="select-row" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedManageDataSourceIds.includes(item.id)"
-                  @change="toggleManageDataSourceSelection(item.id)"
-                />
-                <span>选择</span>
-              </label>
-              <div class="tag-group">
-                <span class="badge">{{ item.sourceType }}</span>
-                <span class="badge">{{ item.isActive ? 'active' : 'inactive' }}</span>
-              </div>
-            </div>
-            <p>{{ item.name }} ({{ item.sourceSystem }})</p>
-            <small>可信度 {{ item.credibilityLevel }} | 频率 {{ item.syncFrequency }}</small>
-            <div class="action-row action-right">
-              <button class="action-btn" @click.stop="openDataSourceEdit(item)">编辑</button>
-            </div>
-          </li>
-        </ul>
-        <div class="action-row pagination-row pagination-center">
-          <span>每页</span>
-          <button :class="['level-btn', { active: dataSourceManagePageSize === 10 }]" @click="setDataSourceManagePageSize(10)">10</button>
-          <button :class="['level-btn', { active: dataSourceManagePageSize === 20 }]" @click="setDataSourceManagePageSize(20)">20</button>
-          <button :class="['level-btn', { active: dataSourceManagePageSize === 50 }]" @click="setDataSourceManagePageSize(50)">50</button>
-          <button class="action-btn" @click="goDataSourceManagePage(-1)">上一页</button>
-          <input v-model="dataSourceManageJumpPage" class="jump-input" placeholder="页码" />
-          <button class="action-btn" @click="jumpToDataSourcePageFromInput">跳转</button>
-          <button class="action-btn" @click="goDataSourceManagePage(1)">下一页</button>
-        </div>
-      </article>
-    </main>
+    <ManageFilterRulesPanel
+      v-if="currentView === 'filterRules'"
+      :all-filter-rules-on-page-selected="allFilterRulesOnPageSelected"
+      :has-filter-rules="hasFilterRules"
+      :filter-rules="filterRules"
+      :selected-filter-rule-id="selectedFilterRule?.id ?? ''"
+      :selected-manage-filter-rule-ids="selectedManageFilterRuleIds"
+      :filter-rule-manage-page-size="filterRuleManagePageSize"
+      :filter-rule-manage-jump-page="filterRuleManageJumpPage"
+      @open-create="createFilterRuleDialogOpen = true"
+      @toggle-select-all="toggleSelectAllFilterRulesOnPage"
+      @delete-selected-batch="deleteSelectedFilterRulesBatch"
+      @open-detail="openFilterRuleDetail"
+      @toggle-selection="toggleManageFilterRuleSelection"
+      @open-edit="openFilterRuleEdit"
+      @set-page-size="setFilterRuleManagePageSize"
+      @go-page="goFilterRuleManagePage"
+      @update:jump-page="filterRuleManageJumpPage = $event"
+      @jump-to-page="jumpToFilterRulePageFromInput"
+    />
+      </div>
 
-    <main v-if="currentView === 'filterRules'" class="manage-grid">
-      <article class="panel list-panel">
-        <div class="panel-head">
-          <h2>过滤规则列表</h2>
-          <span>分页 + 批量操作</span>
-        </div>
-        <div class="action-row">
-          <button class="action-btn" @click="createFilterRuleDialogOpen = true">新增规则</button>
-          <button class="action-btn" @click="toggleSelectAllFilterRulesOnPage">
-            {{ allFilterRulesOnPageSelected ? '取消全选本页' : '全选本页' }}
-          </button>
-          <button class="action-btn danger" @click="deleteSelectedFilterRulesBatch">批量删除</button>
-        </div>
-        <ul class="event-list">
-          <li
-            v-for="item in filterRules"
-            :key="item.id"
-            :class="['question-card', { active: selectedFilterRule?.id === item.id }]"
-            @click="openFilterRuleDetail(item)"
-          >
-            <div class="row-between">
-              <label class="select-row" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="selectedManageFilterRuleIds.includes(item.id)"
-                  @change="toggleManageFilterRuleSelection(item.id)"
-                />
-                <span>选择</span>
-              </label>
-              <div class="tag-group">
-                <span class="badge">{{ item.filterExpression }}</span>
-                <span class="badge">{{ item.ruleScope }}</span>
-                <span class="badge">{{ item.status }}</span>
-              </div>
-            </div>
-            <p>{{ item.name }} (L{{ item.level }})</p>
-            <small>优先级 {{ item.priority }} | 版本 {{ item.version }}</small>
-            <div class="action-row action-right">
-              <button class="action-btn" @click.stop="openFilterRuleEdit(item)">编辑</button>
-            </div>
-          </li>
-        </ul>
-        <div class="action-row pagination-row pagination-center">
-          <span>每页</span>
-          <button :class="['level-btn', { active: filterRuleManagePageSize === 10 }]" @click="setFilterRuleManagePageSize(10)">10</button>
-          <button :class="['level-btn', { active: filterRuleManagePageSize === 20 }]" @click="setFilterRuleManagePageSize(20)">20</button>
-          <button :class="['level-btn', { active: filterRuleManagePageSize === 50 }]" @click="setFilterRuleManagePageSize(50)">50</button>
-          <button class="action-btn" @click="goFilterRuleManagePage(-1)">上一页</button>
-          <input v-model="filterRuleManageJumpPage" class="jump-input" placeholder="页码" />
-          <button class="action-btn" @click="jumpToFilterRulePageFromInput">跳转</button>
-          <button class="action-btn" @click="goFilterRuleManagePage(1)">下一页</button>
-        </div>
-      </article>
-    </main>
+    </div>
 
     <div v-if="taskDetailDialogOpen && selectedTaskDetail" class="dialog-backdrop" @click.self="taskDetailDialogOpen = false">
       <section class="dialog-panel">
@@ -3722,11 +3578,20 @@ watch(backendOnline, (online) => {
         </div>
         <div class="detail-grid">
           <p><strong>ID：</strong>{{ manageDetailQuestion.id }}</p>
-          <p><strong>关联事件：</strong>{{ allKnownEvents.find((item) => item.id === (manageDetailQuestion?.eventId ?? ''))?.title ?? '未匹配事件' }}</p>
+          <p>
+            <strong>关联事件：</strong>
+            {{
+              (manageDetailQuestion?.eventIds ?? [])
+                .map((eventId) => allKnownEvents.find((item) => item.id === eventId)?.title)
+                .filter((title): title is string => Boolean(title))
+                .join('、') || '未匹配事件'
+            }}
+          </p>
           <p><strong>等级：</strong>{{ manageDetailQuestion.level }}</p>
           <p><strong>状态：</strong>{{ statusLabel[manageDetailQuestion.status] }}</p>
           <p><strong>截止时间：</strong>{{ formatDate(manageDetailQuestion.deadline) }}</p>
           <p><strong>标题：</strong>{{ manageDetailQuestion.title }}</p>
+          <p><strong>答案范围：</strong>{{ manageDetailQuestion.answerSpace || '未填写' }}</p>
           <p><strong>假设：</strong>{{ manageDetailQuestion.hypothesis }}</p>
           <p><strong>真实结果：</strong>{{ manageDetailQuestion.groundTruth }}</p>
         </div>
@@ -3744,8 +3609,33 @@ watch(backendOnline, (online) => {
           <input v-model="questionEditForm.title" />
         </div>
         <div class="field-block">
+          <label>关联事件（可多选）</label>
+          <input v-model="questionEditEventSearch" placeholder="搜索可关联事件（标题/战区/内容）" />
+          <div class="question-event-multi-select">
+            <label v-for="eventItem in filteredKnownEventsForQuestionEdit" :key="`question-edit-target-${eventItem.id}`" class="select-row question-event-option">
+              <input
+                type="checkbox"
+                :checked="questionEditForm.eventIds.includes(eventItem.id)"
+                @change="toggleQuestionEditEventSelection(eventItem.id)"
+              />
+              <span>{{ eventItem.title }}（{{ eventItem.theater }}）</span>
+            </label>
+            <p v-if="filteredKnownEventsForQuestionEdit.length === 0" class="item-subtle">无匹配事件</p>
+          </div>
+        </div>
+        <div class="field-block">
+          <label>问题等级</label>
+          <select v-model="questionEditForm.level">
+            <option v-for="level in levels" :key="`edit-question-${level}`" :value="level">{{ level }}</option>
+          </select>
+        </div>
+        <div v-if="questionEditForm.level === 'L1' || questionEditForm.level === 'L2'" class="field-block">
+          <label>答案范围（L1/L2 必填）</label>
+          <textarea v-model="questionEditForm.answerSpace" rows="2" placeholder="请输入候选答案文本"></textarea>
+        </div>
+        <div class="field-block">
           <label>截止时间（ISO）</label>
-          <input v-model="questionEditForm.deadline" />
+          <input v-model="questionEditForm.deadline" type="datetime-local" />
         </div>
         <div class="field-block">
           <label>状态</label>
@@ -3962,27 +3852,39 @@ watch(backendOnline, (online) => {
         </div>
         <div class="field-block">
           <label>绑定事件</label>
-          <select v-model="selectedEventId">
-            <option v-if="questionEventSearchLoading" value="" disabled>搜索中...</option>
-            <option v-if="filteredKnownEventsForQuestion.length === 0" value="" disabled>无匹配新闻</option>
-            <option v-for="eventItem in filteredKnownEventsForQuestion" :key="`question-target-${eventItem.id}`" :value="eventItem.id">
-              {{ eventItem.title }}（{{ eventItem.theater }}）
-            </option>
-          </select>
+          <div class="question-event-multi-select">
+            <label
+              v-for="eventItem in filteredKnownEventsForQuestion"
+              :key="`question-target-${eventItem.id}`"
+              class="select-row question-event-option"
+            >
+              <input
+                type="checkbox"
+                :checked="selectedEventIdsForQuestion.includes(eventItem.id)"
+                @change="toggleQuestionEventSelection(eventItem.id)"
+              />
+              <span>{{ eventItem.title }}（{{ eventItem.theater }}）</span>
+            </label>
+            <p v-if="questionEventSearchLoading" class="item-subtle">搜索中...</p>
+            <p v-else-if="filteredKnownEventsForQuestion.length === 0" class="item-subtle">无匹配新闻</p>
+          </div>
+          <small>已选择 {{ selectedEventIdsForQuestion.length }} 个事件</small>
         </div>
         <div class="field-block">
           <label>问题标题</label>
           <input v-model="draftQuestion.title" placeholder="输入预测问题" />
         </div>
-        <div class="field-block">
-          <label>问题等级</label>
-          <select v-model="draftQuestion.level">
-            <option v-for="level in levels" :key="`new-question-${level}`" :value="level">{{ level }}</option>
-          </select>
-        </div>
-        <div class="field-block">
-          <label>截止时间</label>
-          <input v-model="draftQuestion.deadline" type="datetime-local" />
+        <div class="dialog-inline-grid">
+          <div class="field-block">
+            <label>问题等级</label>
+            <select v-model="draftQuestion.level">
+              <option v-for="level in levels" :key="`new-question-${level}`" :value="level">{{ level }}</option>
+            </select>
+          </div>
+          <div class="field-block">
+            <label>截止时间</label>
+            <input v-model="draftQuestion.deadline" class="deadline-input" type="datetime-local" step="60" />
+          </div>
         </div>
         <div class="field-block">
           <label>初始状态</label>
@@ -3992,10 +3894,25 @@ watch(backendOnline, (online) => {
             <option value="resolved">已解析</option>
           </select>
         </div>
+        <div v-if="draftQuestion.level === 'L1' || draftQuestion.level === 'L2'" class="field-block">
+          <label>答案范围（L1/L2 必填）</label>
+          <textarea
+            v-model="draftQuestion.answerSpace"
+            rows="2"
+            placeholder="请输入候选答案，支持换行/中英文逗号分隔"
+          ></textarea>
+        </div>
         <div class="action-row">
           <button class="action-btn" @click="submitCreateQuestionFromDialog">提交问题</button>
         </div>
       </section>
     </div>
+
+    <section class="toast-stack" aria-live="polite" aria-atomic="false">
+      <article v-for="toast in toasts" :key="toast.id" :class="['toast', `toast-${toast.kind}`]">
+        <p>{{ toast.message }}</p>
+        <button type="button" class="toast-close" @click="dismissToast(toast.id)">关闭</button>
+      </article>
+    </section>
   </div>
 </template>
