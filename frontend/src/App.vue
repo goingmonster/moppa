@@ -680,11 +680,12 @@ const allKnownEvents = computed(() => {
   return Array.from(map.values())
 })
 const localFilteredKnownEventsForQuestion = computed(() => {
+  const passedEvents = allKnownEvents.value.filter((item) => item.filterStatus === 'passed')
   const keyword = questionEventSearch.value.trim().toLowerCase()
   if (!keyword) {
-    return allKnownEvents.value
+    return passedEvents
   }
-  return allKnownEvents.value.filter((item) => {
+  return passedEvents.filter((item) => {
     const haystack = `${item.title}\n${item.summary}`.toLowerCase()
     return haystack.includes(keyword)
   })
@@ -2223,7 +2224,7 @@ async function fetchQuestionEventOptions(keyword: string): Promise<void> {
   try {
     const query = encodeURIComponent(keyword.trim())
     const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-      `/events/search?keyword=${query}&page=1&page_size=50`,
+      `/events/search?keyword=${query}&filter_status=passed&page=1&page_size=50`,
     )
     if (requestSeq !== questionEventSearchSeq.value) {
       return
