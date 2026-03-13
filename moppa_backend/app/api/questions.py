@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import get_current_user, require_admin_user
 from app.db.models import QuestionEntity
 from app.db.session import get_db
 from app.models.common_model import BatchDeleteRequest, BatchDeleteResponse
@@ -27,7 +28,11 @@ def to_question_list_item(entity: QuestionEntity, event_ids: list[str] | None = 
 
 
 @router.post("", summary="Create question")
-def create_question(payload: QuestionCreateModel, db: Session = Depends(get_db)) -> dict[str, str]:
+def create_question(
+    payload: QuestionCreateModel,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin_user),
+) -> dict[str, str]:
     service = QuestionService(db)
     try:
         question_id = service.create(payload)
@@ -41,6 +46,7 @@ def list_questions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    _: object = Depends(get_current_user),
 ) -> QuestionPaginationResponse:
     service = QuestionService(db)
     rows, total = service.list_paginated(page=page, page_size=page_size)
@@ -61,6 +67,7 @@ def search_questions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    _: object = Depends(get_current_user),
 ) -> QuestionPaginationResponse:
     service = QuestionService(db)
     rows, total = service.search_paginated(keyword=keyword, page=page, page_size=page_size)
@@ -76,14 +83,22 @@ def search_questions(
 
 
 @router.delete("", summary="Batch delete questions")
-def delete_questions(payload: BatchDeleteRequest, db: Session = Depends(get_db)) -> BatchDeleteResponse:
+def delete_questions(
+    payload: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin_user),
+) -> BatchDeleteResponse:
     service = QuestionService(db)
     deleted_count = service.batch_delete(payload.ids)
     return BatchDeleteResponse(deleted_count=deleted_count)
 
 
 @router.get("/{question_id}", summary="Get question detail")
-def get_question(question_id: str, db: Session = Depends(get_db)) -> QuestionListItemModel:
+def get_question(
+    question_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(get_current_user),
+) -> QuestionListItemModel:
     service = QuestionService(db)
     entity = service.get_by_id(question_id)
     if entity is None:
@@ -93,7 +108,12 @@ def get_question(question_id: str, db: Session = Depends(get_db)) -> QuestionLis
 
 
 @router.patch("/{question_id}", summary="Update question")
-def update_question(question_id: str, payload: QuestionUpdateModel, db: Session = Depends(get_db)) -> QuestionListItemModel:
+def update_question(
+    question_id: str,
+    payload: QuestionUpdateModel,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin_user),
+) -> QuestionListItemModel:
     service = QuestionService(db)
     if not payload.model_dump(exclude_none=True):
         raise ApiError(status_code=400, code="EMPTY_UPDATE_PAYLOAD", message="No fields to update")

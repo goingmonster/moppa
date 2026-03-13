@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import require_admin_user
 from app.db.models import SystemConfigEntity
 from app.db.session import get_db
 from app.models.task_config_model import (
@@ -14,7 +15,7 @@ from app.models.task_config_model import (
 from app.services.task_config_service import TaskConfigService
 
 
-router = APIRouter(prefix="/task-configs", tags=["task-configs"])
+router = APIRouter(prefix="/task-configs", tags=["task-configs"], dependencies=[Depends(require_admin_user)])
 
 
 def to_item(entity: SystemConfigEntity) -> TaskConfigItemModel:

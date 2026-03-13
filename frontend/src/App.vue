@@ -57,6 +57,20 @@ interface BackendHealth {
   database: boolean
 }
 
+interface AuthUser {
+  id: string
+  username: string
+  role: string
+  is_active: boolean
+}
+
+interface AuthLoginApiResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  user: AuthUser
+}
+
 interface BackendEventItem {
   id: string
   event_key: string
@@ -314,6 +328,15 @@ const rankingLevel = ref<'ALL' | Level>('ALL')
 const currentView = ref<AppView>('home')
 const backendStatus = ref('后端未连接，当前使用模拟数据')
 const backendOnline = ref(false)
+const authUser = ref<AuthUser | null>(null)
+const authLoading = ref(false)
+const authError = ref('')
+const authDialogOpen = ref(false)
+const authMode = ref<'login' | 'register'>('login')
+const authAccessToken = ref(localStorage.getItem('moppa_access_token') ?? '')
+const authRefreshToken = ref(localStorage.getItem('moppa_refresh_token') ?? '')
+const authForm = reactive({ username: '', password: '', email: '' })
+let authRefreshPromise: Promise<boolean> | null = null
 const toasts = ref<ToastItem[]>([])
 let toastSeed = 0
 
@@ -509,6 +532,8 @@ const editFilterRuleForm = reactive({
 })
 
 const selectedTemplateDetail = computed(() => selectedTemplate.value)
+const isAuthenticated = computed(() => Boolean(authUser.value))
+const isAdmin = computed(() => authUser.value?.role === 'admin')
 const previewEvents = computed(() => homeEvents.value.filter((item) => item.filterStatus === 'passed'))
 const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.value / homeEventPageSize)))
 const homeHasEvents = computed(() => previewEvents.value.length > 0)
@@ -658,8 +683,6 @@ const allFilterRulesOnPageSelected = computed(
     filterRules.value.length > 0 &&
     filterRules.value.every((item) => selectedManageFilterRuleIds.value.includes(item.id)),
 )
-
-const dataSourceLabel = computed(() => (backendOnline.value ? '后端' : '模拟'))
 
 const displayedRanking = computed(() => {
   const filtered =
@@ -2341,22 +2364,88 @@ async function ensureQuestionEventOptionsByIds(eventIds: string[]): Promise<void
   questionEventOptions.value = merged
 }
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
-  const response = await fetch(`${base}${path}`)
-  if (!response.ok) {
-    throw new Error(`请求失败: ${response.status}`)
-  }
-  return (await response.json()) as T
+function apiBaseUrl(): string {
+  return (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
 }
 
-async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', body: object): Promise<T> {
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+function applyAuthSession(payload: AuthLoginApiResponse): void {
+  authAccessToken.value = payload.access_token
+  authRefreshToken.value = payload.refresh_token
+  authUser.value = payload.user
+  localStorage.setItem('moppa_access_token', payload.access_token)
+  localStorage.setItem('moppa_refresh_token', payload.refresh_token)
+}
+
+function clearAuthSession(openDialog = true): void {
+  authAccessToken.value = ''
+  authRefreshToken.value = ''
+  authUser.value = null
+  localStorage.removeItem('moppa_access_token')
+  localStorage.removeItem('moppa_refresh_token')
+  if (openDialog) {
+    authDialogOpen.value = true
+  }
+}
+
+async function refreshAuthSession(): Promise<boolean> {
+  if (!authRefreshToken.value) {
+    return false
+  }
+  if (authRefreshPromise) {
+    return authRefreshPromise
+  }
+  authRefreshPromise = (async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl()}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: authRefreshToken.value }),
+      })
+      if (!response.ok) {
+        return false
+      }
+      const payload = (await response.json()) as AuthLoginApiResponse
+      applyAuthSession(payload)
+      return true
+    } catch {
+      return false
+    } finally {
+      authRefreshPromise = null
+    }
+  })()
+  const refreshed = await authRefreshPromise
+  if (!refreshed) {
+    clearAuthSession(true)
+  }
+  return refreshed
+}
+
+async function requestJson<T>(
+  path: string,
+  init: RequestInit,
+  withAuth: boolean,
+  retryOnUnauthorized: boolean,
+): Promise<T> {
+  const headers = new Headers(init.headers ?? {})
+  if (!headers.has('Content-Type') && init.body) {
+    headers.set('Content-Type', 'application/json')
+  }
+  if (withAuth && authAccessToken.value) {
+    headers.set('Authorization', `Bearer ${authAccessToken.value}`)
+  }
+
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
+    ...init,
+    headers,
   })
+
+  if (response.status === 401 && retryOnUnauthorized && withAuth) {
+    const refreshed = await refreshAuthSession()
+    if (refreshed) {
+      return requestJson<T>(path, init, withAuth, false)
+    }
+  }
+
   if (!response.ok) {
     throw new Error(`请求失败: ${response.status}`)
   }
@@ -2364,6 +2453,97 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
     return {} as T
   }
   return (await response.json()) as T
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const shouldAttachAuth = !path.startsWith('/auth/login') && !path.startsWith('/auth/register') && !path.startsWith('/auth/refresh')
+  return requestJson<T>(path, { method: 'GET' }, shouldAttachAuth, true)
+}
+
+async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', body: object): Promise<T> {
+  const shouldAttachAuth = !path.startsWith('/auth/login') && !path.startsWith('/auth/register') && !path.startsWith('/auth/refresh')
+  return requestJson<T>(
+    path,
+    {
+      method,
+      body: JSON.stringify(body),
+    },
+    shouldAttachAuth,
+    true,
+  )
+}
+
+async function bootstrapAuthSession(): Promise<void> {
+  authLoading.value = true
+  try {
+    if (authAccessToken.value) {
+      const me = await fetchJson<AuthUser>('/auth/me')
+      authUser.value = me
+      authDialogOpen.value = false
+      authError.value = ''
+      return
+    }
+    if (authRefreshToken.value) {
+      const refreshed = await refreshAuthSession()
+      if (refreshed) {
+        authDialogOpen.value = false
+        authError.value = ''
+        return
+      }
+    }
+    authDialogOpen.value = true
+  } catch {
+    clearAuthSession(true)
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function submitAuth(): Promise<void> {
+  const username = authForm.username.trim()
+  const password = authForm.password.trim()
+  const email = authForm.email.trim()
+  if (!username || !password) {
+    authError.value = '请输入用户名和密码'
+    return
+  }
+
+  authLoading.value = true
+  authError.value = ''
+  try {
+    if (authMode.value === 'register') {
+      await sendJson<AuthUser>('/auth/register', 'POST', {
+        username,
+        password,
+        email: email || null,
+      })
+    }
+    const payload = await sendJson<AuthLoginApiResponse>('/auth/login', 'POST', {
+      username,
+      password,
+    })
+    applyAuthSession(payload)
+    authDialogOpen.value = false
+    authForm.password = ''
+    await hydrateFromBackend()
+  } catch {
+    authError.value = authMode.value === 'register' ? '注册或登录失败，请检查输入' : '登录失败，请检查用户名或密码'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+async function logout(): Promise<void> {
+  try {
+    if (authRefreshToken.value) {
+      await sendJson('/auth/logout', 'POST', { refresh_token: authRefreshToken.value })
+    }
+  } catch {
+    // ignore
+  } finally {
+    clearAuthSession(true)
+    currentView.value = 'home'
+  }
 }
 
 async function fetchEventTotalByStatus(status: string): Promise<number> {
@@ -2753,8 +2933,13 @@ async function hydrateFromBackend(): Promise<void> {
 }
 
 onMounted(() => {
-  void hydrateFromBackend()
-  void fetchSourceSystemOptions()
+  void (async () => {
+    await bootstrapAuthSession()
+    if (isAuthenticated.value) {
+      await hydrateFromBackend()
+      await fetchSourceSystemOptions()
+    }
+  })()
   scheduleTopMetricRefresh(0)
   window.addEventListener('keydown', handleGlobalKeydown)
 })
@@ -2768,6 +2953,20 @@ onBeforeUnmount(() => {
 })
 
 watch(currentView, (view) => {
+  if (!isAuthenticated.value) {
+    authDialogOpen.value = true
+    if (view !== 'home' && view !== 'questionStream') {
+      currentView.value = 'home'
+    }
+    return
+  }
+
+  if (!isAdmin.value && view !== 'home' && view !== 'questionStream') {
+    currentView.value = 'home'
+    backendStatus.value = '当前账号仅允许访问首页和问题社区'
+    return
+  }
+
   if (view === 'events') {
     if (backendOnline.value) {
       void fetchManageEvents(1)
@@ -2913,6 +3112,9 @@ watch(questionEventSearch, (keyword) => {
 
 watch(backendOnline, (online) => {
   scheduleTopMetricRefresh(0)
+  if (!isAuthenticated.value) {
+    return
+  }
   if (online && currentView.value === 'events') {
     void fetchManageEvents(1)
   }
@@ -2931,6 +3133,17 @@ watch(backendOnline, (online) => {
   }
 })
 
+watch(isAuthenticated, (authenticated) => {
+  if (!authenticated) {
+    authDialogOpen.value = true
+    backendOnline.value = false
+    currentView.value = 'home'
+    return
+  }
+  authDialogOpen.value = false
+  void hydrateFromBackend()
+})
+
 watch(backendStatus, (status, prev) => {
   if (!status || status === prev) {
     return
@@ -2943,15 +3156,14 @@ watch(backendStatus, (status, prev) => {
 <template>
   <div class="mission-shell">
     <TopbarPanel
-      :data-source-label="dataSourceLabel"
-      :backend-online="backendOnline"
-      :total-event-count="totalEventCount"
-      :pending-event-count="pendingEventCount"
-      :running-task-count="runningTaskCount"
+      :current-user-label="isAuthenticated ? `${authUser?.username}（${authUser?.role}）` : '未登录'"
+      :is-authenticated="isAuthenticated"
+      @open-auth="authDialogOpen = true"
+      @logout="logout"
     />
 
     <div class="workspace-shell">
-      <SidebarNav :current-view="currentView" @update:view="currentView = $event" />
+      <SidebarNav :current-view="currentView" :is-admin="isAdmin" @update:view="currentView = $event" />
 
       <div class="workspace-main">
         <main v-if="currentView === 'home'" class="home-stack">
@@ -3973,6 +4185,35 @@ watch(backendStatus, (status, prev) => {
         </div>
         <div class="action-row">
           <button class="action-btn" @click="submitCreateQuestionFromDialog">提交问题</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="authDialogOpen" class="dialog-backdrop" @click.self.prevent>
+      <section class="dialog-panel auth-dialog">
+        <div class="panel-head">
+          <h2>{{ authMode === 'login' ? '用户登录' : '用户注册' }}</h2>
+        </div>
+        <div class="field-block">
+          <label>用户名</label>
+          <input v-model="authForm.username" placeholder="请输入用户名" />
+        </div>
+        <div class="field-block">
+          <label>密码</label>
+          <input v-model="authForm.password" type="password" placeholder="请输入密码" />
+        </div>
+        <div v-if="authMode === 'register'" class="field-block">
+          <label>邮箱（可选）</label>
+          <input v-model="authForm.email" placeholder="请输入邮箱" />
+        </div>
+        <p v-if="authError" class="auth-error">{{ authError }}</p>
+        <div class="action-row action-right">
+          <button class="action-btn" :disabled="authLoading" @click="authMode = authMode === 'login' ? 'register' : 'login'">
+            {{ authMode === 'login' ? '切换到注册' : '切换到登录' }}
+          </button>
+          <button class="action-btn" :disabled="authLoading" @click="submitAuth">
+            {{ authLoading ? '处理中...' : authMode === 'login' ? '登录' : '注册并登录' }}
+          </button>
         </div>
       </section>
     </div>

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import require_admin_user
 from app.db.models import QuestionTemplateEntity
 from app.db.session import get_db
 from app.models.common_model import BatchDeleteRequest, BatchDeleteResponse
@@ -14,7 +15,7 @@ from app.models.question_template_model import (
 from app.services.question_template_service import QuestionTemplateService
 
 
-router = APIRouter(prefix="/question-templates", tags=["question-templates"])
+router = APIRouter(prefix="/question-templates", tags=["question-templates"], dependencies=[Depends(require_admin_user)])
 
 
 def to_item(entity: QuestionTemplateEntity) -> QuestionTemplateListItemModel:

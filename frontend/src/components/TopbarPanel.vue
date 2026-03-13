@@ -1,10 +1,12 @@
 <script setup lang="ts">
 defineProps<{
-  dataSourceLabel: string
-  backendOnline: boolean
-  totalEventCount: number
-  pendingEventCount: number
-  runningTaskCount: number
+  currentUserLabel: string
+  isAuthenticated: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'open-auth'): void
+  (e: 'logout'): void
 }>()
 </script>
 
@@ -14,23 +16,10 @@ defineProps<{
       <h1>模型预测指挥甲板</h1>
     </div>
     <div class="topbar-meta">
-      <div class="status-pills">
-        <span class="chip">数据源：{{ dataSourceLabel }}</span>
-        <span :class="['chip', backendOnline ? 'chip-online' : 'chip-offline']">后端：{{ backendOnline ? '在线' : '离线' }}</span>
-      </div>
-      <div class="metric-strip">
-        <article class="metric-card">
-          <small>事件总量</small>
-          <strong>{{ totalEventCount }}</strong>
-        </article>
-        <article class="metric-card">
-          <small>待审核事件</small>
-          <strong>{{ pendingEventCount }}</strong>
-        </article>
-        <article class="metric-card">
-          <small>运行中任务</small>
-          <strong>{{ runningTaskCount }}</strong>
-        </article>
+      <div class="topbar-auth">
+        <span class="chip">当前用户：{{ currentUserLabel }}</span>
+        <button v-if="!isAuthenticated" class="action-btn mini-btn" @click="emit('open-auth')">登录</button>
+        <button v-else class="action-btn mini-btn" @click="emit('logout')">退出登录</button>
       </div>
     </div>
   </header>

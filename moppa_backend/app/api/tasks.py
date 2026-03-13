@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import require_admin_user
 from app.db.models import TaskExecutionEntity
 from app.db.session import get_db
 from app.models.common_model import BatchDeleteRequest, BatchDeleteResponse
@@ -14,7 +15,7 @@ from app.models.task_execution_model import (
 )
 from app.services.task_execution_service import TaskExecutionService
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_admin_user)])
 
 
 def to_task_list_item(entity: TaskExecutionEntity) -> TaskExecutionListItemModel:

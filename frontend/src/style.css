@@ -296,6 +296,23 @@ textarea {
   display: grid;
 }
 
+.topbar-auth {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.auth-dialog {
+  width: min(460px, 100%);
+}
+
+.auth-error {
+  color: #f3b2a3;
+  font-size: 0.88rem;
+}
+
 .feed-panel {
   width: min(760px, 100%);
   justify-self: center;

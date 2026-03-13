@@ -51,6 +51,11 @@ class Settings:
     auto_review_batch_size: int
     auto_review_timeout_seconds: int
     log_level: str
+    auth_enabled: bool
+    auth_access_token_expire_minutes: int
+    auth_refresh_token_expire_days: int
+    auth_jwt_secret: str
+    auth_jwt_issuer: str
     cors_allowed_origins: list[str]
 
     @property
@@ -120,6 +125,11 @@ def load_settings() -> Settings:
         auto_review_batch_size=env_int("AUTO_REVIEW_BATCH_SIZE", 100),
         auto_review_timeout_seconds=env_int("AUTO_REVIEW_TIMEOUT_SECONDS", 60),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        auth_enabled=env_bool("AUTH_ENABLED", False),
+        auth_access_token_expire_minutes=env_int("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", 30),
+        auth_refresh_token_expire_days=env_int("AUTH_REFRESH_TOKEN_EXPIRE_DAYS", 14),
+        auth_jwt_secret=os.getenv("AUTH_JWT_SECRET", "change-me-in-production"),
+        auth_jwt_issuer=os.getenv("AUTH_JWT_ISSUER", "moppa-backend"),
         cors_allowed_origins=env_csv(
             "CORS_ALLOWED_ORIGINS",
             "http://localhost:5173,http://127.0.0.1:5173",

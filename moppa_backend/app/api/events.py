@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import get_current_user, require_admin_user
 from app.db.models import EventEntity
 from app.db.session import get_db
 from app.models.common_model import BatchDeleteRequest, BatchDeleteResponse
@@ -46,7 +47,11 @@ def to_event_list_item(entity: EventEntity) -> EventListItemModel:
 
 
 @router.post("", summary="Create event")
-def create_event(payload: EventCreateModel, db: Session = Depends(get_db)) -> dict[str, str]:
+def create_event(
+    payload: EventCreateModel,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin_user),
+) -> dict[str, str]:
     service = EventService(db)
     event_id = service.create(payload)
     return {"id": event_id}
@@ -57,6 +62,7 @@ def list_events(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    _: object = Depends(get_current_user),
 ) -> EventPaginationResponse:
     service = EventService(db)
     rows, total = service.list_paginated(page=page, page_size=page_size)
@@ -73,6 +79,7 @@ def search_events(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
+    _: object = Depends(get_current_user),
 ) -> EventPaginationResponse:
     service = EventService(db)
     parsed_event_time_from = _parse_optional_datetime(event_time_from, "event_time_from")
@@ -90,14 +97,22 @@ def search_events(
 
 
 @router.delete("", summary="Batch delete events")
-def delete_events(payload: BatchDeleteRequest, db: Session = Depends(get_db)) -> BatchDeleteResponse:
+def delete_events(
+    payload: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin_user),
+) -> BatchDeleteResponse:
     service = EventService(db)
     deleted_count = service.batch_delete(payload.ids)
     return BatchDeleteResponse(deleted_count=deleted_count)
 
 
 @router.get("/{event_id}", summary="Get event detail")
-def get_event(event_id: str, db: Session = Depends(get_db)) -> EventListItemModel:
+def get_event(
+    event_id: str,
+    db: Session = Depends(get_db),
+    _: object = Depends(get_current_user),
+) -> EventListItemModel:
     service = EventService(db)
     entity = service.get_by_id(event_id)
     if entity is None:
@@ -106,7 +121,12 @@ def get_event(event_id: str, db: Session = Depends(get_db)) -> EventListItemMode
 
 
 @router.patch("/{event_id}", summary="Update event")
-def update_event(event_id: str, payload: EventUpdateModel, db: Session = Depends(get_db)) -> EventListItemModel:
+def update_event(
+    event_id: str,
+    payload: EventUpdateModel,
+    db: Session = Depends(get_db),
+    _: object = Depends(require_admin_user),
+) -> EventListItemModel:
     service = EventService(db)
     if not payload.model_dump(exclude_none=True):
         raise ApiError(status_code=400, code="EMPTY_UPDATE_PAYLOAD", message="No fields to update")

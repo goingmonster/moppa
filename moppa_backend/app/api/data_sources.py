@@ -1,9 +1,11 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import require_admin_user
 from app.db.session import get_db
 from app.models.common_model import BatchDeleteRequest, BatchDeleteResponse
 from app.models.data_source_model import (
@@ -15,7 +17,7 @@ from app.models.data_source_model import (
 from app.repositories.data_source_repository import DataSourceRepository
 from app.services.data_source_service import DataSourceService
 
-router = APIRouter(prefix="/data-sources", tags=["data-sources"])
+router = APIRouter(prefix="/data-sources", tags=["data-sources"], dependencies=[Depends(require_admin_user)])
 
 
 def _format_interval(value: object) -> str:
@@ -29,20 +31,25 @@ def _format_interval(value: object) -> str:
     return str(value)
 
 
-def to_data_source_item(row: dict[str, object]) -> DataSourceListItemModel:
+def to_data_source_item(row: dict[str, Any]) -> DataSourceListItemModel:
+    connection_config_raw = row.get("connection_config")
+    connection_config = connection_config_raw if isinstance(connection_config_raw, dict) else {}
+    credibility_level = int(row.get("credibility_level", 0))
+    created_at_raw = row.get("created_at")
+    updated_at_raw = row.get("updated_at")
     return DataSourceListItemModel(
         id=str(row["id"]),
         name=str(row["name"]),
         source_system=str(row["source_system"]),
         source_type=str(row["source_type"]),
-        connection_config=dict(row["connection_config"] or {}),
+        connection_config=connection_config,
         secret_ref=str(row["secret_ref"]) if row["secret_ref"] is not None else None,
-        credibility_level=int(row["credibility_level"]),
+        credibility_level=credibility_level,
         sync_frequency=_format_interval(row["sync_frequency"]),
         is_active=bool(row["is_active"]),
         version=str(row["version"]),
-        created_at=row["created_at"].isoformat(),
-        updated_at=row["updated_at"].isoformat(),
+        created_at=created_at_raw.isoformat() if isinstance(created_at_raw, datetime) else "",
+        updated_at=updated_at_raw.isoformat() if isinstance(updated_at_raw, datetime) else "",
     )
 
 

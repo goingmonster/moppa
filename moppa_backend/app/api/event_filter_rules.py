@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import require_admin_user
 from app.db.models import EventFilterRuleEntity
 from app.db.session import get_db
 from app.models.event_filter_rule_model import (
@@ -13,7 +14,7 @@ from app.models.event_filter_rule_model import (
 from app.services.event_filter_rule_service import EventFilterRuleService
 
 
-router = APIRouter(prefix="/event-filter-rules", tags=["event-filter-rules"])
+router = APIRouter(prefix="/event-filter-rules", tags=["event-filter-rules"], dependencies=[Depends(require_admin_user)])
 
 
 def to_item(entity: EventFilterRuleEntity) -> EventFilterRuleListItemModel:

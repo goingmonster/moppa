@@ -3,6 +3,7 @@ type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' 
 
 defineProps<{
   currentView: AppView
+  isAdmin: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,13 +23,13 @@ const emit = defineEmits<{
       </div>
       <div class="nav-group">
         <p class="nav-group-title">核心管理</p>
-        <button type="button" :class="['level-btn', { active: currentView === 'events' }]" :aria-pressed="currentView === 'events'" @click="emit('update:view', 'events')">事件管理</button>
-        <button type="button" :class="['level-btn', { active: currentView === 'questions' }]" :aria-pressed="currentView === 'questions'" @click="emit('update:view', 'questions')">问题管理</button>
         <button type="button" :class="['level-btn', { active: currentView === 'questionStream' }]" :aria-pressed="currentView === 'questionStream'" @click="emit('update:view', 'questionStream')">问题社区</button>
-        <button type="button" :class="['level-btn', { active: currentView === 'templates' }]" :aria-pressed="currentView === 'templates'" @click="emit('update:view', 'templates')">模板配置</button>
-        <button type="button" :class="['level-btn', { active: currentView === 'tasks' }]" :aria-pressed="currentView === 'tasks'" @click="emit('update:view', 'tasks')">任务管理</button>
+        <button v-if="isAdmin" type="button" :class="['level-btn', { active: currentView === 'events' }]" :aria-pressed="currentView === 'events'" @click="emit('update:view', 'events')">事件管理</button>
+        <button v-if="isAdmin" type="button" :class="['level-btn', { active: currentView === 'questions' }]" :aria-pressed="currentView === 'questions'" @click="emit('update:view', 'questions')">问题管理</button>
+        <button v-if="isAdmin" type="button" :class="['level-btn', { active: currentView === 'templates' }]" :aria-pressed="currentView === 'templates'" @click="emit('update:view', 'templates')">模板配置</button>
+        <button v-if="isAdmin" type="button" :class="['level-btn', { active: currentView === 'tasks' }]" :aria-pressed="currentView === 'tasks'" @click="emit('update:view', 'tasks')">任务管理</button>
       </div>
-      <div class="nav-group">
+      <div v-if="isAdmin" class="nav-group">
         <p class="nav-group-title">系统配置</p>
         <button type="button" :class="['level-btn', { active: currentView === 'dataSources' }]" :aria-pressed="currentView === 'dataSources'" @click="emit('update:view', 'dataSources')">数据源管理</button>
         <button type="button" :class="['level-btn', { active: currentView === 'filterRules' }]" :aria-pressed="currentView === 'filterRules'" @click="emit('update:view', 'filterRules')">过滤规则管理</button>

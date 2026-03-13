@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core import ApiError
+from app.api.dependencies import require_admin_user
 from app.db.session import get_db
 from app.models.s1_ingest_model import (
     S1DryRunRequestModel,
@@ -15,7 +16,7 @@ from app.services.s1_auto_review_service import S1AutoReviewService
 from app.services.s1_ingest_service import S1IngestService
 
 
-router = APIRouter(prefix="/s1", tags=["s1-ingest"])
+router = APIRouter(prefix="/s1", tags=["s1-ingest"], dependencies=[Depends(require_admin_user)])
 
 
 @router.post("/events/push", summary="Push events into S1 pool")
