@@ -308,7 +308,7 @@ CREATE TABLE IF NOT EXISTS event (
 CREATE TABLE IF NOT EXISTS question (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
-    event_id UUID NOT NULL REFERENCES event(id) ON DELETE RESTRICT,
+  event_id UUID REFERENCES event(id) ON DELETE RESTRICT,
     template_id UUID REFERENCES question_template(id),
     level SMALLINT NOT NULL REFERENCES rule_level_config(level),
     content TEXT NOT NULL,

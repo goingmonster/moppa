@@ -1815,8 +1815,8 @@ async function submitQuestionEdit(): Promise<void> {
     const deadline = questionEditForm.deadline.trim()
     const eventIds = Array.from(new Set(questionEditForm.eventIds)).filter((value) => value.trim().length > 0)
     const answerSpace = questionEditForm.answerSpace.trim()
-    if (!title || !deadline || eventIds.length === 0) {
-      backendStatus.value = '问题更新失败：请填写标题、截止时间并至少选择一个事件'
+    if (!title || !deadline) {
+      backendStatus.value = '问题更新失败：请填写标题与截止时间'
       return
     }
     if ((questionEditForm.level === 'L1' || questionEditForm.level === 'L2') && !answerSpace) {
@@ -2584,8 +2584,8 @@ async function createQuestion(): Promise<void> {
     const deadline = draftQuestion.deadline.trim()
     const eventIds = Array.from(new Set(selectedEventIdsForQuestion.value)).filter((value) => value.trim().length > 0)
     const answerSpace = draftQuestion.answerSpace.trim()
-    if (eventIds.length === 0 || !title || !deadline) {
-      backendStatus.value = '问题新增失败：请至少选择一个事件并填写标题与截止时间'
+    if (!title || !deadline) {
+      backendStatus.value = '问题新增失败：请填写标题与截止时间'
       return
     }
     if ((draftQuestion.level === 'L1' || draftQuestion.level === 'L2') && !answerSpace) {
@@ -3851,7 +3851,7 @@ watch(backendStatus, (status, prev) => {
           </small>
         </div>
         <div class="field-block">
-          <label>绑定事件</label>
+          <label>绑定事件（可不选）</label>
           <div class="question-event-multi-select">
             <label
               v-for="eventItem in filteredKnownEventsForQuestion"

@@ -34,7 +34,7 @@ class QuestionEntity(Base):
     __tablename__ = "question"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    event_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     level: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     answer_space: Mapped[str | None] = mapped_column(Text, nullable=True)

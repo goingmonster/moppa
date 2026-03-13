@@ -14,11 +14,9 @@ class QuestionRepository:
 
     def create(self, payload: QuestionCreateModel) -> str:
         event_ids = self._resolve_event_ids(payload.event_ids, payload.event_id)
-        if not event_ids:
-            raise ValueError("event_ids is required")
 
         entity = QuestionEntity(
-            event_id=event_ids[0],
+            event_id=event_ids[0] if event_ids else None,
             level=payload.level,
             content=payload.content,
             answer_space=payload.answer_space,
@@ -28,7 +26,8 @@ class QuestionRepository:
         )
         self.db.add(entity)
         self.db.flush()
-        self._replace_question_events(entity.id, event_ids)
+        if event_ids:
+            self._replace_question_events(entity.id, event_ids)
         self.db.commit()
         return str(entity.id)
 
@@ -94,9 +93,7 @@ class QuestionRepository:
             entity.status = self._normalize_status(payload.status)
         if payload.event_ids is not None:
             event_ids = self._resolve_event_ids(payload.event_ids, None)
-            if not event_ids:
-                raise ValueError("event_ids cannot be empty")
-            entity.event_id = event_ids[0]
+            entity.event_id = event_ids[0] if event_ids else None
             self._replace_question_events(entity.id, event_ids)
 
         self.db.commit()

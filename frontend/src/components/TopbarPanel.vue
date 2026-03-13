@@ -11,7 +11,6 @@ defineProps<{
 <template>
   <header class="topbar panel">
     <div class="topbar-title">
-      <p class="eyebrow">MOPPA 战术控制台</p>
       <h1>模型预测指挥甲板</h1>
     </div>
     <div class="topbar-meta">

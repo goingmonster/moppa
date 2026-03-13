@@ -12,10 +12,10 @@ router = APIRouter(prefix="/questions", tags=["questions"])
 
 
 def to_question_list_item(entity: QuestionEntity, event_ids: list[str] | None = None) -> QuestionListItemModel:
-    resolved_event_ids = event_ids if event_ids is not None else [str(entity.event_id)]
+    resolved_event_ids = event_ids if event_ids is not None else ([str(entity.event_id)] if entity.event_id else [])
     return QuestionListItemModel(
         id=str(entity.id),
-        event_id=str(entity.event_id),
+        event_id=str(entity.event_id) if entity.event_id else None,
         event_ids=resolved_event_ids,
         level=entity.level,
         content=entity.content,
@@ -45,7 +45,13 @@ def list_questions(
     service = QuestionService(db)
     rows, total = service.list_paginated(page=page, page_size=page_size)
     event_map = service.get_event_ids_map([str(row.id) for row in rows])
-    items = [to_question_list_item(row, event_map.get(str(row.id), [str(row.event_id)])) for row in rows]
+    items = [
+        to_question_list_item(
+            row,
+            event_map.get(str(row.id), [str(row.event_id)] if row.event_id else []),
+        )
+        for row in rows
+    ]
     return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
 
@@ -59,7 +65,13 @@ def search_questions(
     service = QuestionService(db)
     rows, total = service.search_paginated(keyword=keyword, page=page, page_size=page_size)
     event_map = service.get_event_ids_map([str(row.id) for row in rows])
-    items = [to_question_list_item(row, event_map.get(str(row.id), [str(row.event_id)])) for row in rows]
+    items = [
+        to_question_list_item(
+            row,
+            event_map.get(str(row.id), [str(row.event_id)] if row.event_id else []),
+        )
+        for row in rows
+    ]
     return QuestionPaginationResponse(page=page, page_size=page_size, total=total, items=items)
 
 
@@ -77,7 +89,7 @@ def get_question(question_id: str, db: Session = Depends(get_db)) -> QuestionLis
     if entity is None:
         raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
     event_ids = service.get_event_ids(question_id)
-    return to_question_list_item(entity, event_ids if event_ids else [str(entity.event_id)])
+    return to_question_list_item(entity, event_ids if event_ids else ([str(entity.event_id)] if entity.event_id else []))
 
 
 @router.patch("/{question_id}", summary="Update question")
@@ -95,4 +107,4 @@ def update_question(question_id: str, payload: QuestionUpdateModel, db: Session 
     if entity is None:
         raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
     event_ids = service.get_event_ids(question_id)
-    return to_question_list_item(entity, event_ids if event_ids else [str(entity.event_id)])
+    return to_question_list_item(entity, event_ids if event_ids else ([str(entity.event_id)] if entity.event_id else []))
