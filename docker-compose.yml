@@ -22,7 +22,7 @@ services:
       db:
         condition: service_healthy
     env_file:
-      - ${BACKEND_ENV_FILE:-.env.example}
+      - ${BACKEND_ENV_FILE:-./moppa_backend/.env}
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
