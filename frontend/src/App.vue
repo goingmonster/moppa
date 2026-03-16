@@ -500,6 +500,8 @@ const predictionSubmitting = ref(false)
 const commentSubmitting = ref(false)
 const predictionForm = reactive({ predictionContent: '', confidence: '', reasoning: '' })
 const commentDraft = ref('')
+const questionComposerMode = ref<'prediction' | 'comment' | null>(null)
+const questionDiscussionOpen = ref(false)
 const tasks = ref<TaskItem[]>([])
 const taskManagePage = ref(1)
 const taskManagePageSize = ref(10)
@@ -866,6 +868,8 @@ function openEventEdit(eventItem: EventItem): void {
 function openManageQuestionDetail(questionItem: QuestionItem): void {
   selectedQuestionId.value = questionItem.id
   manageDetailQuestion.value = questionItem
+  questionComposerMode.value = null
+  questionDiscussionOpen.value = false
   void ensureQuestionEventOptionsByIds(questionItem.eventIds)
   commentDraft.value = ''
   void loadQuestionInteractions(questionItem.id)
@@ -2642,6 +2646,18 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
   }
 }
 
+function openQuestionComposer(mode: 'prediction' | 'comment'): void {
+  const question = manageDetailQuestion.value
+  if (!question) {
+    return
+  }
+  if (!canInteractWithQuestion(question)) {
+    backendStatus.value = '当前问题不可互动：仅收集中且截止前允许预测和评论'
+    return
+  }
+  questionComposerMode.value = mode
+}
+
 async function submitMyPrediction(): Promise<void> {
   const question = manageDetailQuestion.value
   if (!question || !backendOnline.value || !isAuthenticated.value) {
@@ -2675,6 +2691,8 @@ async function submitMyPrediction(): Promise<void> {
       reasoning: predictionForm.reasoning.trim() || null,
     })
     await loadQuestionInteractions(question.id)
+    questionDiscussionOpen.value = true
+    questionComposerMode.value = null
     pushToast('预测已保存', 'success')
   } catch {
     backendStatus.value = '预测提交失败：请确认问题状态、截止时间与权限'
@@ -2706,6 +2724,8 @@ async function submitQuestionComment(): Promise<void> {
     })
     commentDraft.value = ''
     await loadQuestionInteractions(question.id)
+    questionDiscussionOpen.value = true
+    questionComposerMode.value = null
     pushToast('评论已发布', 'success')
   } catch {
     backendStatus.value = '评论发布失败：请确认问题状态、截止时间与权限'
@@ -3194,6 +3214,14 @@ watch(myCurrentPrediction, (mine) => {
   predictionForm.predictionContent = mine.predictionContent
   predictionForm.confidence = mine.confidence !== null && mine.confidence !== undefined ? String(mine.confidence) : ''
   predictionForm.reasoning = mine.reasoning ?? ''
+})
+
+watch(questionDetailDialogOpen, (open) => {
+  if (open) {
+    return
+  }
+  questionComposerMode.value = null
+  questionDiscussionOpen.value = false
 })
 
 onMounted(() => {
@@ -4142,20 +4170,36 @@ watch(backendStatus, (status, prev) => {
         </div>
 
         <div class="field-block">
-          <label>社区预测</label>
+          <label>社区互动</label>
           <small>
-            {{ canCurrentQuestionInteract ? '当前可预测：问题收集中且未到截止时间' : '当前不可预测：仅收集中且截止前可提交或修改' }}
+            {{ canCurrentQuestionInteract ? '当前可互动：问题收集中且未到截止时间' : '当前不可互动：仅收集中且截止前允许预测和评论' }}
           </small>
-          <div v-if="questionInteractionLoading" class="item-subtle">互动数据加载中...</div>
-          <div v-else-if="activeQuestionPredictions.length === 0" class="item-subtle">暂无社区预测</div>
-          <div v-else class="question-event-multi-select">
-            <p v-for="item in activeQuestionPredictions" :key="`prediction-${item.id}`" class="item-meta">
-              <strong>{{ item.username }}</strong>
-              <span v-if="item.userId === authUser?.id">（我的预测）</span>
-              ：{{ item.predictionContent }}
-              <span v-if="item.confidence !== null">（置信度 {{ item.confidence }}）</span>
-            </p>
+          <div class="action-row question-actions-strip">
+            <span class="chip">预测 {{ activeQuestionPredictions.length }}</span>
+            <span class="chip">评论 {{ activeQuestionComments.length }}</span>
+            <button
+              class="action-btn"
+              :disabled="!canCurrentQuestionInteract || questionInteractionLoading"
+              @click="openQuestionComposer('prediction')"
+            >
+              {{ myCurrentPrediction ? '编辑我的预测' : '发布预测' }}
+            </button>
+            <button
+              class="action-btn"
+              :disabled="!canCurrentQuestionInteract || questionInteractionLoading"
+              @click="openQuestionComposer('comment')"
+            >
+              写评论
+            </button>
+            <button class="action-btn" @click="questionDiscussionOpen = !questionDiscussionOpen">
+              {{ questionDiscussionOpen ? '收起讨论' : '查看讨论' }}
+            </button>
           </div>
+          <div v-if="questionInteractionLoading" class="item-subtle">互动数据加载中...</div>
+        </div>
+
+        <div v-if="questionComposerMode === 'prediction'" class="detail-block composer-drawer">
+          <h3>发布预测</h3>
           <div class="field-block">
             <label>我的预测内容</label>
             <textarea
@@ -4187,6 +4231,7 @@ watch(backendStatus, (status, prev) => {
             </div>
           </div>
           <div class="action-row action-right">
+            <button class="action-btn" @click="questionComposerMode = null">取消</button>
             <button
               class="action-btn"
               :disabled="!canCurrentQuestionInteract || predictionSubmitting"
@@ -4197,15 +4242,8 @@ watch(backendStatus, (status, prev) => {
           </div>
         </div>
 
-        <div class="field-block">
-          <label>问题评论</label>
-          <div v-if="questionInteractionLoading" class="item-subtle">评论加载中...</div>
-          <div v-else-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</div>
-          <div v-else class="question-event-multi-select">
-            <p v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`" class="item-meta">
-              <strong>{{ comment.username }}</strong>：{{ comment.content }}
-            </p>
-          </div>
+        <div v-if="questionComposerMode === 'comment'" class="detail-block composer-drawer">
+          <h3>发布评论</h3>
           <textarea
             v-model="commentDraft"
             rows="2"
@@ -4213,6 +4251,7 @@ watch(backendStatus, (status, prev) => {
             placeholder="输入评论内容"
           ></textarea>
           <div class="action-row action-right">
+            <button class="action-btn" @click="questionComposerMode = null">取消</button>
             <button
               class="action-btn"
               :disabled="!canCurrentQuestionInteract || commentSubmitting"
@@ -4221,6 +4260,30 @@ watch(backendStatus, (status, prev) => {
               {{ commentSubmitting ? '发布中...' : '发布评论' }}
             </button>
           </div>
+        </div>
+
+        <div v-if="questionDiscussionOpen" class="split-grid">
+          <section class="subpanel">
+            <h3>社区预测</h3>
+            <p v-if="activeQuestionPredictions.length === 0" class="item-subtle">暂无社区预测</p>
+            <div v-else class="comment-list">
+              <p v-for="item in activeQuestionPredictions" :key="`prediction-${item.id}`">
+                <strong>{{ item.username }}</strong>
+                <span v-if="item.userId === authUser?.id">（我的预测）</span>
+                ：{{ item.predictionContent }}
+                <span v-if="item.confidence !== null">（置信度 {{ item.confidence }}）</span>
+              </p>
+            </div>
+          </section>
+          <section class="subpanel">
+            <h3>评论</h3>
+            <p v-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</p>
+            <div v-else class="comment-list">
+              <p v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`">
+                <strong>{{ comment.username }}</strong>：{{ comment.content }}
+              </p>
+            </div>
+          </section>
         </div>
       </section>
     </div>

@@ -764,6 +764,25 @@ select:focus-visible {
   justify-content: flex-end;
 }
 
+.question-actions-strip {
+  align-items: center;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(19, 25, 18, 0.82);
+}
+
+.composer-drawer {
+  border-style: solid;
+  border-color: rgba(154, 169, 79, 0.45);
+  background: rgba(28, 35, 27, 0.78);
+}
+
+.composer-drawer h3 {
+  color: var(--accent-strong);
+  font-size: 1.1rem;
+}
+
 .event-card.with-actions,
 .question-card.with-actions {
   position: relative;
