@@ -23,9 +23,15 @@ interface QuestionInteractionCount {
   commentCount: number
 }
 
+interface QuestionParticipationSummary {
+  hasPrediction: boolean
+  myCommentCount: number
+}
+
 const props = defineProps<{
   items: QuestionItem[]
   interactionCounts: Record<string, QuestionInteractionCount>
+  participation: Record<string, QuestionParticipationSummary>
   loading: boolean
   hasMore: boolean
   backendOnline: boolean
@@ -83,6 +89,16 @@ function interactionCount(questionId: string): QuestionInteractionCount {
   return props.interactionCounts[questionId] ?? { predictionCount: 0, commentCount: 0 }
 }
 
+const participatedItems = computed(() =>
+  props.items.filter((item) => {
+    const summary = props.participation[item.id]
+    if (!summary) {
+      return false
+    }
+    return summary.hasPrediction || summary.myCommentCount > 0
+  }),
+)
+
 function setupObserver(): void {
   if (observer || !sentinelRef.value) {
     return
@@ -118,7 +134,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="feed-shell">
+  <main class="feed-shell question-community-shell">
     <article class="panel feed-panel">
       <div class="panel-head">
         <h2>问题社区</h2>
@@ -169,5 +185,28 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </article>
+
+    <aside class="panel participation-panel">
+      <div class="panel-head">
+        <h2>我的参与</h2>
+        <span>预测/评论</span>
+      </div>
+      <p v-if="participatedItems.length === 0" class="item-subtle">你还没有参与当前列表中的问题</p>
+      <div v-else class="participation-list">
+        <button
+          v-for="item in participatedItems"
+          :key="`participation-${item.id}`"
+          type="button"
+          class="participation-item"
+          @click="emit('open-question', item)"
+        >
+          <strong>{{ item.title }}</strong>
+          <span class="item-subtle">
+            {{ participation[item.id]?.hasPrediction ? '已预测' : '未预测' }}
+            · 我评论 {{ participation[item.id]?.myCommentCount ?? 0 }} 条
+          </span>
+        </button>
+      </div>
+    </aside>
   </main>
 </template>

@@ -274,6 +274,11 @@ interface QuestionInteractionCount {
   commentCount: number
 }
 
+interface QuestionParticipationSummary {
+  hasPrediction: boolean
+  myCommentCount: number
+}
+
 interface BackendQuestionCommentItem {
   id: string
   question_id: string
@@ -497,6 +502,7 @@ const questionFeedTotal = ref(0)
 const questionFeedLoading = ref(false)
 const questionFeedHasMore = ref(true)
 const questionFeedInteractionCounts = ref<Record<string, QuestionInteractionCount>>({})
+const questionFeedParticipation = ref<Record<string, QuestionParticipationSummary>>({})
 const selectedManageQuestionIds = ref<string[]>([])
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const questionPredictions = ref<Record<string, CommunityPredictionItem[]>>({})
@@ -2679,6 +2685,13 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
         commentCount: commentResult.items.length,
       },
     }
+    questionFeedParticipation.value = {
+      ...questionFeedParticipation.value,
+      [questionId]: {
+        hasPrediction: predictionResult.items.some((item) => item.user_id === authUser.value?.id),
+        myCommentCount: commentResult.items.filter((item) => item.user_id === authUser.value?.id).length,
+      },
+    }
     applyPredictionFormFromMine(questionId)
   } catch {
     backendStatus.value = '问题互动加载失败：请检查预测和评论接口'
@@ -3037,16 +3050,22 @@ function resetQuestionFeed(): void {
   questionFeedTotal.value = 0
   questionFeedHasMore.value = true
   questionFeedInteractionCounts.value = {}
+  questionFeedParticipation.value = {}
 }
 
 function ensureQuestionFeedCounts(questionIds: string[]): void {
   const next = { ...questionFeedInteractionCounts.value }
+  const participationNext = { ...questionFeedParticipation.value }
   for (const questionId of questionIds) {
     if (!next[questionId]) {
       next[questionId] = { predictionCount: 0, commentCount: 0 }
     }
+    if (!participationNext[questionId]) {
+      participationNext[questionId] = { hasPrediction: false, myCommentCount: 0 }
+    }
   }
   questionFeedInteractionCounts.value = next
+  questionFeedParticipation.value = participationNext
 }
 
 async function hydrateQuestionFeedCounts(questionIds: string[]): Promise<void> {
@@ -3073,18 +3092,26 @@ async function hydrateQuestionFeedCounts(questionIds: string[]): Promise<void> {
           questionId,
           predictionCount: predictionResult.items.length,
           commentCount: commentResult.items.length,
+          hasPrediction: predictionResult.items.some((item) => item.user_id === authUser.value?.id),
+          myCommentCount: commentResult.items.filter((item) => item.user_id === authUser.value?.id).length,
         }
       }),
     )
 
     const next = { ...questionFeedInteractionCounts.value }
+    const participationNext = { ...questionFeedParticipation.value }
     for (const row of rows) {
       next[row.questionId] = {
         predictionCount: row.predictionCount,
         commentCount: row.commentCount,
       }
+      participationNext[row.questionId] = {
+        hasPrediction: row.hasPrediction,
+        myCommentCount: row.myCommentCount,
+      }
     }
     questionFeedInteractionCounts.value = next
+    questionFeedParticipation.value = participationNext
   } catch {
     ensureQuestionFeedCounts(uniqueIds)
   }
@@ -3757,6 +3784,7 @@ watch(backendStatus, (status, prev) => {
       v-if="currentView === 'questionStream'"
       :items="questionFeedItems"
       :interaction-counts="questionFeedInteractionCounts"
+      :participation="questionFeedParticipation"
       :loading="questionFeedLoading"
       :has-more="questionFeedHasMore"
       :backend-online="backendOnline"
