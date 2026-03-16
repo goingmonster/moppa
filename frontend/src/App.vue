@@ -269,6 +269,11 @@ interface QuestionCommentItem {
   updatedAt: string
 }
 
+interface QuestionInteractionCount {
+  predictionCount: number
+  commentCount: number
+}
+
 interface BackendQuestionCommentItem {
   id: string
   question_id: string
@@ -491,6 +496,7 @@ const questionFeedPage = ref(0)
 const questionFeedTotal = ref(0)
 const questionFeedLoading = ref(false)
 const questionFeedHasMore = ref(true)
+const questionFeedInteractionCounts = ref<Record<string, QuestionInteractionCount>>({})
 const selectedManageQuestionIds = ref<string[]>([])
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const questionPredictions = ref<Record<string, CommunityPredictionItem[]>>({})
@@ -501,7 +507,8 @@ const commentSubmitting = ref(false)
 const predictionForm = reactive({ predictionContent: '', confidence: '', reasoning: '' })
 const commentDraft = ref('')
 const questionComposerMode = ref<'prediction' | 'comment' | null>(null)
-const questionDiscussionOpen = ref(false)
+const predictionPanelCollapsed = ref(false)
+const commentPanelCollapsed = ref(false)
 const tasks = ref<TaskItem[]>([])
 const taskManagePage = ref(1)
 const taskManagePageSize = ref(10)
@@ -869,7 +876,8 @@ function openManageQuestionDetail(questionItem: QuestionItem): void {
   selectedQuestionId.value = questionItem.id
   manageDetailQuestion.value = questionItem
   questionComposerMode.value = null
-  questionDiscussionOpen.value = false
+  predictionPanelCollapsed.value = false
+  commentPanelCollapsed.value = false
   void ensureQuestionEventOptionsByIds(questionItem.eventIds)
   commentDraft.value = ''
   void loadQuestionInteractions(questionItem.id)
@@ -2638,6 +2646,13 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
       ...questionComments.value,
       [questionId]: commentResult.items.map(toQuestionCommentItem),
     }
+    questionFeedInteractionCounts.value = {
+      ...questionFeedInteractionCounts.value,
+      [questionId]: {
+        predictionCount: predictionResult.items.length,
+        commentCount: commentResult.items.length,
+      },
+    }
     applyPredictionFormFromMine(questionId)
   } catch {
     backendStatus.value = '问题互动加载失败：请检查预测和评论接口'
@@ -2691,7 +2706,6 @@ async function submitMyPrediction(): Promise<void> {
       reasoning: predictionForm.reasoning.trim() || null,
     })
     await loadQuestionInteractions(question.id)
-    questionDiscussionOpen.value = true
     questionComposerMode.value = null
     pushToast('预测已保存', 'success')
   } catch {
@@ -2724,7 +2738,6 @@ async function submitQuestionComment(): Promise<void> {
     })
     commentDraft.value = ''
     await loadQuestionInteractions(question.id)
-    questionDiscussionOpen.value = true
     questionComposerMode.value = null
     pushToast('评论已发布', 'success')
   } catch {
@@ -2947,6 +2960,58 @@ function resetQuestionFeed(): void {
   questionFeedPage.value = 0
   questionFeedTotal.value = 0
   questionFeedHasMore.value = true
+  questionFeedInteractionCounts.value = {}
+}
+
+function ensureQuestionFeedCounts(questionIds: string[]): void {
+  const next = { ...questionFeedInteractionCounts.value }
+  for (const questionId of questionIds) {
+    if (!next[questionId]) {
+      next[questionId] = { predictionCount: 0, commentCount: 0 }
+    }
+  }
+  questionFeedInteractionCounts.value = next
+}
+
+async function hydrateQuestionFeedCounts(questionIds: string[]): Promise<void> {
+  if (!backendOnline.value || !isAuthenticated.value || questionIds.length === 0) {
+    ensureQuestionFeedCounts(questionIds)
+    return
+  }
+
+  const uniqueIds = Array.from(new Set(questionIds)).filter((questionId) => !questionFeedInteractionCounts.value[questionId])
+  if (uniqueIds.length === 0) {
+    return
+  }
+
+  try {
+    const rows = await Promise.all(
+      uniqueIds.map(async (questionId) => {
+        const [predictionResult, commentResult] = await Promise.all([
+          fetchJson<{ items: BackendCommunityPredictionItem[] }>(
+            `/community-predictions?question_id=${encodeURIComponent(questionId)}`,
+          ),
+          fetchJson<{ items: BackendQuestionCommentItem[] }>(`/question-comments?question_id=${encodeURIComponent(questionId)}`),
+        ])
+        return {
+          questionId,
+          predictionCount: predictionResult.items.length,
+          commentCount: commentResult.items.length,
+        }
+      }),
+    )
+
+    const next = { ...questionFeedInteractionCounts.value }
+    for (const row of rows) {
+      next[row.questionId] = {
+        predictionCount: row.predictionCount,
+        commentCount: row.commentCount,
+      }
+    }
+    questionFeedInteractionCounts.value = next
+  } catch {
+    ensureQuestionFeedCounts(uniqueIds)
+  }
 }
 
 async function loadQuestionFeedNextPage(): Promise<void> {
@@ -2967,6 +3032,7 @@ async function loadQuestionFeedNextPage(): Promise<void> {
       questionFeedPage.value = nextPage
       questionFeedTotal.value = source.length
       questionFeedHasMore.value = questionFeedItems.value.length < source.length && batch.length > 0
+      ensureQuestionFeedCounts(batch.map((item) => item.id))
       return
     }
 
@@ -2978,6 +3044,7 @@ async function loadQuestionFeedNextPage(): Promise<void> {
     questionFeedPage.value = nextPage
     questionFeedTotal.value = pageData.total
     questionFeedHasMore.value = questionFeedItems.value.length < pageData.total && batch.length > 0
+    await hydrateQuestionFeedCounts(batch.map((item) => item.id))
   } catch {
     backendStatus.value = '问题社区加载失败：请检查后端问题搜索接口'
     questionFeedHasMore.value = false
@@ -3221,7 +3288,8 @@ watch(questionDetailDialogOpen, (open) => {
     return
   }
   questionComposerMode.value = null
-  questionDiscussionOpen.value = false
+  predictionPanelCollapsed.value = false
+  commentPanelCollapsed.value = false
 })
 
 onMounted(() => {
@@ -3611,6 +3679,7 @@ watch(backendStatus, (status, prev) => {
     <QuestionFeedPanel
       v-if="currentView === 'questionStream'"
       :items="questionFeedItems"
+      :interaction-counts="questionFeedInteractionCounts"
       :loading="questionFeedLoading"
       :has-more="questionFeedHasMore"
       :backend-online="backendOnline"
@@ -4191,9 +4260,6 @@ watch(backendStatus, (status, prev) => {
             >
               写评论
             </button>
-            <button class="action-btn" @click="questionDiscussionOpen = !questionDiscussionOpen">
-              {{ questionDiscussionOpen ? '收起讨论' : '查看讨论' }}
-            </button>
           </div>
           <div v-if="questionInteractionLoading" class="item-subtle">互动数据加载中...</div>
         </div>
@@ -4262,10 +4328,16 @@ watch(backendStatus, (status, prev) => {
           </div>
         </div>
 
-        <div v-if="questionDiscussionOpen" class="split-grid">
+        <div class="discussion-stack">
           <section class="subpanel">
-            <h3>社区预测</h3>
-            <p v-if="activeQuestionPredictions.length === 0" class="item-subtle">暂无社区预测</p>
+            <div class="discussion-panel-head">
+              <h3>社区预测</h3>
+              <button class="action-btn mini-btn" @click="predictionPanelCollapsed = !predictionPanelCollapsed">
+                {{ predictionPanelCollapsed ? '展开' : '折叠' }}
+              </button>
+            </div>
+            <p v-if="predictionPanelCollapsed" class="item-subtle">预测区已折叠</p>
+            <p v-else-if="activeQuestionPredictions.length === 0" class="item-subtle">暂无社区预测</p>
             <div v-else class="comment-list">
               <p v-for="item in activeQuestionPredictions" :key="`prediction-${item.id}`">
                 <strong>{{ item.username }}</strong>
@@ -4276,8 +4348,14 @@ watch(backendStatus, (status, prev) => {
             </div>
           </section>
           <section class="subpanel">
-            <h3>评论</h3>
-            <p v-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</p>
+            <div class="discussion-panel-head">
+              <h3>评论</h3>
+              <button class="action-btn mini-btn" @click="commentPanelCollapsed = !commentPanelCollapsed">
+                {{ commentPanelCollapsed ? '展开' : '折叠' }}
+              </button>
+            </div>
+            <p v-if="commentPanelCollapsed" class="item-subtle">评论区已折叠</p>
+            <p v-else-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</p>
             <div v-else class="comment-list">
               <p v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`">
                 <strong>{{ comment.username }}</strong>：{{ comment.content }}

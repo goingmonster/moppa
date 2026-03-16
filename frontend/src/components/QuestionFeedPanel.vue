@@ -18,8 +18,14 @@ interface EventOption {
   title: string
 }
 
+interface QuestionInteractionCount {
+  predictionCount: number
+  commentCount: number
+}
+
 const props = defineProps<{
   items: QuestionItem[]
+  interactionCounts: Record<string, QuestionInteractionCount>
   loading: boolean
   hasMore: boolean
   backendOnline: boolean
@@ -71,6 +77,10 @@ function eventLabel(ids: string[]): string {
     .map((id) => eventTitleMap.value.get(id))
     .filter((title): title is string => Boolean(title))
   return labels.length > 0 ? labels.join('、') : '未关联事件'
+}
+
+function interactionCount(questionId: string): QuestionInteractionCount {
+  return props.interactionCounts[questionId] ?? { predictionCount: 0, commentCount: 0 }
 }
 
 function setupObserver(): void {
@@ -137,6 +147,10 @@ onBeforeUnmount(() => {
           <p class="item-title">{{ question.title }}</p>
           <p class="item-meta"><strong>答案范围：</strong>{{ question.answerSpace || '未设置' }}</p>
           <p class="item-meta"><strong>关联事件：</strong>{{ eventLabel(question.eventIds) }}</p>
+          <div class="action-row stream-engagement-row">
+            <span class="chip">预测 {{ interactionCount(question.id).predictionCount }}</span>
+            <span class="chip">评论 {{ interactionCount(question.id).commentCount }}</span>
+          </div>
           <div class="tag-group stream-tags">
             <span class="badge">{{ question.level }}</span>
             <span :class="['badge', statusTone(question.status)]">{{ statusLabel[question.status] }}</span>
