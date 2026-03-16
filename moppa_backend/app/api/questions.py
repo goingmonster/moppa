@@ -44,7 +44,7 @@ def create_question(
 @router.get("", summary="List questions")
 def list_questions(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_size: int = Query(default=20, ge=1),
     db: Session = Depends(get_db),
     _: object = Depends(get_current_user),
 ) -> QuestionPaginationResponse:
@@ -65,7 +65,7 @@ def list_questions(
 def search_questions(
     keyword: str = Query(default=""),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_size: int = Query(default=20, ge=1),
     db: Session = Depends(get_db),
     _: object = Depends(get_current_user),
 ) -> QuestionPaginationResponse:
