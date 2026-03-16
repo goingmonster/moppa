@@ -28,6 +28,7 @@ defineProps<{
   selectedTemplateId: string
   selectedManageTemplateIds: string[]
   templateManagePageSize: number
+  templateManagePageSizeOptions: number[]
   templateManageJumpPage: string
 }>()
 
@@ -103,9 +104,9 @@ function templateStatusBadgeTone(status: TemplateItem['status']): string {
       </ul>
       <div class="action-row pagination-row pagination-center">
         <span>每页</span>
-        <button :class="['level-btn', { active: templateManagePageSize === 3 }]" @click="emit('set-page-size', 3)">3</button>
-        <button :class="['level-btn', { active: templateManagePageSize === 6 }]" @click="emit('set-page-size', 6)">6</button>
-        <button :class="['level-btn', { active: templateManagePageSize === 10 }]" @click="emit('set-page-size', 10)">10</button>
+        <select :value="templateManagePageSize" @change="emit('set-page-size', Number(($event.target as HTMLSelectElement).value))">
+          <option v-for="size in templateManagePageSizeOptions" :key="`template-page-size-${size}`" :value="size">{{ size }}</option>
+        </select>
         <button class="action-btn" @click="emit('go-page', -1)">上一页</button>
         <input :value="templateManageJumpPage" class="jump-input" placeholder="页码" @input="emit('update:jump-page', ($event.target as HTMLInputElement).value)" />
         <button class="action-btn" @click="emit('jump-to-page')">跳转</button>

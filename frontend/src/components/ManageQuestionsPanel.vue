@@ -31,6 +31,7 @@ defineProps<{
   selectedQuestionId: string
   selectedManageQuestionIds: string[]
   questionManagePageSize: number
+  questionManagePageSizeOptions: number[]
   questionManageJumpPage: string
   allKnownEvents: EventOption[]
 }>()
@@ -124,9 +125,9 @@ function questionStatusBadgeTone(status: QuestionItem['status']): string {
       </ul>
       <div class="action-row pagination-row pagination-center">
         <span>每页</span>
-        <button :class="['level-btn', { active: questionManagePageSize === 3 }]" @click="emit('set-page-size', 3)">3</button>
-        <button :class="['level-btn', { active: questionManagePageSize === 6 }]" @click="emit('set-page-size', 6)">6</button>
-        <button :class="['level-btn', { active: questionManagePageSize === 10 }]" @click="emit('set-page-size', 10)">10</button>
+        <select :value="questionManagePageSize" @change="emit('set-page-size', Number(($event.target as HTMLSelectElement).value))">
+          <option v-for="size in questionManagePageSizeOptions" :key="`question-page-size-${size}`" :value="size">{{ size }}</option>
+        </select>
         <button class="action-btn" @click="emit('go-page', -1)">上一页</button>
         <input :value="questionManageJumpPage" class="jump-input" placeholder="页码" @input="emit('update:jump-page', ($event.target as HTMLInputElement).value)" />
         <button class="action-btn" @click="emit('jump-to-page')">跳转</button>

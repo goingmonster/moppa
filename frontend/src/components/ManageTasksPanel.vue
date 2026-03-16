@@ -16,6 +16,7 @@ defineProps<{
   selectedTaskId: string
   selectedManageTaskIds: string[]
   taskManagePageSize: number
+  taskManagePageSizeOptions: number[]
   taskManageJumpPage: string
 }>()
 
@@ -90,9 +91,9 @@ function taskStatusBadgeTone(status: TaskItem['status']): string {
       </ul>
       <div class="action-row pagination-row pagination-center">
         <span>每页</span>
-        <button :class="['level-btn', { active: taskManagePageSize === 10 }]" @click="emit('set-page-size', 10)">10</button>
-        <button :class="['level-btn', { active: taskManagePageSize === 20 }]" @click="emit('set-page-size', 20)">20</button>
-        <button :class="['level-btn', { active: taskManagePageSize === 50 }]" @click="emit('set-page-size', 50)">50</button>
+        <select :value="taskManagePageSize" @change="emit('set-page-size', Number(($event.target as HTMLSelectElement).value))">
+          <option v-for="size in taskManagePageSizeOptions" :key="`task-page-size-${size}`" :value="size">{{ size }}</option>
+        </select>
         <button class="action-btn" @click="emit('go-page', -1)">上一页</button>
         <input :value="taskManageJumpPage" class="jump-input" placeholder="页码" @input="emit('update:jump-page', ($event.target as HTMLInputElement).value)" />
         <button class="action-btn" @click="emit('jump-to-page')">跳转</button>
