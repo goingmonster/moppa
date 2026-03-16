@@ -2837,8 +2837,9 @@ async function submitMyPrediction(): Promise<void> {
     return
   }
   let parsedConfidence: number | null = null
-  if (predictionForm.confidence.trim()) {
-    const numeric = Number(predictionForm.confidence)
+  const confidenceRaw = predictionForm.confidence == null ? '' : String(predictionForm.confidence).trim()
+  if (confidenceRaw) {
+    const numeric = Number(confidenceRaw)
     if (!Number.isFinite(numeric) || numeric < 0 || numeric > 100) {
       backendStatus.value = '置信度必须在 0-100 之间'
       return
@@ -2852,7 +2853,7 @@ async function submitMyPrediction(): Promise<void> {
       question_id: question.id,
       prediction_content: predictionContent,
       confidence: parsedConfidence,
-      reasoning: predictionForm.reasoning.trim() || null,
+      reasoning: String(predictionForm.reasoning ?? '').trim() || null,
     })
     await loadQuestionInteractions(question.id)
     questionComposerMode.value = null

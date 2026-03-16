@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import Depends, Header
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -20,37 +21,42 @@ def _extract_bearer_token(authorization: str | None) -> str:
     return authorization[len(prefix) :].strip()
 
 
+def _resolve_system_admin_user(db: Session, preferred_username: str) -> AppUserEntity:
+    repository = AuthRepository(db)
+    preferred = repository.get_user_by_username(preferred_username)
+    if preferred is not None and preferred.is_active and preferred.deleted_at is None and preferred.role == "admin":
+        return preferred
+
+    fallback = db.scalar(
+        select(AppUserEntity)
+        .where(
+            AppUserEntity.role == "admin",
+            AppUserEntity.is_active.is_(True),
+            AppUserEntity.deleted_at.is_(None),
+        )
+        .order_by(AppUserEntity.created_at.asc())
+        .limit(1)
+    )
+    if fallback is not None:
+        return fallback
+
+    raise ApiError(
+        status_code=503,
+        code="SYSTEM_ADMIN_USER_NOT_FOUND",
+        message="No active admin user found for system authentication mode",
+    )
+
+
 def get_current_user(
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
 ) -> AppUserEntity:
     if not settings.auth_enabled:
-        mock_user = AppUserEntity(
-            id=UUID("00000000-0000-0000-0000-000000000001"),
-            username="dev-admin",
-            role="admin",
-            password_hash="",
-            email=None,
-            is_active=True,
-            permissions={},
-            last_login_at=None,
-            deleted_at=None,
-        )
-        return mock_user
+        return _resolve_system_admin_user(db, preferred_username="dev-admin")
 
     token = _extract_bearer_token(authorization)
     if is_integration_api_token(token):
-        return AppUserEntity(
-            id=UUID("00000000-0000-0000-0000-000000000002"),
-            username="integration-admin",
-            role="admin",
-            password_hash="",
-            email=None,
-            is_active=True,
-            permissions={"scope": "all"},
-            last_login_at=None,
-            deleted_at=None,
-        )
+        return _resolve_system_admin_user(db, preferred_username="integration-admin")
 
     try:
         payload = decode_access_token(token)
