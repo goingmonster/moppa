@@ -440,9 +440,14 @@ const createQuestionDialogOpen = ref(false)
 const questionEventSearch = ref('')
 const questionEditEventSearch = ref('')
 const questionEventSearchLoading = ref(false)
+const questionEventSearchLoadingMore = ref(false)
 const questionEventSearchTotal = ref(0)
 const questionEventOptions = ref<EventItem[]>([])
 const questionEventSearchSeq = ref(0)
+const questionEventSearchPage = ref(0)
+const questionEventSearchHasMore = ref(true)
+const questionEventSearchKeyword = ref('')
+const questionEventSearchMode = ref<'create' | 'edit' | null>(null)
 let questionEventSearchTimer: number | undefined
 const questionDetailDialogOpen = ref(false)
 const questionEditDialogOpen = ref(false)
@@ -792,6 +797,9 @@ const filteredKnownEventsForQuestion = computed(() =>
   backendOnline.value ? questionEventOptions.value : localFilteredKnownEventsForQuestion.value,
 )
 const filteredKnownEventsForQuestionEdit = computed(() => {
+  if (backendOnline.value) {
+    return questionEventOptions.value
+  }
   const keyword = questionEditEventSearch.value.trim().toLowerCase()
   if (!keyword) {
     return allKnownEvents.value
@@ -958,7 +966,11 @@ function openQuestionEdit(questionItem: QuestionItem): void {
   questionEditForm.eventIds = [...questionItem.eventIds]
   questionEditForm.deadline = toDateTimeLocalValue(questionItem.deadline)
   questionEditForm.status = questionItem.status
+  questionEventSearchMode.value = 'edit'
   void ensureQuestionEventOptionsByIds(questionItem.eventIds)
+  if (backendOnline.value) {
+    void fetchQuestionEventOptions('', 'edit')
+  }
   questionEditDialogOpen.value = true
 }
 
@@ -966,8 +978,9 @@ function openCreateQuestionDialog(): void {
   questionEventSearch.value = ''
   selectedEventIdsForQuestion.value = selectedEventId.value ? [selectedEventId.value] : []
   createQuestionDialogOpen.value = true
+  questionEventSearchMode.value = 'create'
   if (backendOnline.value) {
-    void fetchQuestionEventOptions('')
+    void fetchQuestionEventOptions('', 'create')
   }
 }
 
@@ -976,10 +989,7 @@ function closeCreateQuestionDialog(): void {
     window.clearTimeout(questionEventSearchTimer)
     questionEventSearchTimer = undefined
   }
-  questionEventSearchSeq.value += 1
-  questionEventOptions.value = []
-  questionEventSearchTotal.value = 0
-  questionEventSearchLoading.value = false
+  resetQuestionEventSearchState()
   questionEventSearch.value = ''
   selectedEventIdsForQuestion.value = []
   createQuestionDialogOpen.value = false
@@ -1044,7 +1054,7 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
 function clearQuestionEventSearch(): void {
   questionEventSearch.value = ''
   if (backendOnline.value && createQuestionDialogOpen.value) {
-    void fetchQuestionEventOptions('')
+    void fetchQuestionEventOptions('', 'create')
   }
 }
 
@@ -2494,49 +2504,121 @@ async function fetchSourceSystemOptions(): Promise<void> {
   }
 }
 
-async function fetchQuestionEventOptions(keyword: string): Promise<void> {
+function resetQuestionEventSearchState(): void {
+  questionEventSearchSeq.value += 1
+  questionEventOptions.value = []
+  questionEventSearchTotal.value = 0
+  questionEventSearchLoading.value = false
+  questionEventSearchLoadingMore.value = false
+  questionEventSearchPage.value = 0
+  questionEventSearchHasMore.value = true
+  questionEventSearchKeyword.value = ''
+  questionEventSearchMode.value = null
+}
+
+function shouldLoadNextQuestionEventPage(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+  const threshold = 56
+  return target.scrollTop + target.clientHeight >= target.scrollHeight - threshold
+}
+
+async function loadMoreQuestionEventOptions(): Promise<void> {
   if (!backendOnline.value) {
     questionEventOptions.value = []
     questionEventSearchTotal.value = 0
     questionEventSearchLoading.value = false
+    questionEventSearchLoadingMore.value = false
+    questionEventSearchHasMore.value = false
+    return
+  }
+  if (questionEventSearchLoading.value || questionEventSearchLoadingMore.value || !questionEventSearchHasMore.value) {
     return
   }
 
+  const nextPage = questionEventSearchPage.value + 1
   const requestSeq = questionEventSearchSeq.value + 1
   questionEventSearchSeq.value = requestSeq
-  questionEventSearchLoading.value = true
+  if (nextPage === 1) {
+    questionEventSearchLoading.value = true
+  } else {
+    questionEventSearchLoadingMore.value = true
+  }
 
   try {
-    const query = encodeURIComponent(keyword.trim())
+    const query = encodeURIComponent(questionEventSearchKeyword.value)
     const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-      `/events/search?keyword=${query}&filter_status=passed&page=1&page_size=50`,
+      `/events/search?keyword=${query}&filter_status=passed&page=${nextPage}&page_size=50`,
     )
     if (requestSeq !== questionEventSearchSeq.value) {
       return
     }
 
     const mapped = sortByEventTimeDesc(eventPage.items.map(toEventItem))
-    questionEventOptions.value = mapped
+    const merged = nextPage === 1 ? [] : [...questionEventOptions.value]
+    for (const item of mapped) {
+      if (!merged.some((target) => target.id === item.id)) {
+        merged.push(item)
+      }
+    }
+    questionEventOptions.value = merged
     questionEventSearchTotal.value = eventPage.total
+    questionEventSearchPage.value = nextPage
+    questionEventSearchHasMore.value = merged.length < eventPage.total && mapped.length > 0
 
-    if (mapped.length > 0 && !mapped.some((item) => item.id === selectedEventId.value)) {
+    if (
+      questionEventSearchMode.value === 'create' &&
+      nextPage === 1 &&
+      mapped.length > 0 &&
+      !mapped.some((item) => item.id === selectedEventId.value)
+    ) {
       selectedEventId.value = mapped[0]?.id ?? selectedEventId.value
     }
-    if (selectedEventIdsForQuestion.value.length === 0) {
+    if (questionEventSearchMode.value === 'create' && nextPage === 1 && selectedEventIdsForQuestion.value.length === 0) {
       selectedEventIdsForQuestion.value = selectedEventId.value ? [selectedEventId.value] : []
     }
   } catch {
     if (requestSeq !== questionEventSearchSeq.value) {
       return
     }
-    questionEventOptions.value = []
-    questionEventSearchTotal.value = 0
+    if (nextPage === 1) {
+      questionEventOptions.value = []
+      questionEventSearchTotal.value = 0
+      questionEventSearchHasMore.value = false
+    }
     backendStatus.value = '事件搜索失败：请检查后端搜索接口'
   } finally {
     if (requestSeq === questionEventSearchSeq.value) {
       questionEventSearchLoading.value = false
+      questionEventSearchLoadingMore.value = false
     }
   }
+}
+
+async function fetchQuestionEventOptions(keyword: string, mode: 'create' | 'edit'): Promise<void> {
+  questionEventSearchMode.value = mode
+  questionEventSearchKeyword.value = keyword.trim()
+  questionEventSearchPage.value = 0
+  questionEventSearchHasMore.value = true
+  questionEventOptions.value = []
+  questionEventSearchTotal.value = 0
+  questionEventSearchLoading.value = false
+  questionEventSearchLoadingMore.value = false
+  await loadMoreQuestionEventOptions()
+}
+
+function handleQuestionEventSelectScroll(mode: 'create' | 'edit', event: Event): void {
+  if (!backendOnline.value) {
+    return
+  }
+  if (questionEventSearchMode.value !== mode) {
+    return
+  }
+  if (!shouldLoadNextQuestionEventPage(event.target)) {
+    return
+  }
+  void loadMoreQuestionEventOptions()
 }
 
 async function ensureQuestionEventOptionsByIds(eventIds: string[]): Promise<void> {
@@ -3607,8 +3689,34 @@ watch(questionEventSearch, (keyword) => {
     window.clearTimeout(questionEventSearchTimer)
   }
   questionEventSearchTimer = window.setTimeout(() => {
-    void fetchQuestionEventOptions(keyword)
+    void fetchQuestionEventOptions(keyword, 'create')
   }, 250)
+})
+
+watch(questionEditEventSearch, (keyword) => {
+  if (!questionEditDialogOpen.value || !backendOnline.value) {
+    return
+  }
+  if (questionEventSearchTimer !== undefined) {
+    window.clearTimeout(questionEventSearchTimer)
+  }
+  questionEventSearchTimer = window.setTimeout(() => {
+    void fetchQuestionEventOptions(keyword, 'edit')
+  }, 250)
+})
+
+watch(questionEditDialogOpen, (open) => {
+  if (open) {
+    return
+  }
+  if (questionEventSearchTimer !== undefined) {
+    window.clearTimeout(questionEventSearchTimer)
+    questionEventSearchTimer = undefined
+  }
+  questionEditEventSearch.value = ''
+  if (!createQuestionDialogOpen.value) {
+    resetQuestionEventSearchState()
+  }
 })
 
 watch(backendOnline, (online) => {
@@ -3630,7 +3738,10 @@ watch(backendOnline, (online) => {
     void fetchTemplates(1)
   }
   if (online && createQuestionDialogOpen.value) {
-    void fetchQuestionEventOptions(questionEventSearch.value)
+    void fetchQuestionEventOptions(questionEventSearch.value, 'create')
+  }
+  if (online && questionEditDialogOpen.value) {
+    void fetchQuestionEventOptions(questionEditEventSearch.value, 'edit')
   }
 })
 
@@ -4558,7 +4669,7 @@ watch(backendStatus, (status, prev) => {
         <div class="field-block">
           <label>关联事件（可多选）</label>
           <input v-model="questionEditEventSearch" placeholder="搜索可关联事件（标题/战区/内容）" />
-          <div class="question-event-multi-select">
+          <div class="question-event-multi-select" @scroll.passive="handleQuestionEventSelectScroll('edit', $event)">
             <label v-for="eventItem in filteredKnownEventsForQuestionEdit" :key="`question-edit-target-${eventItem.id}`" class="select-row question-event-option">
               <input
                 type="checkbox"
@@ -4567,7 +4678,15 @@ watch(backendStatus, (status, prev) => {
               />
               <span>{{ eventItem.title }}（{{ eventItem.theater }}）</span>
             </label>
-            <p v-if="filteredKnownEventsForQuestionEdit.length === 0" class="item-subtle">无匹配事件</p>
+            <p v-if="questionEventSearchLoading" class="item-subtle">搜索中...</p>
+            <p v-else-if="filteredKnownEventsForQuestionEdit.length === 0" class="item-subtle">无匹配事件</p>
+            <p v-if="questionEventSearchLoadingMore" class="item-subtle">正在加载更多...</p>
+            <p
+              v-else-if="backendOnline && questionEventSearchMode === 'edit' && !questionEventSearchHasMore && filteredKnownEventsForQuestionEdit.length > 0"
+              class="item-subtle"
+            >
+              已加载全部匹配事件
+            </p>
           </div>
         </div>
         <div class="field-block">
@@ -4799,7 +4918,7 @@ watch(backendStatus, (status, prev) => {
         </div>
         <div class="field-block">
           <label>绑定事件（可不选）</label>
-          <div class="question-event-multi-select">
+          <div class="question-event-multi-select" @scroll.passive="handleQuestionEventSelectScroll('create', $event)">
             <label
               v-for="eventItem in filteredKnownEventsForQuestion"
               :key="`question-target-${eventItem.id}`"
@@ -4814,6 +4933,13 @@ watch(backendStatus, (status, prev) => {
             </label>
             <p v-if="questionEventSearchLoading" class="item-subtle">搜索中...</p>
             <p v-else-if="filteredKnownEventsForQuestion.length === 0" class="item-subtle">无匹配新闻</p>
+            <p v-if="questionEventSearchLoadingMore" class="item-subtle">正在加载更多...</p>
+            <p
+              v-else-if="backendOnline && questionEventSearchMode === 'create' && !questionEventSearchHasMore && filteredKnownEventsForQuestion.length > 0"
+              class="item-subtle"
+            >
+              已加载全部匹配事件
+            </p>
           </div>
           <small>已选择 {{ selectedEventIdsForQuestion.length }} 个事件</small>
         </div>
