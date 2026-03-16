@@ -45,16 +45,22 @@ class QuestionCommentService:
         if entity.user_id != user_id:
             raise ApiError(status_code=403, code="FORBIDDEN", message="You can only edit your own comment")
 
-        question = self.question_repository.get_by_id(str(entity.target_id))
-        if question is None:
-            raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
-        self._validate_question_open(question.status, question.deadline)
-
         content = payload.content.strip()
         if not content:
             raise ApiError(status_code=422, code="INVALID_COMMENT_CONTENT", message="Comment content cannot be empty")
 
         return self.repository.update_content(entity, content)
+
+    def delete_comment(self, comment_id: str, user_id: UUID, user_role: str) -> None:
+        comment_uuid = self._parse_uuid(comment_id, "comment_id")
+        entity = self.repository.get_by_id(comment_uuid)
+        if entity is None:
+            raise ApiError(status_code=404, code="COMMENT_NOT_FOUND", message="Comment not found")
+
+        if entity.user_id != user_id and user_role != "admin":
+            raise ApiError(status_code=403, code="FORBIDDEN", message="You can only delete your own comment")
+
+        self.repository.soft_delete(entity)
 
     @staticmethod
     def _validate_question_open(status: str, deadline: datetime) -> None:

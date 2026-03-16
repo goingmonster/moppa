@@ -506,6 +506,9 @@ const predictionSubmitting = ref(false)
 const commentSubmitting = ref(false)
 const predictionForm = reactive({ predictionContent: '', confidence: '', reasoning: '' })
 const commentDraft = ref('')
+const editingCommentId = ref('')
+const editingCommentContent = ref('')
+const commentActionLoading = ref(false)
 const questionComposerMode = ref<'prediction' | 'comment' | null>(null)
 const predictionPanelCollapsed = ref(false)
 const commentPanelCollapsed = ref(false)
@@ -718,6 +721,28 @@ const myCurrentPrediction = computed(() => {
   return activeQuestionPredictions.value.find((item) => item.userId === userId) ?? null
 })
 const canCurrentQuestionInteract = computed(() => canInteractWithQuestion(manageDetailQuestion.value))
+
+function canEditComment(comment: QuestionCommentItem): boolean {
+  return authUser.value?.id === comment.userId
+}
+
+function canDeleteComment(comment: QuestionCommentItem): boolean {
+  return authUser.value?.id === comment.userId || isAdmin.value
+}
+
+function beginCommentEdit(comment: QuestionCommentItem): void {
+  if (!canEditComment(comment)) {
+    backendStatus.value = '你只能编辑自己的评论'
+    return
+  }
+  editingCommentId.value = comment.id
+  editingCommentContent.value = comment.content
+}
+
+function cancelCommentEdit(): void {
+  editingCommentId.value = ''
+  editingCommentContent.value = ''
+}
 const localFilteredKnownEventsForQuestion = computed(() => {
   const passedEvents = allKnownEvents.value.filter((item) => item.filterStatus === 'passed')
   const keyword = questionEventSearch.value.trim().toLowerCase()
@@ -878,6 +903,7 @@ function openManageQuestionDetail(questionItem: QuestionItem): void {
   questionComposerMode.value = null
   predictionPanelCollapsed.value = false
   commentPanelCollapsed.value = false
+  cancelCommentEdit()
   void ensureQuestionEventOptionsByIds(questionItem.eventIds)
   commentDraft.value = ''
   void loadQuestionInteractions(questionItem.id)
@@ -2747,6 +2773,56 @@ async function submitQuestionComment(): Promise<void> {
   }
 }
 
+async function saveEditedComment(): Promise<void> {
+  const question = manageDetailQuestion.value
+  if (!question || !backendOnline.value || !isAuthenticated.value || !editingCommentId.value) {
+    return
+  }
+
+  const content = editingCommentContent.value.trim()
+  if (!content) {
+    backendStatus.value = '评论内容不能为空'
+    return
+  }
+
+  commentActionLoading.value = true
+  try {
+    await sendJson<BackendQuestionCommentItem>(`/question-comments/${editingCommentId.value}`, 'PATCH', { content })
+    await loadQuestionInteractions(question.id)
+    cancelCommentEdit()
+    pushToast('评论已更新', 'success')
+  } catch {
+    backendStatus.value = '评论更新失败：你只能编辑自己的评论'
+  } finally {
+    commentActionLoading.value = false
+  }
+}
+
+async function deleteComment(comment: QuestionCommentItem): Promise<void> {
+  const question = manageDetailQuestion.value
+  if (!question || !backendOnline.value || !isAuthenticated.value) {
+    return
+  }
+  if (!canDeleteComment(comment)) {
+    backendStatus.value = '你无权删除该评论'
+    return
+  }
+
+  commentActionLoading.value = true
+  try {
+    await sendJson(`/question-comments/${comment.id}`, 'DELETE', {})
+    await loadQuestionInteractions(question.id)
+    if (editingCommentId.value === comment.id) {
+      cancelCommentEdit()
+    }
+    pushToast('评论已删除', 'success')
+  } catch {
+    backendStatus.value = '评论删除失败：仅本人或管理员可删除'
+  } finally {
+    commentActionLoading.value = false
+  }
+}
+
 async function bootstrapAuthSession(): Promise<void> {
   authLoading.value = true
   try {
@@ -3290,6 +3366,7 @@ watch(questionDetailDialogOpen, (open) => {
   questionComposerMode.value = null
   predictionPanelCollapsed.value = false
   commentPanelCollapsed.value = false
+  cancelCommentEdit()
 })
 
 onMounted(() => {
@@ -4357,9 +4434,43 @@ watch(backendStatus, (status, prev) => {
             <p v-if="commentPanelCollapsed" class="item-subtle">评论区已折叠</p>
             <p v-else-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</p>
             <div v-else class="comment-list">
-              <p v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`">
-                <strong>{{ comment.username }}</strong>：{{ comment.content }}
-              </p>
+              <div v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`" class="comment-item-row">
+                <template v-if="editingCommentId === comment.id">
+                  <textarea
+                    v-model="editingCommentContent"
+                    rows="2"
+                    :disabled="commentActionLoading"
+                    placeholder="修改评论内容"
+                  ></textarea>
+                  <div class="action-row action-right">
+                    <button class="action-btn mini-btn" :disabled="commentActionLoading" @click="cancelCommentEdit">取消</button>
+                    <button class="action-btn mini-btn" :disabled="commentActionLoading" @click="saveEditedComment">
+                      {{ commentActionLoading ? '保存中...' : '保存' }}
+                    </button>
+                  </div>
+                </template>
+                <template v-else>
+                  <p><strong>{{ comment.username }}</strong>：{{ comment.content }}</p>
+                  <div class="action-row action-right">
+                    <button
+                      v-if="canEditComment(comment)"
+                      class="action-btn mini-btn"
+                      :disabled="commentActionLoading"
+                      @click="beginCommentEdit(comment)"
+                    >
+                      编辑
+                    </button>
+                    <button
+                      v-if="canDeleteComment(comment)"
+                      class="action-btn mini-btn danger"
+                      :disabled="commentActionLoading"
+                      @click="deleteComment(comment)"
+                    >
+                      删除
+                    </button>
+                  </div>
+                </template>
+              </div>
             </div>
           </section>
         </div>

@@ -1009,6 +1009,21 @@ select:focus-visible {
   color: var(--text-soft);
 }
 
+.comment-item-row {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 0.45rem;
+  background: rgba(17, 23, 16, 0.65);
+  display: grid;
+  gap: 0.35rem;
+}
+
+.comment-item-row .mini-btn {
+  font-size: 0.76rem;
+  padding: 0.18rem 0.5rem;
+  min-height: 28px;
+}
+
 .comment-list span {
   color: var(--accent);
 }

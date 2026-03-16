@@ -59,3 +59,14 @@ def update_question_comment(
     service = QuestionCommentService(db)
     entity = service.update_mine(comment_id, payload, current_user.id)
     return to_comment_item(entity, current_user.username)
+
+
+@router.delete("/{comment_id}", summary="Delete question comment")
+def delete_question_comment(
+    comment_id: str,
+    db: Session = Depends(get_db),
+    current_user: AppUserEntity = Depends(get_current_user),
+) -> dict[str, str]:
+    service = QuestionCommentService(db)
+    service.delete_comment(comment_id, current_user.id, current_user.role)
+    return {"status": "ok"}

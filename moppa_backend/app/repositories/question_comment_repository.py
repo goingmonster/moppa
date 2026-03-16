@@ -64,3 +64,9 @@ class QuestionCommentRepository:
         self.db.commit()
         self.db.refresh(entity)
         return entity
+
+    def soft_delete(self, entity: FeedbackEntity) -> None:
+        now = datetime.now(timezone.utc)
+        entity.deleted_at = now
+        entity.updated_at = now
+        self.db.commit()
