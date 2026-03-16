@@ -13,6 +13,7 @@ import TopbarPanel from './components/TopbarPanel.vue'
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
 type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
 type ToastKind = 'success' | 'error' | 'info'
+type ThemeId = 'olive' | 'blue' | 'sunset'
 
 interface ToastItem {
   id: number
@@ -289,7 +290,17 @@ interface BackendQuestionCommentItem {
   updated_at: string
 }
 
+interface ThemeOption {
+  id: ThemeId
+  label: string
+}
+
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
+const themeOptions: ThemeOption[] = [
+  { id: 'olive', label: '橄榄夜幕' },
+  { id: 'blue', label: '蓝白简约' },
+  { id: 'sunset', label: '暖橙日落' },
+]
 const filterRuleScopes: FilterRuleItem['ruleScope'][] = ['db_import', 'scrapy', 'document', 'use', 'other']
 const eventManagePageSizeOptions = [5, 10, 20, 50, 100]
 
@@ -380,6 +391,7 @@ const selectedEventIdsForQuestion = ref<string[]>(selectedEventId.value ? [selec
 const selectedQuestionId = ref(questions.value[0]?.id ?? '')
 const rankingLevel = ref<'ALL' | Level>('ALL')
 const currentView = ref<AppView>('home')
+const activeTheme = ref<ThemeId>('olive')
 const backendStatus = ref('后端未连接，当前使用模拟数据')
 const backendOnline = ref(false)
 const authUser = ref<AuthUser | null>(null)
@@ -393,6 +405,22 @@ const authForm = reactive({ username: '', password: '', email: '' })
 let authRefreshPromise: Promise<boolean> | null = null
 const toasts = ref<ToastItem[]>([])
 let toastSeed = 0
+
+function isThemeId(value: string): value is ThemeId {
+  return value === 'olive' || value === 'blue' || value === 'sunset'
+}
+
+function applyTheme(theme: ThemeId): void {
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('moppa_theme', theme)
+}
+
+function updateTheme(nextTheme: string): void {
+  if (!isThemeId(nextTheme)) {
+    return
+  }
+  activeTheme.value = nextTheme
+}
 
 const draftEvent = reactive({ title: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
 const draftQuestion = reactive({
@@ -3396,7 +3424,16 @@ watch(questionDetailDialogOpen, (open) => {
   cancelCommentEdit()
 })
 
+watch(activeTheme, (theme) => {
+  applyTheme(theme)
+})
+
 onMounted(() => {
+  const savedTheme = localStorage.getItem('moppa_theme') ?? ''
+  if (isThemeId(savedTheme)) {
+    activeTheme.value = savedTheme
+  }
+  applyTheme(activeTheme.value)
   void (async () => {
     await bootstrapAuthSession()
     if (isAuthenticated.value) {
@@ -3622,8 +3659,11 @@ watch(backendStatus, (status, prev) => {
     <TopbarPanel
       :current-user-label="isAuthenticated ? `${authUser?.username}（${authUser?.role}）` : '未登录'"
       :is-authenticated="isAuthenticated"
+      :active-theme="activeTheme"
+      :theme-options="themeOptions"
       @open-auth="authDialogOpen = true"
       @logout="logout"
+      @update-theme="updateTheme"
     />
 
     <div class="workspace-shell">
