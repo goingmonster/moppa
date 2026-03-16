@@ -125,3 +125,10 @@ def decode_refresh_token(token: str) -> dict[str, object]:
 
 def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def is_integration_api_token(token: str) -> bool:
+    configured = settings.integration_api_token.strip()
+    if not configured:
+        return False
+    return hmac.compare_digest(token, configured)

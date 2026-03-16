@@ -56,6 +56,7 @@ class Settings:
     auth_refresh_token_expire_days: int
     auth_jwt_secret: str
     auth_jwt_issuer: str
+    integration_api_token: str
     cors_allowed_origins: list[str]
 
     @property
@@ -130,6 +131,7 @@ def load_settings() -> Settings:
         auth_refresh_token_expire_days=env_int("AUTH_REFRESH_TOKEN_EXPIRE_DAYS", 14),
         auth_jwt_secret=os.getenv("AUTH_JWT_SECRET", "change-me-in-production"),
         auth_jwt_issuer=os.getenv("AUTH_JWT_ISSUER", "moppa-backend"),
+        integration_api_token=os.getenv("INTEGRATION_API_TOKEN", ""),
         cors_allowed_origins=env_csv(
             "CORS_ALLOWED_ORIGINS",
             "http://localhost:5173,http://127.0.0.1:5173",

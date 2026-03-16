@@ -873,6 +873,10 @@ function openManageQuestionDetail(questionItem: QuestionItem): void {
 }
 
 function openQuestionEdit(questionItem: QuestionItem): void {
+  if (!isAdmin.value) {
+    backendStatus.value = '当前账号无权限编辑问题'
+    return
+  }
   selectedQuestionId.value = questionItem.id
   questionEditEventSearch.value = ''
   questionEditForm.id = questionItem.id
@@ -1910,6 +1914,11 @@ async function deleteSelectedQuestionsBatch(): Promise<void> {
 }
 
 async function submitQuestionEdit(): Promise<void> {
+  if (!isAdmin.value) {
+    backendStatus.value = '当前账号无权限编辑问题'
+    questionEditDialogOpen.value = false
+    return
+  }
   if (!questionEditForm.id) {
     return
   }
@@ -1967,6 +1976,11 @@ async function submitQuestionEdit(): Promise<void> {
 }
 
 async function deleteQuestionInEditDialog(): Promise<void> {
+  if (!isAdmin.value) {
+    backendStatus.value = '当前账号无权限编辑问题'
+    questionEditDialogOpen.value = false
+    return
+  }
   await deleteSelectedQuestion()
   questionEditDialogOpen.value = false
 }
@@ -4103,7 +4117,7 @@ watch(backendStatus, (status, prev) => {
         <div class="panel-head">
           <h2>问题详情（只读）</h2>
           <div class="action-row">
-            <button class="action-btn" @click="openQuestionEdit(manageDetailQuestion!)">编辑</button>
+            <button v-if="isAdmin" class="action-btn" @click="openQuestionEdit(manageDetailQuestion!)">编辑</button>
             <button class="action-btn" @click="questionDetailDialogOpen = false">关闭</button>
           </div>
         </div>

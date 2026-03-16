@@ -8,7 +8,7 @@ from app.core import ApiError
 from app.db.models import AppUserEntity
 from app.db.session import get_db
 from app.repositories.auth_repository import AuthRepository
-from app.security.auth import decode_access_token
+from app.security.auth import decode_access_token, is_integration_api_token
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -39,6 +39,19 @@ def get_current_user(
         return mock_user
 
     token = _extract_bearer_token(authorization)
+    if is_integration_api_token(token):
+        return AppUserEntity(
+            id=UUID("00000000-0000-0000-0000-000000000002"),
+            username="integration-admin",
+            role="admin",
+            password_hash="",
+            email=None,
+            is_active=True,
+            permissions={"scope": "all"},
+            last_login_at=None,
+            deleted_at=None,
+        )
+
     try:
         payload = decode_access_token(token)
     except ValueError as exc:
