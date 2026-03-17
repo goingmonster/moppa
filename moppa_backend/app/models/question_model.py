@@ -10,6 +10,10 @@ class QuestionCreateModel(BaseModel):
     template_id: UUID | None = None
     level: int = Field(ge=1, le=4)
     content: str = Field(min_length=1)
+    match_score: float | None = None
+    event_domain: str | None = None
+    event_type: str | None = None
+    background: str | None = None
     answer_space: str | None = None
     verification_conditions: str | None = None
     deadline: datetime
@@ -24,6 +28,10 @@ class QuestionListItemModel(BaseModel):
     template_id: str | None = None
     level: int
     content: str
+    match_score: float | None = None
+    event_domain: str | None = None
+    event_type: str | None = None
+    background: str | None = None
     answer_space: str | None = None
     verification_conditions: str | None = None
     deadline: str
@@ -41,6 +49,10 @@ class QuestionPaginationResponse(BaseModel):
 class QuestionUpdateModel(BaseModel):
     level: int | None = Field(default=None, ge=1, le=4)
     content: str | None = Field(default=None, min_length=1)
+    match_score: float | None = None
+    event_domain: str | None = None
+    event_type: str | None = None
+    background: str | None = None
     answer_space: str | None = None
     deadline: datetime | None = None
     status: str | None = Field(default=None, min_length=1)

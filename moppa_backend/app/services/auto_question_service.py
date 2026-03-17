@@ -86,6 +86,8 @@ class AutoQuestionService:
             processed_events = 0
             generated_questions = 0
             saved_questions = 0
+            failed_batches = 0
+            failed_events = 0
             api_call_count = 0
             batch_logs: list[dict[str, object]] = []
 
@@ -116,8 +118,61 @@ class AutoQuestionService:
                     len(events),
                     settings.auto_question_generate_url,
                 )
-                response_data = self._call_generate_api(payload)
-                api_call_count += 1
+                try:
+                    response_data = self._call_generate_api_with_retry(
+                        payload=payload,
+                        task_id=str(task.id),
+                        batch_number=processed_batches + 1,
+                        total_batches=total_batches,
+                    )
+                    api_call_count += 1
+                except RuntimeError as exc:
+                    failed_batches += 1
+                    failed_events += len(events)
+                    processed_batches += 1
+                    offset += len(events)
+
+                    log_item: dict[str, object] = {
+                        "batch": processed_batches,
+                        "event_count": len(events),
+                        "status": "failed",
+                        "error": str(exc),
+                        "event_ids": [str(event.id) for event in events],
+                    }
+                    batch_logs.append(log_item)
+                    _logger.error(
+                        "Auto question batch failed and skipped: task_id=%s batch=%s/%s batch_event_count=%s error=%s",
+                        str(task.id),
+                        processed_batches,
+                        total_batches,
+                        len(events),
+                        str(exc),
+                    )
+
+                    progress_result = {
+                        "event_scope": settings.auto_question_event_scope,
+                        "total_events": total_events,
+                        "total_batches": total_batches,
+                        "processed_batches": processed_batches,
+                        "processed_events": processed_events,
+                        "generated_questions": generated_questions,
+                        "saved_questions": saved_questions,
+                        "failed_batches": failed_batches,
+                        "failed_events": failed_events,
+                        "batch_logs": batch_logs,
+                    }
+                    progress_template_count = 0
+                    for group in grouped_templates:
+                        group_templates = group.get("templates")
+                        if isinstance(group_templates, list):
+                            progress_template_count += len(group_templates)
+                    progress_metrics = {
+                        "template_group_count": len(grouped_templates),
+                        "template_count": progress_template_count,
+                        "api_call_count": api_call_count,
+                    }
+                    _ = self.task_repository.update_progress(task.id, progress_result, progress_metrics)
+                    continue
 
                 questions = response_data.get("questions")
                 question_count = len(questions) if isinstance(questions, list) else 0
@@ -139,10 +194,14 @@ class AutoQuestionService:
                 batch_logs.append(log_item)
                 progress_result = {
                     "event_scope": settings.auto_question_event_scope,
+                    "total_events": total_events,
+                    "total_batches": total_batches,
                     "processed_batches": processed_batches,
                     "processed_events": processed_events,
                     "generated_questions": generated_questions,
                     "saved_questions": saved_questions,
+                    "failed_batches": failed_batches,
+                    "failed_events": failed_events,
                     "batch_logs": batch_logs,
                 }
                 progress_template_count = 0
@@ -191,6 +250,8 @@ class AutoQuestionService:
                 "processed_events": processed_events,
                 "generated_questions": generated_questions,
                 "saved_questions": saved_questions,
+                "failed_batches": failed_batches,
+                "failed_events": failed_events,
                 "batch_logs": batch_logs,
             }
             metrics = {
@@ -314,6 +375,10 @@ class AutoQuestionService:
 
             candidate_answers_value = item.get("candidate_answers")
             answer_space = self._build_answer_space(candidate_answers_value)
+            match_score = self._parse_match_score(item.get("match_score"))
+            event_domain = item.get("event_domain") if isinstance(item.get("event_domain"), str) else None
+            event_type = item.get("event_type") if isinstance(item.get("event_type"), str) else None
+            background = item.get("background") if isinstance(item.get("background"), str) else None
 
             resolution_criteria_value = item.get("resolution_criteria")
             verification_conditions: str | None = None
@@ -335,6 +400,10 @@ class AutoQuestionService:
                 template_id=template_id,
                 level=level,
                 content=content_value.strip(),
+                match_score=match_score,
+                event_domain=event_domain.strip() if event_domain else None,
+                event_type=event_type.strip() if event_type else None,
+                background=background.strip() if background else None,
                 answer_space=answer_space,
                 verification_conditions=verification_conditions,
                 deadline=deadline,
@@ -440,6 +509,56 @@ class AutoQuestionService:
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
+
+    def _parse_match_score(self, value: object) -> float | None:
+        if isinstance(value, (int, float)):
+            parsed = float(value)
+            if parsed >= 0:
+                return parsed
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = float(text)
+            except ValueError:
+                return None
+            if parsed >= 0:
+                return parsed
+        return None
+
+    def _call_generate_api_with_retry(
+        self,
+        payload: dict[str, object],
+        task_id: str,
+        batch_number: int,
+        total_batches: int,
+    ) -> dict[str, object]:
+        attempts = settings.auto_question_retry_count + 1
+        last_error: RuntimeError | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return self._call_generate_api(payload)
+            except RuntimeError as exc:
+                last_error = exc
+                if attempt >= attempts:
+                    break
+                sleep_seconds = settings.auto_question_retry_backoff_seconds * attempt
+                _logger.warning(
+                    "Auto question API retry: task_id=%s batch=%s/%s attempt=%s/%s sleep_seconds=%s error=%s",
+                    task_id,
+                    batch_number,
+                    total_batches,
+                    attempt + 1,
+                    attempts,
+                    sleep_seconds,
+                    str(exc),
+                )
+                time.sleep(sleep_seconds)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Auto question API retry failed without error")
 
     def _call_generate_api(self, payload: dict[str, object]) -> dict[str, object]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

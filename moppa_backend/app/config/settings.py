@@ -57,6 +57,8 @@ class Settings:
     auto_question_batch_size: int
     auto_question_timeout_seconds: int
     auto_question_event_scope: str
+    auto_question_retry_count: int
+    auto_question_retry_backoff_seconds: int
     log_level: str
     auth_enabled: bool
     auth_access_token_expire_minutes: int
@@ -158,6 +160,8 @@ def load_settings() -> Settings:
         auto_question_batch_size=min(max(env_int("AUTO_QUESTION_BATCH_SIZE", 10), 1), 10),
         auto_question_timeout_seconds=max(env_int("AUTO_QUESTION_TIMEOUT_SECONDS", 30), 1),
         auto_question_event_scope=normalize_event_scope(os.getenv("AUTO_QUESTION_EVENT_SCOPE", "today"), "today"),
+        auto_question_retry_count=max(env_int("AUTO_QUESTION_RETRY_COUNT", 2), 0),
+        auto_question_retry_backoff_seconds=max(env_int("AUTO_QUESTION_RETRY_BACKOFF_SECONDS", 2), 1),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         auth_enabled=env_bool("AUTH_ENABLED", False),
         auth_access_token_expire_minutes=env_int("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", 30),

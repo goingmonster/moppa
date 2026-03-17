@@ -39,6 +39,10 @@ interface QuestionItem {
   eventIds: string[]
   level: Level
   title: string
+  matchScore: number | null
+  eventDomain: string
+  eventType: string
+  background: string
   answerSpace: string
   hypothesis: string
   deadline: string
@@ -93,6 +97,10 @@ interface BackendQuestionItem {
   event_ids?: string[]
   level: number
   content: string
+  match_score?: number | null
+  event_domain?: string | null
+  event_type?: string | null
+  background?: string | null
   answer_space?: string | null
   deadline: string
   status: string
@@ -353,6 +361,10 @@ const questions = ref<QuestionItem[]>([
     eventIds: ['evt-001'],
     level: 'L2',
     title: 'A7 走廊车队流量会在 72 小时内上升吗？',
+    matchScore: null,
+    eventDomain: '',
+    eventType: '',
+    background: '',
     answerSpace: '会上升\n不会上升\n不确定',
     hypothesis: '若流量持续上升 20%，可判定存在前置部署行为。',
     deadline: '2026-03-12T00:00:00Z',
@@ -364,6 +376,10 @@ const questions = ref<QuestionItem[]>([
     eventIds: ['evt-002'],
     level: 'L1',
     title: '声呐异常会持续到下一个潮汐周期吗？',
+    matchScore: null,
+    eventDomain: '',
+    eventType: '',
+    background: '',
     answerSpace: '会\n不会',
     hypothesis: '若异常高于基线持续 18 小时，说明来源并非环境因素。',
     deadline: '2026-03-11T06:00:00Z',
@@ -375,6 +391,10 @@ const questions = ref<QuestionItem[]>([
     eventIds: ['evt-003'],
     level: 'L3',
     title: '本周中继故障会使指挥吞吐降到 65% 以下吗？',
+    matchScore: null,
+    eventDomain: '',
+    eventType: '',
+    background: '',
     answerSpace: '',
     hypothesis: '天气与干扰叠加可能导致吞吐持续下降。',
     deadline: '2026-03-15T12:00:00Z',
@@ -456,6 +476,10 @@ const draftQuestion = reactive({
   level: 'L2' as Level,
   deadline: '',
   status: 'collecting' as QuestionItem['status'],
+  matchScore: '',
+  eventDomain: '',
+  eventType: '',
+  background: '',
   answerSpace: '',
 })
 const homeDetailEvent = ref<EventItem | null>(null)
@@ -494,6 +518,10 @@ const questionEditForm = reactive({
   id: '',
   title: '',
   level: 'L2' as Level,
+  matchScore: '',
+  eventDomain: '',
+  eventType: '',
+  background: '',
   answerSpace: '',
   eventIds: [] as string[],
   deadline: '',
@@ -998,6 +1026,10 @@ function openQuestionEdit(questionItem: QuestionItem): void {
   questionEditForm.id = questionItem.id
   questionEditForm.title = questionItem.title
   questionEditForm.level = questionItem.level
+  questionEditForm.matchScore = questionItem.matchScore !== null ? String(questionItem.matchScore) : ''
+  questionEditForm.eventDomain = questionItem.eventDomain
+  questionEditForm.eventType = questionItem.eventType
+  questionEditForm.background = questionItem.background
   questionEditForm.answerSpace = questionItem.answerSpace
   questionEditForm.eventIds = [...questionItem.eventIds]
   questionEditForm.deadline = toDateTimeLocalValue(questionItem.deadline)
@@ -2120,8 +2152,17 @@ async function submitQuestionEdit(): Promise<void> {
     const deadline = questionEditForm.deadline.trim()
     const eventIds = Array.from(new Set(questionEditForm.eventIds)).filter((value) => value.trim().length > 0)
     const answerSpace = questionEditForm.answerSpace.trim()
+    const eventDomain = questionEditForm.eventDomain.trim()
+    const eventType = questionEditForm.eventType.trim()
+    const background = questionEditForm.background.trim()
+    const matchScoreText = questionEditForm.matchScore.trim()
+    const matchScore = matchScoreText ? Number(matchScoreText) : null
     if (!title || !deadline) {
       backendStatus.value = '问题更新失败：请填写标题与截止时间'
+      return
+    }
+    if (matchScoreText && !Number.isFinite(matchScore)) {
+      backendStatus.value = '问题更新失败：匹配分数格式无效'
       return
     }
     if ((questionEditForm.level === 'L1' || questionEditForm.level === 'L2') && !answerSpace) {
@@ -2140,6 +2181,10 @@ async function submitQuestionEdit(): Promise<void> {
       if (target) {
         target.title = title
         target.level = questionEditForm.level
+        target.matchScore = matchScore
+        target.eventDomain = eventDomain
+        target.eventType = eventType
+        target.background = background
         target.answerSpace = answerSpace
         target.eventIds = eventIds
         target.deadline = normalizedDeadline
@@ -2153,6 +2198,10 @@ async function submitQuestionEdit(): Promise<void> {
     await sendJson(`/questions/${questionEditForm.id}`, 'PATCH', {
       level: levelToNumber(questionEditForm.level),
       content: title,
+      match_score: matchScore,
+      event_domain: eventDomain || null,
+      event_type: eventType || null,
+      background: background || null,
       answer_space: answerSpace || null,
       event_ids: eventIds,
       deadline: normalizedDeadline,
@@ -2351,6 +2400,10 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
     eventIds,
     level: normalizeLevel(item.level),
     title: item.content,
+    matchScore: typeof item.match_score === 'number' ? item.match_score : null,
+    eventDomain: item.event_domain ?? '',
+    eventType: item.event_type ?? '',
+    background: item.background ?? '',
     answerSpace: item.answer_space ?? '',
     hypothesis: '由后端问题内容导入，待补充可证伪假设。',
     deadline: item.deadline,
@@ -3472,8 +3525,17 @@ async function createQuestion(): Promise<void> {
     const deadline = draftQuestion.deadline.trim()
     const eventIds = Array.from(new Set(selectedEventIdsForQuestion.value)).filter((value) => value.trim().length > 0)
     const answerSpace = draftQuestion.answerSpace.trim()
+    const eventDomain = draftQuestion.eventDomain.trim()
+    const eventType = draftQuestion.eventType.trim()
+    const background = draftQuestion.background.trim()
+    const matchScoreText = draftQuestion.matchScore.trim()
+    const matchScore = matchScoreText ? Number(matchScoreText) : null
     if (!title || !deadline) {
       backendStatus.value = '问题新增失败：请填写标题与截止时间'
+      return
+    }
+    if (matchScoreText && !Number.isFinite(matchScore)) {
+      backendStatus.value = '问题新增失败：匹配分数格式无效'
       return
     }
     if ((draftQuestion.level === 'L1' || draftQuestion.level === 'L2') && !answerSpace) {
@@ -3495,6 +3557,10 @@ async function createQuestion(): Promise<void> {
         eventIds,
         level: draftQuestion.level,
         title,
+        matchScore,
+        eventDomain,
+        eventType,
+        background,
         answerSpace,
         hypothesis: '由人工创建，待补充假设。',
         deadline: normalizedDeadline,
@@ -3504,6 +3570,10 @@ async function createQuestion(): Promise<void> {
       selectedQuestionId.value = localId
       backendStatus.value = '后端离线：已在模拟数据中新增问题'
       draftQuestion.title = ''
+      draftQuestion.matchScore = ''
+      draftQuestion.eventDomain = ''
+      draftQuestion.eventType = ''
+      draftQuestion.background = ''
       draftQuestion.answerSpace = ''
       return
     }
@@ -3512,6 +3582,10 @@ async function createQuestion(): Promise<void> {
       event_ids: eventIds,
       level: levelToNumber(draftQuestion.level),
       content: title,
+      match_score: matchScore,
+      event_domain: eventDomain || null,
+      event_type: eventType || null,
+      background: background || null,
       answer_space: answerSpace || null,
       deadline: normalizedDeadline,
       trace_id: makeTraceId(),
@@ -3519,6 +3593,10 @@ async function createQuestion(): Promise<void> {
     await Promise.all([hydrateFromBackend(), fetchManageQuestions(1)])
     backendStatus.value = '问题新增成功（后端）'
     draftQuestion.title = ''
+    draftQuestion.matchScore = ''
+    draftQuestion.eventDomain = ''
+    draftQuestion.eventType = ''
+    draftQuestion.background = ''
     draftQuestion.answerSpace = ''
   } catch {
     backendStatus.value = '问题新增失败：请检查后端接口或参数格式'
@@ -4648,6 +4726,10 @@ watch(backendStatus, (status, prev) => {
           <p><strong>状态：</strong>{{ statusLabel[manageDetailQuestion.status] }}</p>
           <p><strong>截止时间：</strong>{{ formatDate(manageDetailQuestion.deadline) }}</p>
           <p><strong>标题：</strong>{{ manageDetailQuestion.title }}</p>
+          <p><strong>匹配分数：</strong>{{ manageDetailQuestion.matchScore ?? '-' }}</p>
+          <p><strong>事件域：</strong>{{ manageDetailQuestion.eventDomain || '-' }}</p>
+          <p><strong>事件类型：</strong>{{ manageDetailQuestion.eventType || '-' }}</p>
+          <p><strong>背景：</strong>{{ manageDetailQuestion.background || '-' }}</p>
           <p><strong>答案范围：</strong>{{ manageDetailQuestion.answerSpace || '未填写' }}</p>
           <p><strong>假设：</strong>{{ manageDetailQuestion.hypothesis }}</p>
           <p><strong>真实结果：</strong>{{ manageDetailQuestion.groundTruth }}</p>
@@ -4853,6 +4935,22 @@ watch(backendStatus, (status, prev) => {
           <select v-model="questionEditForm.level">
             <option v-for="level in levels" :key="`edit-question-${level}`" :value="level">{{ level }}</option>
           </select>
+        </div>
+        <div class="field-block">
+          <label>匹配分数（可选）</label>
+          <input v-model="questionEditForm.matchScore" type="number" step="0.0001" min="0" placeholder="例如 0.7074" />
+        </div>
+        <div class="field-block">
+          <label>事件域（可选）</label>
+          <input v-model="questionEditForm.eventDomain" placeholder="例如 外交" />
+        </div>
+        <div class="field-block">
+          <label>事件类型（可选）</label>
+          <input v-model="questionEditForm.eventType" placeholder="例如 外交对话" />
+        </div>
+        <div class="field-block">
+          <label>背景（可选）</label>
+          <textarea v-model="questionEditForm.background" rows="3" placeholder="问题背景描述"></textarea>
         </div>
         <div v-if="questionEditForm.level === 'L1' || questionEditForm.level === 'L2'" class="field-block">
           <label>答案范围（L1/L2 必填）</label>
@@ -5138,6 +5236,22 @@ watch(backendStatus, (status, prev) => {
             <label>截止时间</label>
             <input v-model="draftQuestion.deadline" class="deadline-input" type="datetime-local" step="60" />
           </div>
+        </div>
+        <div class="field-block">
+          <label>匹配分数（可选）</label>
+          <input v-model="draftQuestion.matchScore" type="number" step="0.0001" min="0" placeholder="例如 0.7074" />
+        </div>
+        <div class="field-block">
+          <label>事件域（可选）</label>
+          <input v-model="draftQuestion.eventDomain" placeholder="例如 外交" />
+        </div>
+        <div class="field-block">
+          <label>事件类型（可选）</label>
+          <input v-model="draftQuestion.eventType" placeholder="例如 外交对话" />
+        </div>
+        <div class="field-block">
+          <label>背景（可选）</label>
+          <textarea v-model="draftQuestion.background" rows="3" placeholder="问题背景描述"></textarea>
         </div>
         <div class="field-block">
           <label>初始状态</label>

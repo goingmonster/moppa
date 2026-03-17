@@ -20,6 +20,10 @@ class QuestionRepository:
             template_id=payload.template_id,
             level=payload.level,
             content=payload.content,
+            match_score=payload.match_score,
+            event_domain=payload.event_domain,
+            event_type=payload.event_type,
+            background=payload.background,
             answer_space=payload.answer_space,
             verification_conditions=payload.verification_conditions,
             deadline=payload.deadline,
@@ -87,6 +91,14 @@ class QuestionRepository:
             entity.level = payload.level
         if payload.content is not None:
             entity.content = payload.content
+        if payload.match_score is not None:
+            entity.match_score = payload.match_score
+        if payload.event_domain is not None:
+            entity.event_domain = payload.event_domain
+        if payload.event_type is not None:
+            entity.event_type = payload.event_type
+        if payload.background is not None:
+            entity.background = payload.background
         if payload.answer_space is not None:
             entity.answer_space = payload.answer_space
         if payload.deadline is not None:

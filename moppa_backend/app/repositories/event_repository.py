@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import Session
 
 from app.db.models import EventEntity
@@ -259,23 +259,19 @@ class EventRepository:
         if not event_ids:
             return 0
         now = datetime.now(timezone.utc)
-        _ = self.db.execute(
-            text(
-                """
-                UPDATE event
-                SET filter_status = 'matched',
-                    updated_at = :updated_at
-                WHERE id = ANY(:event_ids)
-                  AND deleted_at IS NULL
-                """
-            ),
-            {
-                "updated_at": now,
-                "event_ids": [str(item) for item in event_ids],
-            },
+        result = self.db.execute(
+            update(EventEntity)
+            .where(
+                EventEntity.id.in_(event_ids),
+                EventEntity.deleted_at.is_(None),
+            )
+            .values(
+                filter_status="matched",
+                updated_at=now,
+            )
         )
         self.db.commit()
-        return len(event_ids)
+        return int(result.rowcount or 0)
 
     def get_by_id(self, event_id: str) -> EventEntity | None:
         entity = self.db.get(EventEntity, UUID(event_id))

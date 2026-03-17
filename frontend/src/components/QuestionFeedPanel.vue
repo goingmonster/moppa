@@ -6,6 +6,10 @@ interface QuestionItem {
   eventIds: string[]
   level: 'L1' | 'L2' | 'L3' | 'L4'
   title: string
+  matchScore: number | null
+  eventDomain: string
+  eventType: string
+  background: string
   answerSpace: string
   hypothesis: string
   deadline: string
@@ -161,6 +165,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <p class="item-title">{{ question.title }}</p>
+          <p class="item-meta"><strong>事件域：</strong>{{ question.eventDomain || '-' }} ｜ <strong>事件类型：</strong>{{ question.eventType || '-' }}</p>
+          <p class="item-meta"><strong>匹配分：</strong>{{ question.matchScore ?? '-' }}</p>
           <p class="item-meta"><strong>答案范围：</strong>{{ question.answerSpace || '未设置' }}</p>
           <p class="item-meta"><strong>关联事件：</strong>{{ eventLabel(question.eventIds) }}</p>
           <div class="action-row stream-engagement-row">

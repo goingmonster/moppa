@@ -4,6 +4,10 @@ interface QuestionItem {
   eventIds: string[]
   level: 'L1' | 'L2' | 'L3' | 'L4'
   title: string
+  matchScore: number | null
+  eventDomain: string
+  eventType: string
+  background: string
   answerSpace: string
   status: 'collecting' | 'locked' | 'resolved'
   hypothesis: string
@@ -118,6 +122,7 @@ function questionStatusBadgeTone(status: QuestionItem['status']): string {
                 .join('、') || '未匹配事件'
             }}
           </small>
+          <small class="item-meta">事件域：{{ question.eventDomain || '-' }} ｜ 事件类型：{{ question.eventType || '-' }} ｜ 匹配分：{{ question.matchScore ?? '-' }}</small>
           <div class="action-row action-right card-actions">
             <button class="action-btn" @click.stop="emit('open-edit', question)">编辑</button>
           </div>
