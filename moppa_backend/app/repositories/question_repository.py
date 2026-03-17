@@ -17,12 +17,14 @@ class QuestionRepository:
 
         entity = QuestionEntity(
             event_id=event_ids[0] if event_ids else None,
+            template_id=payload.template_id,
             level=payload.level,
             content=payload.content,
             answer_space=payload.answer_space,
+            verification_conditions=payload.verification_conditions,
             deadline=payload.deadline,
             trace_id=payload.trace_id,
-            status="draft",
+            status=self._normalize_status(payload.status or "draft"),
         )
         self.db.add(entity)
         self.db.flush()
@@ -161,6 +163,7 @@ class QuestionRepository:
             "published": "published",
             "closed": "closed",
             "expired": "expired",
+            "matched": "matched",
         }
         resolved = mapping.get(normalized)
         if resolved is None:

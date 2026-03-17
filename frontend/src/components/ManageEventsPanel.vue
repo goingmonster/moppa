@@ -74,6 +74,9 @@ function eventFilterBadgeTone(status: string): string {
   if (status === 'passed') {
     return 'badge-success'
   }
+  if (status === 'matched') {
+    return 'badge-info'
+  }
   if (status === 'filtered') {
     return 'badge-error'
   }
@@ -110,6 +113,7 @@ function eventFilterBadgeTone(status: string): string {
           <option value="">全部状态</option>
           <option value="pending">pending</option>
           <option value="passed">passed</option>
+          <option value="matched">matched</option>
           <option value="filtered">filtered</option>
           <option value="reviewed">reviewed（passed + filtered）</option>
         </select>

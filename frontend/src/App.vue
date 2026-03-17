@@ -397,7 +397,28 @@ const selectedEventId = ref(homeEvents.value[0]?.id ?? '')
 const selectedEventIdsForQuestion = ref<string[]>(selectedEventId.value ? [selectedEventId.value] : [])
 const selectedQuestionId = ref(questions.value[0]?.id ?? '')
 const rankingLevel = ref<'ALL' | Level>('ALL')
-const currentView = ref<AppView>('home')
+const APP_VIEW_STORAGE_KEY = 'moppa_current_view'
+
+function isAppView(value: string): value is AppView {
+  return value === 'home'
+    || value === 'events'
+    || value === 'questions'
+    || value === 'questionStream'
+    || value === 'templates'
+    || value === 'tasks'
+    || value === 'dataSources'
+    || value === 'filterRules'
+}
+
+function loadInitialView(): AppView {
+  const saved = localStorage.getItem(APP_VIEW_STORAGE_KEY)
+  if (saved && isAppView(saved)) {
+    return saved
+  }
+  return 'home'
+}
+
+const currentView = ref<AppView>(loadInitialView())
 const activeTheme = ref<ThemeId>('blue')
 const backendStatus = ref('后端未连接，当前使用模拟数据')
 const backendOnline = ref(false)
@@ -573,6 +594,7 @@ const autoReviewProcessing = ref(false)
 const autoQuestionProcessing = ref(false)
 const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
+const taskDetailRefreshing = ref(false)
 const createTaskForm = reactive({ taskType: 's1_ingest_pull', idempotencyKey: '', traceId: '' })
 const triggerPullForm = reactive({ sourceSystem: '' })
 const sourceSystemOptions = ref<string[]>([])
@@ -855,6 +877,7 @@ const totalEventCount = ref(0)
 const pendingEventCount = ref(0)
 const runningTaskCount = ref(0)
 let topMetricRefreshTimer: number | undefined
+let taskDetailRefreshTimer: number | undefined
 const skeletonRows = [1, 2, 3, 4]
 
 const statusLabel: Record<QuestionItem['status'], string> = {
@@ -882,6 +905,9 @@ function severityBadgeTone(value: EventItem['severity']): string {
 function eventFilterBadgeTone(status: string): string {
   if (status === 'passed') {
     return 'badge-success'
+  }
+  if (status === 'matched') {
+    return 'badge-info'
   }
   if (status === 'filtered') {
     return 'badge-error'
@@ -1332,6 +1358,56 @@ async function fetchTaskDetail(taskId: string): Promise<void> {
       trace_id: basic.trace_id,
     }
   }
+  scheduleTaskDetailAutoRefresh()
+}
+
+async function refreshCurrentTaskDetail(): Promise<void> {
+  const taskId = selectedTask.value?.id ?? selectedTaskDetail.value?.task_id
+  if (!taskId) {
+    return
+  }
+  taskDetailRefreshing.value = true
+  try {
+    await fetchTaskDetail(taskId)
+  } finally {
+    taskDetailRefreshing.value = false
+  }
+}
+
+function stopTaskDetailAutoRefresh(): void {
+  if (taskDetailRefreshTimer !== undefined) {
+    window.clearTimeout(taskDetailRefreshTimer)
+    taskDetailRefreshTimer = undefined
+  }
+}
+
+function scheduleTaskDetailAutoRefresh(): void {
+  stopTaskDetailAutoRefresh()
+  const status = selectedTaskDetail.value?.status ?? ''
+  if (!taskDetailDialogOpen.value || (status !== 'running' && status !== 'pending')) {
+    return
+  }
+  taskDetailRefreshTimer = window.setTimeout(() => {
+    void refreshCurrentTaskDetail().then(() => {
+      scheduleTaskDetailAutoRefresh()
+    })
+  }, 2000)
+}
+
+function getTaskResultNumber(key: string): number | null {
+  const value = selectedTaskDetail.value?.result?.[key]
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  return null
+}
+
+function getTaskBatchLogs(): Array<Record<string, unknown>> {
+  const raw = selectedTaskDetail.value?.result?.batch_logs
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
 }
 
 async function submitCreateTask(): Promise<void> {
@@ -3514,83 +3590,7 @@ async function hydrateFromBackend(): Promise<void> {
   }
 }
 
-watch(
-  () => manageDetailQuestion.value?.id,
-  (questionId) => {
-    if (!questionId) {
-      predictionForm.predictionContent = ''
-      predictionForm.confidence = ''
-      predictionForm.reasoning = ''
-      commentDraft.value = ''
-      return
-    }
-    applyPredictionFormFromMine(questionId)
-  },
-)
-
-watch(myCurrentPrediction, (mine) => {
-  if (!mine) {
-    return
-  }
-  predictionForm.predictionContent = mine.predictionContent
-  predictionForm.confidence = mine.confidence !== null && mine.confidence !== undefined ? String(mine.confidence) : ''
-  predictionForm.reasoning = mine.reasoning ?? ''
-})
-
-watch(questionDetailDialogOpen, (open) => {
-  if (open) {
-    return
-  }
-  questionComposerMode.value = null
-  predictionPanelCollapsed.value = false
-  commentPanelCollapsed.value = false
-  cancelCommentEdit()
-})
-
-watch(activeTheme, (theme) => {
-  applyTheme(theme)
-})
-
-onMounted(() => {
-  const savedTheme = localStorage.getItem('moppa_theme') ?? ''
-  if (isThemeId(savedTheme)) {
-    activeTheme.value = savedTheme
-  }
-  applyTheme(activeTheme.value)
-  void (async () => {
-    await bootstrapAuthSession()
-    if (isAuthenticated.value) {
-      await hydrateFromBackend()
-      await fetchSourceSystemOptions()
-    }
-  })()
-  scheduleTopMetricRefresh(0)
-  window.addEventListener('keydown', handleGlobalKeydown)
-})
-
-onBeforeUnmount(() => {
-  if (topMetricRefreshTimer !== undefined) {
-    window.clearTimeout(topMetricRefreshTimer)
-    topMetricRefreshTimer = undefined
-  }
-  window.removeEventListener('keydown', handleGlobalKeydown)
-})
-
-watch(currentView, (view) => {
-  if (!isAuthenticated.value) {
-    authDialogOpen.value = true
-    if (view !== 'home' && view !== 'questionStream') {
-      currentView.value = 'home'
-    }
-    return
-  }
-
-  if (!isAdmin.value && view !== 'home' && view !== 'questionStream') {
-    currentView.value = 'home'
-    backendStatus.value = '当前账号仅允许访问首页和问题社区'
-    return
-  }
-
+function loadViewData(view: AppView): void {
   if (view === 'events') {
     if (backendOnline.value) {
       void fetchManageEvents(1)
@@ -3661,7 +3661,109 @@ watch(currentView, (view) => {
       selectedManageFilterRuleIds.value = []
     }
   }
+}
+
+watch(
+  () => manageDetailQuestion.value?.id,
+  (questionId) => {
+    if (!questionId) {
+      predictionForm.predictionContent = ''
+      predictionForm.confidence = ''
+      predictionForm.reasoning = ''
+      commentDraft.value = ''
+      return
+    }
+    applyPredictionFormFromMine(questionId)
+  },
+)
+
+watch(myCurrentPrediction, (mine) => {
+  if (!mine) {
+    return
+  }
+  predictionForm.predictionContent = mine.predictionContent
+  predictionForm.confidence = mine.confidence !== null && mine.confidence !== undefined ? String(mine.confidence) : ''
+  predictionForm.reasoning = mine.reasoning ?? ''
 })
+
+watch(questionDetailDialogOpen, (open) => {
+  if (open) {
+    return
+  }
+  questionComposerMode.value = null
+  predictionPanelCollapsed.value = false
+  commentPanelCollapsed.value = false
+  cancelCommentEdit()
+})
+
+watch(activeTheme, (theme) => {
+  applyTheme(theme)
+})
+
+onMounted(() => {
+  const savedTheme = localStorage.getItem('moppa_theme') ?? ''
+  if (isThemeId(savedTheme)) {
+    activeTheme.value = savedTheme
+  }
+  applyTheme(activeTheme.value)
+  void (async () => {
+    await bootstrapAuthSession()
+    if (isAuthenticated.value) {
+      await hydrateFromBackend()
+      await fetchSourceSystemOptions()
+      if (!isAdmin.value && currentView.value !== 'home' && currentView.value !== 'questionStream') {
+        currentView.value = 'home'
+      } else {
+        loadViewData(currentView.value)
+      }
+    }
+  })()
+  scheduleTopMetricRefresh(0)
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  if (topMetricRefreshTimer !== undefined) {
+    window.clearTimeout(topMetricRefreshTimer)
+    topMetricRefreshTimer = undefined
+  }
+  stopTaskDetailAutoRefresh()
+  window.removeEventListener('keydown', handleGlobalKeydown)
+})
+
+watch(currentView, (view) => {
+  if (!isAuthenticated.value) {
+    authDialogOpen.value = true
+    if (view !== 'home' && view !== 'questionStream') {
+      currentView.value = 'home'
+    }
+    return
+  }
+
+  if (!isAdmin.value && view !== 'home' && view !== 'questionStream') {
+    currentView.value = 'home'
+    backendStatus.value = '当前账号仅允许访问首页和问题社区'
+    return
+  }
+
+  localStorage.setItem(APP_VIEW_STORAGE_KEY, view)
+  loadViewData(view)
+})
+
+watch(taskDetailDialogOpen, (open) => {
+  if (!open) {
+    stopTaskDetailAutoRefresh()
+    return
+  }
+  scheduleTaskDetailAutoRefresh()
+})
+
+watch(
+  () => selectedTaskDetail.value?.status,
+  () => {
+    scheduleTaskDetailAutoRefresh()
+  },
+)
 
 watch(eventManageSearchKeyword, () => {
   eventManagePage.value = 1
@@ -4089,6 +4191,9 @@ watch(backendStatus, (status, prev) => {
         <div class="panel-head">
           <h2>任务执行详情</h2>
           <div class="action-row">
+            <button class="action-btn" :disabled="taskDetailRefreshing" @click="refreshCurrentTaskDetail">
+              {{ taskDetailRefreshing ? '刷新中...' : '刷新详情' }}
+            </button>
             <button class="action-btn" @click="taskDetailDialogOpen = false">关闭</button>
           </div>
         </div>
@@ -4103,8 +4208,13 @@ watch(backendStatus, (status, prev) => {
           <p><strong>结束时间：</strong>{{ selectedTaskDetail.finished_at ? formatDate(selectedTaskDetail.finished_at) : '-' }}</p>
           <p><strong>下次重试：</strong>{{ selectedTaskDetail.next_retry_at ? formatDate(selectedTaskDetail.next_retry_at) : '-' }}</p>
           <p><strong>错误信息：</strong>{{ selectedTaskDetail.error_message ?? '-' }}</p>
+          <p><strong>已处理批次：</strong>{{ getTaskResultNumber('processed_batches') ?? '-' }}</p>
+          <p><strong>已处理事件：</strong>{{ getTaskResultNumber('processed_events') ?? '-' }}</p>
+          <p><strong>已生成问题：</strong>{{ getTaskResultNumber('generated_questions') ?? '-' }}</p>
+          <p><strong>已保存问题：</strong>{{ getTaskResultNumber('saved_questions') ?? '-' }}</p>
           <p><strong>结果：</strong>{{ JSON.stringify(selectedTaskDetail.result) }}</p>
           <p><strong>指标：</strong>{{ JSON.stringify(selectedTaskDetail.metrics) }}</p>
+          <p><strong>批次日志：</strong>{{ JSON.stringify(getTaskBatchLogs()) }}</p>
         </div>
       </section>
     </div>
@@ -4496,13 +4606,14 @@ watch(backendStatus, (status, prev) => {
           <select v-model="eventEditForm.filterStatus">
             <option value="" disabled>请选择状态</option>
             <option
-              v-if="eventEditForm.filterStatus && !['pending', 'passed', 'filtered'].includes(eventEditForm.filterStatus)"
+              v-if="eventEditForm.filterStatus && !['pending', 'passed', 'matched', 'filtered'].includes(eventEditForm.filterStatus)"
               :value="eventEditForm.filterStatus"
             >
               {{ eventEditForm.filterStatus }}
             </option>
             <option value="pending">pending</option>
             <option value="passed">passed</option>
+            <option value="matched">matched</option>
             <option value="filtered">filtered</option>
           </select>
         </div>

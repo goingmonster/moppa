@@ -1,16 +1,20 @@
 import json
 import logging
+import math
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import EventEntity, QuestionTemplateEntity, TaskExecutionEntity
+from app.models.question_model import QuestionCreateModel
 from app.models.s1_ingest_model import S1TaskResponseModel
 from app.repositories.event_repository import EventRepository
+from app.repositories.question_repository import QuestionRepository
 from app.repositories.question_template_repository import QuestionTemplateRepository
 from app.repositories.task_execution_repository import TaskExecutionRepository
 
@@ -21,6 +25,7 @@ class AutoQuestionService:
     def __init__(self, db: Session) -> None:
         self.db = db
         self.event_repository = EventRepository(db)
+        self.question_repository = QuestionRepository(db)
         self.template_repository = QuestionTemplateRepository(db)
         self.task_repository = TaskExecutionRepository(db)
 
@@ -65,10 +70,22 @@ class AutoQuestionService:
             range_start, range_end = self._resolve_event_time_range(now)
             batch_size = settings.auto_question_batch_size
             offset = 0
+            total_events = self.event_repository.count_passed(day_start=range_start, day_end=range_end)
+            total_batches = math.ceil(total_events / batch_size) if total_events > 0 else 0
+
+            _logger.info(
+                "Auto question task started: task_id=%s total_events=%s batch_size=%s total_batches=%s scope=%s",
+                str(task.id),
+                total_events,
+                batch_size,
+                total_batches,
+                settings.auto_question_event_scope,
+            )
 
             processed_batches = 0
             processed_events = 0
             generated_questions = 0
+            saved_questions = 0
             api_call_count = 0
             batch_logs: list[dict[str, object]] = []
 
@@ -91,28 +108,64 @@ class AutoQuestionService:
                     "skip_filter": False,
                     "skip_dedup": False,
                 }
+                _logger.info(
+                    "Auto question API call start: task_id=%s batch=%s/%s event_count=%s url=%s",
+                    str(task.id),
+                    processed_batches + 1,
+                    total_batches,
+                    len(events),
+                    settings.auto_question_generate_url,
+                )
                 response_data = self._call_generate_api(payload)
                 api_call_count += 1
 
                 questions = response_data.get("questions")
                 question_count = len(questions) if isinstance(questions, list) else 0
+                saved_count = self._save_generated_questions(questions, events)
                 generated_questions += question_count
+                saved_questions += saved_count
                 processed_batches += 1
                 processed_events += len(events)
+                remaining_events = max(total_events - processed_events, 0)
+                _ = self.event_repository.batch_mark_matched([event.id for event in events])
 
                 log_item: dict[str, object] = {
                     "batch": processed_batches,
                     "event_count": len(events),
                     "generated_question_count": question_count,
+                    "saved_question_count": saved_count,
                     "event_ids": [str(event.id) for event in events],
                 }
                 batch_logs.append(log_item)
+                progress_result = {
+                    "event_scope": settings.auto_question_event_scope,
+                    "processed_batches": processed_batches,
+                    "processed_events": processed_events,
+                    "generated_questions": generated_questions,
+                    "saved_questions": saved_questions,
+                    "batch_logs": batch_logs,
+                }
+                progress_template_count = 0
+                for group in grouped_templates:
+                    group_templates = group.get("templates")
+                    if isinstance(group_templates, list):
+                        progress_template_count += len(group_templates)
+                progress_metrics = {
+                    "template_group_count": len(grouped_templates),
+                    "template_count": progress_template_count,
+                    "api_call_count": api_call_count,
+                }
+                _ = self.task_repository.update_progress(task.id, progress_result, progress_metrics)
                 _logger.info(
-                    "Auto question batch completed: task_id=%s batch=%s event_count=%s generated_question_count=%s",
+                    "Auto question batch completed: task_id=%s batch=%s/%s batch_event_count=%s processed_events=%s remaining_events=%s generated_question_count=%s saved_question_count=%s",
                     str(task.id),
                     processed_batches,
+                    total_batches,
                     len(events),
+                    processed_events,
+                    remaining_events,
                     question_count,
+                    saved_count,
                 )
                 if isinstance(questions, list) and questions:
                     _logger.info(
@@ -132,9 +185,12 @@ class AutoQuestionService:
 
             result = {
                 "event_scope": settings.auto_question_event_scope,
+                "total_events": total_events,
+                "total_batches": total_batches,
                 "processed_batches": processed_batches,
                 "processed_events": processed_events,
                 "generated_questions": generated_questions,
+                "saved_questions": saved_questions,
                 "batch_logs": batch_logs,
             }
             metrics = {
@@ -146,8 +202,16 @@ class AutoQuestionService:
             return self._to_task_response(completed or task)
         except Exception as exc:
             _logger.exception("Auto question task failed: task_id=%s", str(task.id))
-            failed = self.task_repository.mark_failed(task.id, error_message=str(exc), max_attempts=3)
-            return self._to_task_response(failed or task)
+            try:
+                self.db.rollback()
+            except Exception:
+                _logger.exception("Auto question rollback failed: task_id=%s", str(task.id))
+            try:
+                failed = self.task_repository.mark_failed(task.id, error_message=str(exc), max_attempts=3)
+                return self._to_task_response(failed or task)
+            except Exception:
+                _logger.exception("Auto question mark_failed failed: task_id=%s", str(task.id))
+                return self._to_task_response(task)
 
     def _validate_runtime_config(self) -> None:
         if not settings.auto_question_generate_url.strip():
@@ -215,6 +279,168 @@ class AutoQuestionService:
             if domain_groups[domain]
         ]
 
+    def _save_generated_questions(self, questions_obj: object, batch_events: list[EventEntity]) -> int:
+        if not isinstance(questions_obj, list):
+            return 0
+
+        event_by_url_title: dict[tuple[str, str], UUID] = {}
+        event_by_url: dict[str, UUID] = {}
+        event_by_source_id: dict[str, UUID] = {}
+        event_by_event_key: dict[str, UUID] = {}
+        for event in batch_events:
+            url = (event.url or "").strip()
+            title = (event.title or "").strip()
+            event_by_source_id[str(event.id)] = event.id
+            if event.event_key:
+                event_by_event_key[event.event_key.strip()] = event.id
+            if url:
+                event_by_url[url] = event.id
+            if url and title:
+                event_by_url_title[(url, title)] = event.id
+
+        saved = 0
+        for item in questions_obj:
+            if not isinstance(item, dict):
+                continue
+            content_value = item.get("question")
+            if not isinstance(content_value, str) or not content_value.strip():
+                continue
+
+            template_id = self._parse_template_uuid(item.get("template_id"))
+            level = self._parse_level(item.get("level"))
+            deadline = self._parse_deadline(item.get("deadline"))
+            if deadline is None:
+                continue
+
+            candidate_answers_value = item.get("candidate_answers")
+            answer_space = self._build_answer_space(candidate_answers_value)
+
+            resolution_criteria_value = item.get("resolution_criteria")
+            verification_conditions: str | None = None
+            if isinstance(resolution_criteria_value, str) and resolution_criteria_value.strip():
+                verification_conditions = resolution_criteria_value.strip()
+
+            linked_event_ids = self._resolve_question_event_ids(
+                source_id_obj=item.get("id"),
+                source_url_obj=item.get("source_url"),
+                event_by_source_id=event_by_source_id,
+                event_by_event_key=event_by_event_key,
+                event_by_url_title=event_by_url_title,
+                event_by_url=event_by_url,
+                batch_events=batch_events,
+            )
+            payload = QuestionCreateModel(
+                event_id=linked_event_ids[0] if linked_event_ids else None,
+                event_ids=linked_event_ids,
+                template_id=template_id,
+                level=level,
+                content=content_value.strip(),
+                answer_space=answer_space,
+                verification_conditions=verification_conditions,
+                deadline=deadline,
+                status="matched",
+                trace_id=uuid4(),
+            )
+            try:
+                _ = self.question_repository.create(payload)
+                saved += 1
+            except Exception:
+                _logger.exception("Auto question save failed for one generated question")
+                self.db.rollback()
+
+        return saved
+
+    def _resolve_question_event_ids(
+        self,
+        source_id_obj: object,
+        source_url_obj: object,
+        event_by_source_id: dict[str, UUID],
+        event_by_event_key: dict[str, UUID],
+        event_by_url_title: dict[tuple[str, str], UUID],
+        event_by_url: dict[str, UUID],
+        batch_events: list[EventEntity],
+    ) -> list[UUID]:
+        resolved: list[UUID] = []
+
+        source_id = str(source_id_obj).strip() if source_id_obj is not None else ""
+        if source_id:
+            mapped_by_id = event_by_source_id.get(source_id)
+            if mapped_by_id is not None:
+                return [mapped_by_id]
+            mapped_by_key = event_by_event_key.get(source_id)
+            if mapped_by_key is not None:
+                return [mapped_by_key]
+
+        if isinstance(source_url_obj, list):
+            for row in source_url_obj:
+                if not isinstance(row, dict):
+                    continue
+                url_value = row.get("url")
+                title_value = row.get("title")
+                url = url_value.strip() if isinstance(url_value, str) else ""
+                title = title_value.strip() if isinstance(title_value, str) else ""
+                match_id: UUID | None = None
+                if url and title:
+                    match_id = event_by_url_title.get((url, title))
+                if match_id is None and url:
+                    match_id = event_by_url.get(url)
+                if match_id is not None and match_id not in resolved:
+                    resolved.append(match_id)
+        if resolved:
+            return resolved
+        if batch_events:
+            return [batch_events[0].id]
+        return []
+
+    def _parse_template_uuid(self, value: object) -> UUID | None:
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return UUID(text)
+        except ValueError:
+            return None
+
+    def _parse_level(self, value: object) -> int:
+        if isinstance(value, str):
+            text = value.strip().upper()
+            if text.startswith("L") and len(text) > 1 and text[1:].isdigit():
+                parsed = int(text[1:])
+                if 1 <= parsed <= 4:
+                    return parsed
+        if isinstance(value, int) and 1 <= value <= 4:
+            return value
+        return 1
+
+    def _parse_deadline(self, value: object) -> datetime | None:
+        if not isinstance(value, str):
+            return None
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            try:
+                parsed = datetime.fromisoformat(f"{text}T00:00:00")
+            except ValueError:
+                return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _build_answer_space(self, value: object) -> str | None:
+        if isinstance(value, list):
+            items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+            if items:
+                return "\n".join(items)
+            return None
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        return None
+
     def _call_generate_api(self, payload: dict[str, object]) -> dict[str, object]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(
@@ -223,21 +449,49 @@ class AutoQuestionService:
             headers={"Content-Type": "application/json", "Accept": "application/json"},
             method="POST",
         )
+        started = time.perf_counter()
         try:
             with urlopen(request, timeout=settings.auto_question_timeout_seconds) as response:
                 raw = response.read().decode("utf-8")
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                status_code = response.getcode()
+                _logger.info(
+                    "Auto question API call success: status=%s elapsed_ms=%s response_size=%s",
+                    status_code,
+                    elapsed_ms,
+                    len(raw),
+                )
                 parsed = json.loads(raw) if raw.strip() else {}
                 if isinstance(parsed, dict):
                     return parsed
                 return {"raw": parsed}
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="ignore") if exc.fp is not None else ""
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            _logger.error(
+                "Auto question API call failed: status=%s elapsed_ms=%s body=%s",
+                exc.code,
+                elapsed_ms,
+                error_body[:500],
+            )
             raise RuntimeError(
                 f"Auto question API HTTP error: status={exc.code} body={error_body[:500]}"
             ) from exc
         except URLError as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            _logger.error(
+                "Auto question API call connection error: elapsed_ms=%s reason=%s",
+                elapsed_ms,
+                exc.reason,
+            )
             raise RuntimeError(f"Auto question API connection error: {exc.reason}") from exc
         except TimeoutError as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            _logger.error(
+                "Auto question API call timeout: elapsed_ms=%s timeout_seconds=%s",
+                elapsed_ms,
+                settings.auto_question_timeout_seconds,
+            )
             raise RuntimeError("Auto question API request timed out") from exc
 
     def _to_task_response(self, task: TaskExecutionEntity) -> S1TaskResponseModel:

@@ -111,7 +111,7 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'question_status') THEN
-        CREATE TYPE question_status AS ENUM ('draft', 'pending_review', 'published', 'closed', 'expired');
+        CREATE TYPE question_status AS ENUM ('draft', 'pending_review', 'published', 'closed', 'expired', 'matched');
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'review_decision') THEN
@@ -311,7 +311,7 @@ CREATE TABLE IF NOT EXISTS event (
     tags TEXT[] NOT NULL DEFAULT '{}',
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     trace_id UUID NOT NULL DEFAULT gen_random_uuid(),
-    filter_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (filter_status IN ('pending', 'passed', 'filtered')),
+    filter_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (filter_status IN ('pending', 'passed', 'filtered', 'matched')),
     filter_reasons TEXT[] NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS question (
     level SMALLINT NOT NULL REFERENCES rule_level_config(level),
     content TEXT NOT NULL,
     answer_space TEXT,
-    verification_conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+    verification_conditions TEXT,
     deadline TIMESTAMPTZ NOT NULL,
     status question_status NOT NULL DEFAULT 'draft',
     duplicate_check_hash TEXT,

@@ -86,6 +86,21 @@ class TaskExecutionRepository:
         self.db.refresh(entity)
         return entity
 
+    def update_progress(
+        self,
+        task_id: UUID,
+        result: Mapping[str, object],
+        metrics: Mapping[str, object],
+    ) -> TaskExecutionEntity | None:
+        entity = self.db.get(TaskExecutionEntity, task_id)
+        if entity is None:
+            return None
+        entity.result = dict(result)
+        entity.metrics = dict(metrics)
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity
+
     def mark_failed(self, task_id: UUID, error_message: str, max_attempts: int = 3) -> TaskExecutionEntity | None:
         entity = self.db.get(TaskExecutionEntity, task_id)
         if entity is None:

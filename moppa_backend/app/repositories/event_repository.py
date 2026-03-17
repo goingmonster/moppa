@@ -88,6 +88,18 @@ class EventRepository:
             )
         )
 
+    def count_passed(self, day_start: datetime | None = None, day_end: datetime | None = None) -> int:
+        query = select(func.count()).select_from(EventEntity).where(
+            EventEntity.deleted_at.is_(None),
+            EventEntity.filter_status == "passed",
+        )
+        if day_start is not None:
+            query = query.where(EventEntity.event_time >= day_start)
+        if day_end is not None:
+            query = query.where(EventEntity.event_time < day_end)
+        total = self.db.scalar(query)
+        return int(total or 0)
+
     def search_paginated(
         self,
         keyword: str,
@@ -242,6 +254,28 @@ class EventRepository:
         self.db.commit()
         self.db.refresh(entity)
         return entity
+
+    def batch_mark_matched(self, event_ids: list[UUID]) -> int:
+        if not event_ids:
+            return 0
+        now = datetime.now(timezone.utc)
+        _ = self.db.execute(
+            text(
+                """
+                UPDATE event
+                SET filter_status = 'matched',
+                    updated_at = :updated_at
+                WHERE id = ANY(:event_ids)
+                  AND deleted_at IS NULL
+                """
+            ),
+            {
+                "updated_at": now,
+                "event_ids": [str(item) for item in event_ids],
+            },
+        )
+        self.db.commit()
+        return len(event_ids)
 
     def get_by_id(self, event_id: str) -> EventEntity | None:
         entity = self.db.get(EventEntity, UUID(event_id))
