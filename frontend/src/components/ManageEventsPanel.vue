@@ -3,6 +3,7 @@ interface EventItem {
   id: string
   codename: string
   title: string
+  url: string | null
   theater: string
   summary: string
   tags: string[]

@@ -14,13 +14,14 @@ class QuestionTemplateRepository:
 
     def create(self, payload: QuestionTemplateCreateModel) -> QuestionTemplateEntity:
         entity = QuestionTemplateEntity(
+            template_index=payload.template_index,
             question_template=payload.question_template,
-            major_topic=payload.major_topic,
-            minor_topic=payload.minor_topic,
             difficulty_level=payload.difficulty_level,
-            construction_rationale=payload.construction_rationale,
-            candidate_answers=payload.candidate_answers,
-            answer_deadline=payload.answer_deadline,
+            candidate_answer_type=payload.candidate_answer_type,
+            event_domain=payload.event_domain,
+            event_type=payload.event_type,
+            event_type_id=payload.event_type_id,
+            operation_level=payload.operation_level,
             status=payload.status,
             version=payload.version,
         )
@@ -55,10 +56,11 @@ class QuestionTemplateRepository:
         pattern = f"%{escaped}%"
         filters = or_(
             QuestionTemplateEntity.question_template.ilike(pattern, escape="\\"),
-            QuestionTemplateEntity.major_topic.ilike(pattern, escape="\\"),
-            QuestionTemplateEntity.minor_topic.ilike(pattern, escape="\\"),
-            QuestionTemplateEntity.construction_rationale.ilike(pattern, escape="\\"),
-            QuestionTemplateEntity.candidate_answers.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.candidate_answer_type.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.event_domain.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.event_type.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.event_type_id.ilike(pattern, escape="\\"),
+            QuestionTemplateEntity.operation_level.ilike(pattern, escape="\\"),
         )
         base = select(QuestionTemplateEntity).where(QuestionTemplateEntity.deleted_at.is_(None), filters)
         items = list(
@@ -81,10 +83,11 @@ class QuestionTemplateRepository:
             query = query.where(
                 or_(
                     QuestionTemplateEntity.question_template.ilike(pattern, escape="\\"),
-                    QuestionTemplateEntity.major_topic.ilike(pattern, escape="\\"),
-                    QuestionTemplateEntity.minor_topic.ilike(pattern, escape="\\"),
-                    QuestionTemplateEntity.construction_rationale.ilike(pattern, escape="\\"),
-                    QuestionTemplateEntity.candidate_answers.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.candidate_answer_type.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.event_domain.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.event_type.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.event_type_id.ilike(pattern, escape="\\"),
+                    QuestionTemplateEntity.operation_level.ilike(pattern, escape="\\"),
                 )
             )
         return list(self.db.scalars(query.order_by(QuestionTemplateEntity.updated_at.desc())))
@@ -94,20 +97,22 @@ class QuestionTemplateRepository:
         if entity is None:
             return None
 
+        if payload.template_index is not None:
+            entity.template_index = payload.template_index
         if payload.question_template is not None:
             entity.question_template = payload.question_template
-        if payload.major_topic is not None:
-            entity.major_topic = payload.major_topic
-        if payload.minor_topic is not None:
-            entity.minor_topic = payload.minor_topic
         if payload.difficulty_level is not None:
             entity.difficulty_level = payload.difficulty_level
-        if payload.construction_rationale is not None:
-            entity.construction_rationale = payload.construction_rationale
-        if payload.candidate_answers is not None:
-            entity.candidate_answers = payload.candidate_answers
-        if payload.answer_deadline is not None:
-            entity.answer_deadline = payload.answer_deadline
+        if payload.candidate_answer_type is not None:
+            entity.candidate_answer_type = payload.candidate_answer_type
+        if payload.event_domain is not None:
+            entity.event_domain = payload.event_domain
+        if payload.event_type is not None:
+            entity.event_type = payload.event_type
+        if payload.event_type_id is not None:
+            entity.event_type_id = payload.event_type_id
+        if payload.operation_level is not None:
+            entity.operation_level = payload.operation_level
         if payload.status is not None:
             entity.status = payload.status
         if payload.version is not None:

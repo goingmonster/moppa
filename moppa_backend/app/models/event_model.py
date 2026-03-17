@@ -11,6 +11,7 @@ class EventCreateModel(BaseModel):
     source_system: str = Field(min_length=1)
     credibility_level: int = Field(ge=1, le=5)
     event_time: datetime
+    url: str | None = None
     trace_id: UUID
 
 
@@ -22,6 +23,7 @@ class EventListItemModel(BaseModel):
     source_system: str
     credibility_level: int
     event_time: str
+    url: str | None
     tags: list[str]
     filter_status: str
     trace_id: str
@@ -40,3 +42,4 @@ class EventUpdateModel(BaseModel):
     source_system: str | None = Field(default=None, min_length=1)
     credibility_level: int | None = Field(default=None, ge=1, le=5)
     filter_status: str | None = Field(default=None, min_length=1)
+    url: str | None = None

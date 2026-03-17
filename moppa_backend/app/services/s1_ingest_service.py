@@ -196,6 +196,7 @@ class S1IngestService:
                 source_system=item.source_system,
                 credibility_level=item.credibility_level,
                 event_time=item.event_time,
+                url=item.url,
                 trace_id=item.trace_id,
             )
 
@@ -249,6 +250,7 @@ class S1IngestService:
             source_system=source_system,
             credibility_level=3,
             event_time=event_time,
+            url=url or None,
             trace_id=uuid4(),
         )
 

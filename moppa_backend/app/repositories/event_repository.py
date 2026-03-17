@@ -20,6 +20,7 @@ class EventRepository:
             source_system=payload.source_system,
             credibility_level=payload.credibility_level,
             event_time=payload.event_time,
+            url=payload.url,
             trace_id=payload.trace_id,
             filter_status="pending",
         )
@@ -127,6 +128,7 @@ class EventRepository:
         source_system: str,
         credibility_level: int,
         event_time: datetime,
+        url: str | None,
         trace_id: UUID,
         version: str = "v1.0",
     ) -> tuple[EventEntity, bool]:
@@ -143,6 +145,7 @@ class EventRepository:
             source_system=source_system,
             credibility_level=credibility_level,
             event_time=event_time,
+            url=url,
             trace_id=trace_id,
             filter_status="pending",
         )
@@ -231,6 +234,8 @@ class EventRepository:
             entity.credibility_level = payload.credibility_level
         if payload.filter_status is not None:
             entity.filter_status = payload.filter_status
+        if payload.url is not None:
+            entity.url = payload.url
 
         self.db.commit()
         self.db.refresh(entity)

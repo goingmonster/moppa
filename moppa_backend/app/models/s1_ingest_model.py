@@ -11,6 +11,7 @@ class S1EventInputModel(BaseModel):
     source_system: str = Field(min_length=1)
     credibility_level: int = Field(ge=1, le=5)
     event_time: datetime
+    url: str | None = None
     trace_id: UUID = Field(default_factory=uuid4)
 
 

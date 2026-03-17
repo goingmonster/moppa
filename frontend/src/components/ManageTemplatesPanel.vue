@@ -3,13 +3,14 @@ type Level = 'L1' | 'L2' | 'L3' | 'L4'
 
 interface TemplateItem {
   id: string
+  templateIndex: number
   questionTemplate: string
-  majorTopic: string
-  minorTopic: string
   difficultyLevel: Level
-  constructionRationale: string
-  candidateAnswers: string
-  answerDeadline: string
+  candidateAnswerType: 'fixed' | 'dynamic' | 'open'
+  eventDomain: string
+  eventType: string
+  eventTypeId: string
+  operationLevel: string
   status: 'active' | 'inactive' | 'archived'
   version: string
   usageCount: number
@@ -71,7 +72,7 @@ function templateStatusBadgeTone(status: TemplateItem['status']): string {
         <input
           :value="templateManageSearchKeyword"
           class="toolbar-grow"
-          placeholder="搜索模板/主题/理由/候选答案"
+          placeholder="搜索模板/事件域/事件类型/事件类型ID"
           @input="emit('update:search-keyword', ($event.target as HTMLInputElement).value)"
         />
         <small class="toolbar-note">匹配 {{ templateManageTotal }} 条</small>
@@ -89,14 +90,16 @@ function templateStatusBadgeTone(status: TemplateItem['status']): string {
               <input type="checkbox" :checked="selectedManageTemplateIds.includes(item.id)" @change="emit('toggle-selection', item.id)" />
               <span>选择</span>
             </label>
+            <span class="badge">#{{ item.templateIndex }}</span>
             <strong class="item-title">{{ item.questionTemplate }}</strong>
             <div class="tag-group">
               <span class="badge">{{ item.difficultyLevel }}</span>
+              <span class="badge">{{ item.candidateAnswerType }}</span>
               <span :class="['badge', templateStatusBadgeTone(item.status)]">{{ item.status }}</span>
             </div>
           </div>
-          <p class="item-meta">{{ item.majorTopic }} / {{ item.minorTopic }}</p>
-          <small class="item-subtle">{{ item.candidateAnswers }}</small>
+          <p class="item-meta">{{ item.eventDomain }} / {{ item.eventType }} / {{ item.eventTypeId }}</p>
+          <small class="item-subtle">{{ item.operationLevel }}</small>
           <div class="action-row action-right card-actions">
             <button class="action-btn" @click.stop="emit('open-edit', item)">编辑</button>
           </div>

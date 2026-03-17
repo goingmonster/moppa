@@ -25,6 +25,7 @@ interface EventItem {
   id: string
   codename: string
   title: string
+  url: string | null
   theater: string
   summary: string
   tags: string[]
@@ -77,6 +78,7 @@ interface BackendEventItem {
   event_key: string
   title: string
   content: string
+  url: string | null
   source_system: string
   credibility_level: number
   event_time: string
@@ -206,13 +208,14 @@ interface BackendFilterRuleItem {
 
 interface QuestionTemplateItem {
   id: string
+  templateIndex: number
   questionTemplate: string
-  majorTopic: string
-  minorTopic: string
   difficultyLevel: Level
-  constructionRationale: string
-  candidateAnswers: string
-  answerDeadline: string
+  candidateAnswerType: 'fixed' | 'dynamic' | 'open'
+  eventDomain: string
+  eventType: string
+  eventTypeId: string
+  operationLevel: string
   status: 'active' | 'inactive' | 'archived'
   version: string
   usageCount: number
@@ -222,13 +225,14 @@ interface QuestionTemplateItem {
 
 interface BackendQuestionTemplateItem {
   id: string
+  template_index: number
   question_template: string
-  major_topic: string
-  minor_topic: string
   difficulty_level: Level
-  construction_rationale: string
-  candidate_answers: string
-  answer_deadline: string
+  candidate_answer_type: QuestionTemplateItem['candidateAnswerType']
+  event_domain: string
+  event_type: string
+  event_type_id: string
+  operation_level: string
   status: QuestionTemplateItem['status']
   version: string
   usage_count: number
@@ -309,6 +313,7 @@ const homeEvents = ref<EventItem[]>([
     id: 'evt-001',
     codename: '铁砂行动',
     title: '边境补给车队改道异常',
+    url: null,
     theater: '边境 A7 扇区',
     summary: '在争议走廊附近监测到补给车队改道。',
     tags: ['大国博弈与战略竞争'],
@@ -320,6 +325,7 @@ const homeEvents = ref<EventItem[]>([
     id: 'evt-002',
     codename: '静港回波',
     title: '未标绘海底通道声呐异常',
+    url: null,
     theater: '沿海 C2 网格',
     summary: '未标绘海底通道出现异常声呐回波。',
     tags: [],
@@ -331,6 +337,7 @@ const homeEvents = ref<EventItem[]>([
     id: 'evt-003',
     codename: '北境极光',
     title: '极地中继丢包与干扰并发',
+    url: null,
     theater: '极地中继枢纽',
     summary: '卫星丢包与风暴前沿及干扰信号同时出现。',
     tags: ['亚太军事与安全'],
@@ -422,7 +429,7 @@ function updateTheme(nextTheme: string): void {
   activeTheme.value = nextTheme
 }
 
-const draftEvent = reactive({ title: '', theater: '', summary: '', severity: 'medium' as EventItem['severity'] })
+const draftEvent = reactive({ title: '', theater: '', summary: '', url: '', severity: 'medium' as EventItem['severity'] })
 const draftQuestion = reactive({
   title: '',
   level: 'L2' as Level,
@@ -473,24 +480,26 @@ const questionEditForm = reactive({
 })
 const templateEditForm = reactive({
   id: '',
+  templateIndex: 1,
   questionTemplate: '',
-  majorTopic: '',
-  minorTopic: '',
   difficultyLevel: 'L2' as Level,
-  constructionRationale: '',
-  candidateAnswers: '',
-  answerDeadline: '',
+  candidateAnswerType: 'dynamic' as QuestionTemplateItem['candidateAnswerType'],
+  eventDomain: '',
+  eventType: '',
+  eventTypeId: '',
+  operationLevel: '',
   status: 'active' as QuestionTemplateItem['status'],
   version: 'v1.0',
 })
 const createTemplateForm = reactive({
+  templateIndex: 1,
   questionTemplate: '',
-  majorTopic: '',
-  minorTopic: '',
   difficultyLevel: 'L2' as Level,
-  constructionRationale: '',
-  candidateAnswers: '',
-  answerDeadline: '',
+  candidateAnswerType: 'dynamic' as QuestionTemplateItem['candidateAnswerType'],
+  eventDomain: '',
+  eventType: '',
+  eventTypeId: '',
+  operationLevel: '',
   status: 'active' as QuestionTemplateItem['status'],
   version: 'v1.0',
 })
@@ -1083,9 +1092,9 @@ async function submitCreateQuestionFromDialog(): Promise<void> {
 }
 
 async function submitCreateEventFromDialog(): Promise<void> {
-  const hadInputBeforeSubmit = [draftEvent.title, draftEvent.theater, draftEvent.summary].some((value) => value.trim())
+  const hadInputBeforeSubmit = [draftEvent.title, draftEvent.theater, draftEvent.summary, draftEvent.url].some((value) => value.trim())
   await createEvent()
-  if (!draftEvent.title && !draftEvent.theater && !draftEvent.summary && hadInputBeforeSubmit) {
+  if (!draftEvent.title && !draftEvent.theater && !draftEvent.summary && !draftEvent.url && hadInputBeforeSubmit) {
     createEventDialogOpen.value = false
   }
 }
@@ -1737,13 +1746,14 @@ function openTemplateDetail(item: QuestionTemplateItem): void {
 function openTemplateEdit(item: QuestionTemplateItem): void {
   selectedTemplate.value = item
   templateEditForm.id = item.id
+  templateEditForm.templateIndex = item.templateIndex
   templateEditForm.questionTemplate = item.questionTemplate
-  templateEditForm.majorTopic = item.majorTopic
-  templateEditForm.minorTopic = item.minorTopic
   templateEditForm.difficultyLevel = item.difficultyLevel
-  templateEditForm.constructionRationale = item.constructionRationale
-  templateEditForm.candidateAnswers = item.candidateAnswers
-  templateEditForm.answerDeadline = toDateTimeLocalValue(item.answerDeadline)
+  templateEditForm.candidateAnswerType = item.candidateAnswerType
+  templateEditForm.eventDomain = item.eventDomain
+  templateEditForm.eventType = item.eventType
+  templateEditForm.eventTypeId = item.eventTypeId
+  templateEditForm.operationLevel = item.operationLevel
   templateEditForm.status = item.status
   templateEditForm.version = item.version
   templateEditDialogOpen.value = true
@@ -1805,33 +1815,34 @@ function jumpToTemplatePageFromInput(): void {
 
 async function submitCreateTemplate(): Promise<void> {
   try {
-    const parsedDeadline = new Date(createTemplateForm.answerDeadline)
-    if (Number.isNaN(parsedDeadline.getTime())) {
-      backendStatus.value = '问题模板新增失败：截止时间格式无效'
+    if (!Number.isFinite(createTemplateForm.templateIndex) || createTemplateForm.templateIndex <= 0) {
+      backendStatus.value = '问题模板新增失败：序号必须是正整数'
       return
     }
 
     await sendJson('/question-templates', 'POST', {
+      template_index: Math.trunc(createTemplateForm.templateIndex),
       question_template: createTemplateForm.questionTemplate.trim(),
-      major_topic: createTemplateForm.majorTopic.trim(),
-      minor_topic: createTemplateForm.minorTopic.trim(),
       difficulty_level: createTemplateForm.difficultyLevel,
-      construction_rationale: createTemplateForm.constructionRationale.trim(),
-      candidate_answers: createTemplateForm.candidateAnswers.trim(),
-      answer_deadline: parsedDeadline.toISOString(),
+      candidate_answer_type: createTemplateForm.candidateAnswerType,
+      event_domain: createTemplateForm.eventDomain.trim(),
+      event_type: createTemplateForm.eventType.trim(),
+      event_type_id: createTemplateForm.eventTypeId.trim(),
+      operation_level: createTemplateForm.operationLevel.trim(),
       status: createTemplateForm.status,
       version: createTemplateForm.version.trim(),
     })
     await fetchTemplates(1)
     backendStatus.value = '问题模板新增成功'
     createTemplateDialogOpen.value = false
+    createTemplateForm.templateIndex = 1
     createTemplateForm.questionTemplate = ''
-    createTemplateForm.majorTopic = ''
-    createTemplateForm.minorTopic = ''
     createTemplateForm.difficultyLevel = 'L2'
-    createTemplateForm.constructionRationale = ''
-    createTemplateForm.candidateAnswers = ''
-    createTemplateForm.answerDeadline = ''
+    createTemplateForm.candidateAnswerType = 'dynamic'
+    createTemplateForm.eventDomain = ''
+    createTemplateForm.eventType = ''
+    createTemplateForm.eventTypeId = ''
+    createTemplateForm.operationLevel = ''
     createTemplateForm.status = 'active'
     createTemplateForm.version = 'v1.0'
   } catch {
@@ -1841,20 +1852,20 @@ async function submitCreateTemplate(): Promise<void> {
 
 async function submitEditTemplate(): Promise<void> {
   try {
-    const parsedDeadline = new Date(templateEditForm.answerDeadline)
-    if (Number.isNaN(parsedDeadline.getTime())) {
-      backendStatus.value = '问题模板更新失败：截止时间格式无效'
+    if (!Number.isFinite(templateEditForm.templateIndex) || templateEditForm.templateIndex <= 0) {
+      backendStatus.value = '问题模板更新失败：序号必须是正整数'
       return
     }
 
     await sendJson(`/question-templates/${templateEditForm.id}`, 'PATCH', {
+      template_index: Math.trunc(templateEditForm.templateIndex),
       question_template: templateEditForm.questionTemplate.trim(),
-      major_topic: templateEditForm.majorTopic.trim(),
-      minor_topic: templateEditForm.minorTopic.trim(),
       difficulty_level: templateEditForm.difficultyLevel,
-      construction_rationale: templateEditForm.constructionRationale.trim(),
-      candidate_answers: templateEditForm.candidateAnswers.trim(),
-      answer_deadline: parsedDeadline.toISOString(),
+      candidate_answer_type: templateEditForm.candidateAnswerType,
+      event_domain: templateEditForm.eventDomain.trim(),
+      event_type: templateEditForm.eventType.trim(),
+      event_type_id: templateEditForm.eventTypeId.trim(),
+      operation_level: templateEditForm.operationLevel.trim(),
       status: templateEditForm.status,
       version: templateEditForm.version.trim(),
     })
@@ -2220,6 +2231,7 @@ function toEventItem(item: BackendEventItem): EventItem {
     id: item.id,
     codename: item.event_key,
     title: item.title,
+    url: item.url,
     theater: item.source_system,
     summary: item.content,
     tags: item.tags ?? [],
@@ -2300,13 +2312,14 @@ function toFilterRuleItem(item: BackendFilterRuleItem): FilterRuleItem {
 function toQuestionTemplateItem(item: BackendQuestionTemplateItem): QuestionTemplateItem {
   return {
     id: item.id,
+    templateIndex: item.template_index,
     questionTemplate: item.question_template,
-    majorTopic: item.major_topic,
-    minorTopic: item.minor_topic,
     difficultyLevel: item.difficulty_level,
-    constructionRationale: item.construction_rationale,
-    candidateAnswers: item.candidate_answers,
-    answerDeadline: item.answer_deadline,
+    candidateAnswerType: item.candidate_answer_type,
+    eventDomain: item.event_domain,
+    eventType: item.event_type,
+    eventTypeId: item.event_type_id,
+    operationLevel: item.operation_level,
     status: item.status,
     version: item.version,
     usageCount: item.usage_count,
@@ -3272,6 +3285,7 @@ async function createEvent(): Promise<void> {
     const title = draftEvent.title.trim()
     const theater = draftEvent.theater.trim()
     const summary = draftEvent.summary.trim()
+    const url = draftEvent.url.trim()
     if (!title || !theater || !summary) {
       backendStatus.value = '事件新增失败：请完整填写标题、来源和内容'
       return
@@ -3285,6 +3299,7 @@ async function createEvent(): Promise<void> {
         id: localId,
         codename,
         title,
+        url: url || null,
         theater,
         summary,
         tags: [],
@@ -3305,6 +3320,7 @@ async function createEvent(): Promise<void> {
         event_key: codename,
         title,
         content: summary,
+        url: url || null,
         source_system: theater,
         credibility_level: credibilityFromSeverity(draftEvent.severity),
         event_time: new Date().toISOString(),
@@ -3318,6 +3334,7 @@ async function createEvent(): Promise<void> {
     draftEvent.title = ''
     draftEvent.theater = ''
     draftEvent.summary = ''
+    draftEvent.url = ''
   } catch {
     backendStatus.value = '事件新增失败：请检查后端接口或参数格式'
   }
@@ -4378,6 +4395,7 @@ watch(backendStatus, (status, prev) => {
           <p><strong>标题：</strong>{{ homeDetailEvent.title }}</p>
           <p><strong>event_key：</strong>{{ homeDetailEvent.codename }}</p>
           <p><strong>来源系统：</strong>{{ homeDetailEvent.theater }}</p>
+          <p><strong>URL：</strong>{{ homeDetailEvent.url || '-' }}</p>
           <p><strong>可信等级：</strong>{{ severityLabel[homeDetailEvent.severity] }}</p>
           <p><strong>filter_status：</strong>{{ homeDetailEvent.filterStatus }}</p>
           <p><strong>tags：</strong>{{ homeDetailEvent.tags.length > 0 ? homeDetailEvent.tags.join(', ') : '-' }}</p>
@@ -4401,6 +4419,7 @@ watch(backendStatus, (status, prev) => {
           <p><strong>标题：</strong>{{ manageDetailEvent.title }}</p>
           <p><strong>event_key：</strong>{{ manageDetailEvent.codename }}</p>
           <p><strong>来源系统：</strong>{{ manageDetailEvent.theater }}</p>
+          <p><strong>URL：</strong>{{ manageDetailEvent.url || '-' }}</p>
           <p><strong>可信等级：</strong>{{ severityLabel[manageDetailEvent.severity] }}</p>
           <p><strong>filter_status：</strong>{{ manageDetailEvent.filterStatus }}</p>
           <p><strong>tags：</strong>{{ manageDetailEvent.tags.length > 0 ? manageDetailEvent.tags.join(', ') : '-' }}</p>
@@ -4737,13 +4756,14 @@ watch(backendStatus, (status, prev) => {
         </div>
         <div class="detail-grid">
           <p><strong>ID：</strong>{{ selectedTemplateDetail.id }}</p>
+          <p><strong>序号：</strong>{{ selectedTemplateDetail.templateIndex }}</p>
           <p><strong>问题模板：</strong>{{ selectedTemplateDetail.questionTemplate }}</p>
-          <p><strong>大类主题：</strong>{{ selectedTemplateDetail.majorTopic }}</p>
-          <p><strong>小类主题：</strong>{{ selectedTemplateDetail.minorTopic }}</p>
           <p><strong>难度等级：</strong>{{ selectedTemplateDetail.difficultyLevel }}</p>
-          <p><strong>构题依据：</strong>{{ selectedTemplateDetail.constructionRationale }}</p>
-          <p><strong>候选答案：</strong>{{ selectedTemplateDetail.candidateAnswers }}</p>
-          <p><strong>答题截止：</strong>{{ formatDate(selectedTemplateDetail.answerDeadline) }}</p>
+          <p><strong>候选答案类型：</strong>{{ selectedTemplateDetail.candidateAnswerType }}</p>
+          <p><strong>事件域：</strong>{{ selectedTemplateDetail.eventDomain }}</p>
+          <p><strong>事件类型：</strong>{{ selectedTemplateDetail.eventType }}</p>
+          <p><strong>事件类型ID：</strong>{{ selectedTemplateDetail.eventTypeId }}</p>
+          <p><strong>作战层级：</strong>{{ selectedTemplateDetail.operationLevel }}</p>
           <p><strong>状态：</strong>{{ selectedTemplateDetail.status }}</p>
           <p><strong>版本：</strong>{{ selectedTemplateDetail.version }}</p>
           <p><strong>使用次数：</strong>{{ selectedTemplateDetail.usageCount }}</p>
@@ -4759,16 +4779,12 @@ watch(backendStatus, (status, prev) => {
           <button class="action-btn" @click="templateEditDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
+          <label>序号</label>
+          <input v-model.number="templateEditForm.templateIndex" type="number" min="1" step="1" />
+        </div>
+        <div class="field-block">
           <label>问题模板</label>
           <textarea v-model="templateEditForm.questionTemplate" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>大类主题</label>
-          <input v-model="templateEditForm.majorTopic" />
-        </div>
-        <div class="field-block">
-          <label>小类主题</label>
-          <input v-model="templateEditForm.minorTopic" />
         </div>
         <div class="field-block">
           <label>难度等级</label>
@@ -4780,16 +4796,28 @@ watch(backendStatus, (status, prev) => {
           </select>
         </div>
         <div class="field-block">
-          <label>构题依据</label>
-          <textarea v-model="templateEditForm.constructionRationale" rows="3"></textarea>
+          <label>候选答案类型</label>
+          <select v-model="templateEditForm.candidateAnswerType">
+            <option value="fixed">fixed</option>
+            <option value="dynamic">dynamic</option>
+            <option value="open">open</option>
+          </select>
         </div>
         <div class="field-block">
-          <label>候选答案</label>
-          <textarea v-model="templateEditForm.candidateAnswers" rows="3"></textarea>
+          <label>事件域</label>
+          <input v-model="templateEditForm.eventDomain" />
         </div>
         <div class="field-block">
-          <label>答题截止时间</label>
-          <input v-model="templateEditForm.answerDeadline" type="datetime-local" />
+          <label>事件类型</label>
+          <input v-model="templateEditForm.eventType" />
+        </div>
+        <div class="field-block">
+          <label>事件类型ID</label>
+          <input v-model="templateEditForm.eventTypeId" />
+        </div>
+        <div class="field-block">
+          <label>作战层级</label>
+          <input v-model="templateEditForm.operationLevel" />
         </div>
         <div class="field-block">
           <label>状态</label>
@@ -4817,16 +4845,12 @@ watch(backendStatus, (status, prev) => {
           <button class="action-btn" @click="createTemplateDialogOpen = false">关闭</button>
         </div>
         <div class="field-block">
+          <label>序号</label>
+          <input v-model.number="createTemplateForm.templateIndex" type="number" min="1" step="1" />
+        </div>
+        <div class="field-block">
           <label>问题模板</label>
           <textarea v-model="createTemplateForm.questionTemplate" rows="3"></textarea>
-        </div>
-        <div class="field-block">
-          <label>大类主题</label>
-          <input v-model="createTemplateForm.majorTopic" />
-        </div>
-        <div class="field-block">
-          <label>小类主题</label>
-          <input v-model="createTemplateForm.minorTopic" />
         </div>
         <div class="field-block">
           <label>难度等级</label>
@@ -4838,16 +4862,28 @@ watch(backendStatus, (status, prev) => {
           </select>
         </div>
         <div class="field-block">
-          <label>构题依据</label>
-          <textarea v-model="createTemplateForm.constructionRationale" rows="3"></textarea>
+          <label>候选答案类型</label>
+          <select v-model="createTemplateForm.candidateAnswerType">
+            <option value="fixed">fixed</option>
+            <option value="dynamic">dynamic</option>
+            <option value="open">open</option>
+          </select>
         </div>
         <div class="field-block">
-          <label>候选答案</label>
-          <textarea v-model="createTemplateForm.candidateAnswers" rows="3"></textarea>
+          <label>事件域</label>
+          <input v-model="createTemplateForm.eventDomain" />
         </div>
         <div class="field-block">
-          <label>答题截止时间</label>
-          <input v-model="createTemplateForm.answerDeadline" type="datetime-local" />
+          <label>事件类型</label>
+          <input v-model="createTemplateForm.eventType" />
+        </div>
+        <div class="field-block">
+          <label>事件类型ID</label>
+          <input v-model="createTemplateForm.eventTypeId" />
+        </div>
+        <div class="field-block">
+          <label>作战层级</label>
+          <input v-model="createTemplateForm.operationLevel" />
         </div>
         <div class="field-block">
           <label>状态</label>
@@ -4889,6 +4925,10 @@ watch(backendStatus, (status, prev) => {
         <div class="field-block">
           <label>事件内容</label>
           <textarea v-model="draftEvent.summary" rows="3" placeholder="填写事件摘要"></textarea>
+        </div>
+        <div class="field-block">
+          <label>URL（可选）</label>
+          <input v-model="draftEvent.url" placeholder="https://example.com/news" />
         </div>
         <div class="field-block">
           <label>可信等级映射</label>

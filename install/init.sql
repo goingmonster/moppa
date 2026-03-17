@@ -259,13 +259,14 @@ CREATE TABLE IF NOT EXISTS event_filter_rule (
 -- S2 阶段问题生成模板表
 CREATE TABLE IF NOT EXISTS question_template (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_index INTEGER NOT NULL CHECK (template_index > 0),
     question_template TEXT NOT NULL,
-    major_topic VARCHAR(100) NOT NULL,
-    minor_topic VARCHAR(100) NOT NULL,
     difficulty_level VARCHAR(2) NOT NULL CHECK (difficulty_level IN ('L1', 'L2', 'L3', 'L4')),
-    construction_rationale TEXT NOT NULL,
-    candidate_answers TEXT NOT NULL,
-    answer_deadline TIMESTAMPTZ NOT NULL,
+    candidate_answer_type VARCHAR(20) NOT NULL CHECK (candidate_answer_type IN ('fixed', 'dynamic', 'open')),
+    event_domain VARCHAR(100) NOT NULL,
+    event_type VARCHAR(100) NOT NULL,
+    event_type_id VARCHAR(20) NOT NULL,
+    operation_level VARCHAR(50) NOT NULL,
     status record_status NOT NULL DEFAULT 'active',
     version VARCHAR(20) NOT NULL DEFAULT 'v1.0',
     created_by UUID REFERENCES app_user(id),
@@ -274,7 +275,8 @@ CREATE TABLE IF NOT EXISTS question_template (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
-    UNIQUE (question_template, answer_deadline, version)
+    UNIQUE (template_index, version),
+    UNIQUE (question_template, difficulty_level, event_type_id, version)
 );
 
 -- S6 阶段评分规则版本表；通过唯一索引保证仅一个激活版本
@@ -305,6 +307,7 @@ CREATE TABLE IF NOT EXISTS event (
     source_system VARCHAR(100) NOT NULL REFERENCES data_source(source_system),
     credibility_level SMALLINT NOT NULL CHECK (credibility_level BETWEEN 1 AND 5),
     event_time TIMESTAMPTZ NOT NULL,
+    url TEXT,
     tags TEXT[] NOT NULL DEFAULT '{}',
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     trace_id UUID NOT NULL DEFAULT gen_random_uuid(),
