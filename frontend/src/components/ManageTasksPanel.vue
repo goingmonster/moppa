@@ -10,6 +10,7 @@ interface TaskItem {
 
 defineProps<{
   autoReviewProcessing: boolean
+  autoQuestionProcessing: boolean
   allTasksOnPageSelected: boolean
   hasTasks: boolean
   tasks: TaskItem[]
@@ -23,6 +24,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'open-trigger-pull'): void
   (e: 'trigger-auto-review'): void
+  (e: 'trigger-auto-question'): void
   (e: 'open-create-task'): void
   (e: 'toggle-select-all'): void
   (e: 'delete-selected-batch'): void
@@ -62,6 +64,9 @@ function taskStatusBadgeTone(status: TaskItem['status']): string {
         <button class="action-btn" @click="emit('open-trigger-pull')">拉取烽火事件</button>
         <button class="action-btn" :disabled="autoReviewProcessing" @click="emit('trigger-auto-review')">
           {{ autoReviewProcessing ? '评审中...' : '一键评审' }}
+        </button>
+        <button class="action-btn" :disabled="autoQuestionProcessing" @click="emit('trigger-auto-question')">
+          {{ autoQuestionProcessing ? '提问中...' : '自动提问' }}
         </button>
         <button class="action-btn" @click="emit('open-create-task')">新增任务</button>
         <button class="action-btn" @click="emit('toggle-select-all')">{{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}</button>

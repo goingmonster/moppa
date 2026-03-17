@@ -570,6 +570,7 @@ const createTaskDialogOpen = ref(false)
 const taskDetailDialogOpen = ref(false)
 const triggerPullDialogOpen = ref(false)
 const autoReviewProcessing = ref(false)
+const autoQuestionProcessing = ref(false)
 const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
 const createTaskForm = reactive({ taskType: 's1_ingest_pull', idempotencyKey: '', traceId: '' })
@@ -1406,6 +1407,28 @@ async function triggerAutoReviewNow(): Promise<void> {
     backendStatus.value = '自动评审触发失败：请检查后端接口或参数格式'
   } finally {
     autoReviewProcessing.value = false
+  }
+}
+
+async function triggerAutoQuestionNow(): Promise<void> {
+  if (!backendOnline.value) {
+    backendStatus.value = '后端离线：无法触发自动提问'
+    return
+  }
+
+  autoQuestionProcessing.value = true
+  try {
+    const result = await sendJson<S1TaskResponse>('/s1/jobs/auto-question-now', 'POST', {})
+    backendStatus.value = `自动提问已触发：${result.task_id}`
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = '自动提问触发失败：请检查后端接口或参数格式'
+  } finally {
+    autoQuestionProcessing.value = false
   }
 }
 
@@ -3993,6 +4016,7 @@ watch(backendStatus, (status, prev) => {
     <ManageTasksPanel
       v-if="currentView === 'tasks'"
       :auto-review-processing="autoReviewProcessing"
+      :auto-question-processing="autoQuestionProcessing"
       :all-tasks-on-page-selected="allTasksOnPageSelected"
       :has-tasks="hasTasks"
       :tasks="tasks"
@@ -4003,6 +4027,7 @@ watch(backendStatus, (status, prev) => {
       :task-manage-jump-page="taskManageJumpPage"
       @open-trigger-pull="triggerPullDialogOpen = true; void fetchSourceSystemOptions()"
       @trigger-auto-review="triggerAutoReviewNow"
+      @trigger-auto-question="triggerAutoQuestionNow"
       @open-create-task="createTaskDialogOpen = true"
       @toggle-select-all="toggleSelectAllTasksOnPage"
       @delete-selected-batch="deleteSelectedTasksBatch"

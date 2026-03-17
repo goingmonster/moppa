@@ -13,6 +13,7 @@ from app.models.s1_ingest_model import (
     S1TaskResponseModel,
 )
 from app.services.s1_auto_review_service import S1AutoReviewService
+from app.services.auto_question_service import AutoQuestionService
 from app.services.s1_ingest_service import S1IngestService
 
 
@@ -35,6 +36,12 @@ def pull_now(payload: S1PullNowRequestModel, db: Session = Depends(get_db)) -> S
 def auto_review_now(db: Session = Depends(get_db)) -> S1TaskResponseModel:
     service = S1AutoReviewService(db)
     return service.run_review_job(force_run=True)
+
+
+@router.post("/jobs/auto-question-now", summary="Trigger auto question job now")
+def auto_question_now(db: Session = Depends(get_db)) -> S1TaskResponseModel:
+    service = AutoQuestionService(db)
+    return service.run_auto_question_job(force_run=True)
 
 
 @router.get("/jobs/{task_id}", summary="Get S1 job detail")

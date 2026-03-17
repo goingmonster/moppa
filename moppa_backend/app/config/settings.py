@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from urllib.parse import quote_plus
 
 
@@ -50,6 +51,12 @@ class Settings:
     auto_review_api_key: str
     auto_review_batch_size: int
     auto_review_timeout_seconds: int
+    auto_question_enabled: bool
+    auto_question_cron: str
+    auto_question_generate_url: str
+    auto_question_batch_size: int
+    auto_question_timeout_seconds: int
+    auto_question_event_scope: str
     log_level: str
     auth_enabled: bool
     auth_access_token_expire_minutes: int
@@ -84,6 +91,26 @@ def env_int(key: str, default: int) -> int:
     if value is None:
         return default
     return int(value)
+
+
+def normalize_cron(value: str, default: str) -> str:
+    text = value.strip()
+    if not text:
+        return default
+    parts = [part for part in text.split(" ") if part]
+    if len(parts) != 5:
+        return default
+    if any(not re.fullmatch(r"[\w*/,\-]+", part) for part in parts):
+        return default
+    return " ".join(parts)
+
+
+def normalize_event_scope(value: str, default: str) -> str:
+    allowed = {"today", "week", "month", "year", "all"}
+    normalized = value.strip().lower()
+    if normalized in allowed:
+        return normalized
+    return default
 
 
 def env_csv(key: str, default: str) -> list[str]:
@@ -125,6 +152,12 @@ def load_settings() -> Settings:
         auto_review_api_key=os.getenv("AUTO_REVIEW_API_KEY", ""),
         auto_review_batch_size=env_int("AUTO_REVIEW_BATCH_SIZE", 100),
         auto_review_timeout_seconds=env_int("AUTO_REVIEW_TIMEOUT_SECONDS", 60),
+        auto_question_enabled=env_bool("AUTO_QUESTION_ENABLED", False),
+        auto_question_cron=normalize_cron(os.getenv("AUTO_QUESTION_CRON", "0 * * * *"), "0 * * * *"),
+        auto_question_generate_url=os.getenv("AUTO_QUESTION_GENERATE_URL", ""),
+        auto_question_batch_size=min(max(env_int("AUTO_QUESTION_BATCH_SIZE", 10), 1), 10),
+        auto_question_timeout_seconds=max(env_int("AUTO_QUESTION_TIMEOUT_SECONDS", 30), 1),
+        auto_question_event_scope=normalize_event_scope(os.getenv("AUTO_QUESTION_EVENT_SCOPE", "today"), "today"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         auth_enabled=env_bool("AUTH_ENABLED", False),
         auth_access_token_expire_minutes=env_int("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", 30),

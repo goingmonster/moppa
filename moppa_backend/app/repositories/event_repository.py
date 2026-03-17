@@ -58,6 +58,36 @@ class EventRepository:
             )
         )
 
+    def list_passed_today(self, day_start: datetime, day_end: datetime, limit: int, offset: int) -> list[EventEntity]:
+        return list(
+            self.db.scalars(
+                select(EventEntity)
+                .where(
+                    EventEntity.deleted_at.is_(None),
+                    EventEntity.filter_status == "passed",
+                    EventEntity.event_time >= day_start,
+                    EventEntity.event_time < day_end,
+                )
+                .order_by(EventEntity.event_time.asc(), EventEntity.id.asc())
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+
+    def list_passed(self, limit: int, offset: int) -> list[EventEntity]:
+        return list(
+            self.db.scalars(
+                select(EventEntity)
+                .where(
+                    EventEntity.deleted_at.is_(None),
+                    EventEntity.filter_status == "passed",
+                )
+                .order_by(EventEntity.event_time.asc(), EventEntity.id.asc())
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+
     def search_paginated(
         self,
         keyword: str,

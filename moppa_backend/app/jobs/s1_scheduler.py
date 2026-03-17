@@ -5,6 +5,7 @@ from app.config import settings
 from app.db.session import SessionLocal
 from app.models.s1_ingest_model import S1PullNowRequestModel
 from app.repositories.task_config_repository import TaskConfigRepository
+from app.services.auto_question_service import AutoQuestionService
 from app.services.s1_auto_review_service import S1AutoReviewService
 from app.services.s1_ingest_service import S1IngestService
 
@@ -35,6 +36,12 @@ def _run_s1_auto_review_job() -> None:
         _ = service.run_review_job()
 
 
+def _run_auto_question_job() -> None:
+    with SessionLocal() as db:
+        service = AutoQuestionService(db)
+        _ = service.run_auto_question_job()
+
+
 def start_s1_scheduler() -> None:
     global _scheduler
     if not settings.scheduler_enabled:
@@ -62,6 +69,18 @@ def start_s1_scheduler() -> None:
             )
         except Exception:
             _logger.exception("Failed to register auto review scheduler job")
+
+    if settings.auto_question_enabled:
+        try:
+            auto_question_trigger = cron_trigger_class.from_crontab(settings.auto_question_cron)
+            scheduler.add_job(
+                _run_auto_question_job,
+                trigger=auto_question_trigger,
+                id="auto_question",
+                replace_existing=True,
+            )
+        except Exception:
+            _logger.exception("Failed to register auto question scheduler job")
 
     scheduler.start()
     _scheduler = scheduler
