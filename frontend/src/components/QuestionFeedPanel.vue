@@ -15,7 +15,7 @@ interface QuestionItem {
   answerSpace: string
   hypothesis: string
   deadline: string
-  status: 'collecting' | 'locked' | 'resolved'
+  status: 'draft' | 'pending_review' | 'published' | 'expired' | 'matched' | 'closed'
   groundTruth: string
   deleteReason: string
   deletedAt: string
@@ -73,16 +73,22 @@ const sentinelRef = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 
 const statusLabel: Record<QuestionItem['status'], string> = {
-  collecting: '收集中',
-  locked: '已封存',
-  resolved: '已解析',
+  draft: '收集中',
+  pending_review: '待评审',
+  published: '已发布',
+  expired: '已过期',
+  matched: '已匹配',
+  closed: '已解析',
 }
 
 function statusTone(status: QuestionItem['status']): string {
-  if (status === 'resolved') {
+  if (status === 'closed') {
     return 'badge-success'
   }
-  if (status === 'locked') {
+  if (status === 'expired') {
+    return 'badge-error'
+  }
+  if (status === 'pending_review' || status === 'published' || status === 'matched') {
     return 'badge-info'
   }
   return 'badge-warning'
@@ -210,7 +216,7 @@ onBeforeUnmount(() => {
       </p>
 
       <div v-if="items.length === 0 && !loading && (filtersApplied || !hasMore)" class="empty-state">
-        {{ filtersApplied ? '当前筛选条件下暂无匹配问题，继续下滑可加载更多候选数据' : '暂无可展示问题' }}
+        {{ filtersApplied ? (hasMore ? '当前筛选条件下暂无匹配问题，继续下滑可加载更多候选数据' : '当前筛选条件下暂无匹配问题，且无更多候选数据') : '暂无可展示问题' }}
       </div>
 
       <ul v-else class="question-stream-list">
@@ -331,9 +337,12 @@ onBeforeUnmount(() => {
               @change="emit('update:filter-status', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">全部状态</option>
-              <option value="collecting">收集中</option>
-              <option value="locked">已封存</option>
-              <option value="resolved">已解析</option>
+              <option value="draft">收集中</option>
+              <option value="pending_review">待评审</option>
+              <option value="published">已发布</option>
+              <option value="expired">已过期</option>
+              <option value="matched">已匹配</option>
+              <option value="closed">已解析</option>
             </select>
             <select
               :value="filterLevel"

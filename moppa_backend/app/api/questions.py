@@ -5,16 +5,20 @@ from sqlalchemy.orm import Session
 
 from app.core import ApiError
 from app.api.dependencies import get_current_user, require_admin_user
-from app.db.models import QuestionEntity
+from app.db.models import AppUserEntity, QuestionEntity
 from app.db.session import get_db
 from app.models.common_model import BatchDeleteResponse
 from app.models.question_model import (
     QuestionBatchDeleteRequest,
+    QuestionCommunityStatsItemModel,
+    QuestionCommunityStatsResponse,
     QuestionCreateModel,
     QuestionListItemModel,
     QuestionPaginationResponse,
     QuestionUpdateModel,
 )
+from app.services.community_prediction_service import CommunityPredictionService
+from app.services.question_comment_service import QuestionCommentService
 from app.services.question_service import QuestionService
 
 router = APIRouter(prefix="/questions", tags=["questions"])
@@ -170,6 +174,36 @@ def delete_questions(
     return BatchDeleteResponse(deleted_count=deleted_count)
 
 
+@router.get("/community-stats", summary="Get community stats for questions")
+def get_question_community_stats(
+    question_ids: list[str] = Query(default_factory=list),
+    db: Session = Depends(get_db),
+    current_user: AppUserEntity = Depends(get_current_user),
+) -> QuestionCommunityStatsResponse:
+    unique_question_ids = list(dict.fromkeys(question_ids))
+    if not unique_question_ids:
+        return QuestionCommunityStatsResponse(items=[])
+
+    prediction_service = CommunityPredictionService(db)
+    comment_service = QuestionCommentService(db)
+
+    prediction_counts, predicted_by_me = prediction_service.get_stats_by_questions(unique_question_ids, current_user.id)
+    comment_counts, my_comment_counts = comment_service.get_stats_by_questions(unique_question_ids, current_user.id)
+
+    return QuestionCommunityStatsResponse(
+        items=[
+            QuestionCommunityStatsItemModel(
+                question_id=question_id,
+                prediction_count=prediction_counts.get(question_id, 0),
+                comment_count=comment_counts.get(question_id, 0),
+                has_prediction=question_id in predicted_by_me,
+                my_comment_count=my_comment_counts.get(question_id, 0),
+            )
+            for question_id in unique_question_ids
+        ]
+    )
+
+
 @router.get("/{question_id}", summary="Get question detail")
 def get_question(
     question_id: str,
@@ -205,3 +239,4 @@ def update_question(
         raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
     event_ids = service.get_event_ids(question_id)
     return to_question_list_item(entity, event_ids if event_ids else ([str(entity.event_id)] if entity.event_id else []))
+

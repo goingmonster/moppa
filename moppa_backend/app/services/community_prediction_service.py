@@ -19,6 +19,10 @@ class CommunityPredictionService:
         question_uuid = self._parse_uuid(question_id, "question_id")
         return self.repository.list_by_question(question_uuid)
 
+    def get_stats_by_questions(self, question_ids: list[str], user_id: UUID) -> tuple[dict[str, int], set[str]]:
+        question_uuid_ids = self._parse_uuid_list(question_ids, "question_ids")
+        return self.repository.get_stats_by_questions(question_uuid_ids, user_id)
+
     def upsert_for_user(self, payload: CommunityPredictionCreateModel, user_id: UUID) -> CommunityPredictionEntity:
         question_uuid = self._parse_uuid(payload.question_id, "question_id")
         question = self.question_repository.get_by_id(str(question_uuid))
@@ -96,3 +100,7 @@ class CommunityPredictionService:
                 message=f"{field_name} must be UUID",
                 details={"field": field_name, "value": raw},
             ) from exc
+
+    @classmethod
+    def _parse_uuid_list(cls, raws: list[str], field_name: str) -> list[UUID]:
+        return [cls._parse_uuid(raw, field_name) for raw in raws]

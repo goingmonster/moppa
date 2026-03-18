@@ -11,6 +11,7 @@ import SidebarNav from './components/SidebarNav.vue'
 import TopbarPanel from './components/TopbarPanel.vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
+type QuestionStatus = 'draft' | 'pending_review' | 'published' | 'expired' | 'matched' | 'closed'
 type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
 type ToastKind = 'success' | 'error' | 'info'
 type ThemeId = 'olive' | 'blue' | 'sunset'
@@ -48,7 +49,7 @@ interface QuestionItem {
   answerSpace: string
   hypothesis: string
   deadline: string
-  status: 'collecting' | 'locked' | 'resolved'
+  status: QuestionStatus
   groundTruth: string
   deleteReason: string
   deletedAt: string
@@ -311,6 +312,18 @@ interface BackendQuestionCommentItem {
   updated_at: string
 }
 
+interface BackendQuestionCommunityStatsItem {
+  question_id: string
+  prediction_count: number
+  comment_count: number
+  has_prediction: boolean
+  my_comment_count: number
+}
+
+interface BackendQuestionCommunityStatsResponse {
+  items: BackendQuestionCommunityStatsItem[]
+}
+
 interface ThemeOption {
   id: ThemeId
   label: string
@@ -387,7 +400,7 @@ const questions = ref<QuestionItem[]>([
     answerSpace: '会上升\n不会上升\n不确定',
     hypothesis: '若流量持续上升 20%，可判定存在前置部署行为。',
     deadline: '2026-03-12T00:00:00Z',
-    status: 'collecting',
+    status: 'draft',
     groundTruth: '待遥测数据复核。',
     deleteReason: '',
     deletedAt: '',
@@ -406,7 +419,7 @@ const questions = ref<QuestionItem[]>([
     answerSpace: '会\n不会',
     hypothesis: '若异常高于基线持续 18 小时，说明来源并非环境因素。',
     deadline: '2026-03-11T06:00:00Z',
-    status: 'locked',
+    status: 'pending_review',
     groundTruth: '待信号归因报告。',
     deleteReason: '',
     deletedAt: '',
@@ -425,7 +438,7 @@ const questions = ref<QuestionItem[]>([
     answerSpace: '',
     hypothesis: '天气与干扰叠加可能导致吞吐持续下降。',
     deadline: '2026-03-15T12:00:00Z',
-    status: 'resolved',
+    status: 'closed',
     groundTruth: '观测平均吞吐 61.7%，已确认跌破阈值。',
     deleteReason: '',
     deletedAt: '',
@@ -504,7 +517,7 @@ const draftQuestion = reactive({
   title: '',
   level: 'L2' as Level,
   deadline: '',
-  status: 'collecting' as QuestionItem['status'],
+  status: 'draft' as QuestionItem['status'],
   matchScore: '',
   eventDomain: '',
   eventType: '',
@@ -558,7 +571,7 @@ const questionEditForm = reactive({
   answerSpace: '',
   eventIds: [] as string[],
   deadline: '',
-  status: 'collecting' as QuestionItem['status'],
+  status: 'draft' as QuestionItem['status'],
 })
 const templateEditForm = reactive({
   id: '',
@@ -640,6 +653,9 @@ const questionFeedFilterDeadlineTo = ref('')
 const questionFeedFilterStatus = ref('')
 const questionFeedFilterLevel = ref('')
 let questionFeedSearchTimer: number | undefined
+let questionFeedFilterResetting = false
+let questionFeedReloadPending = false
+const questionFeedReloadSeq = ref(0)
 const questionFeedInteractionCounts = ref<Record<string, QuestionInteractionCount>>({})
 const questionFeedParticipation = ref<Record<string, QuestionParticipationSummary>>({})
 const selectedManageQuestionIds = ref<string[]>([])
@@ -1072,9 +1088,12 @@ let taskDetailRefreshTimer: number | undefined
 const skeletonRows = [1, 2, 3, 4]
 
 const statusLabel: Record<QuestionItem['status'], string> = {
-  collecting: '收集中',
-  locked: '已封存 / 待真实结果',
-  resolved: '已解析',
+  draft: '收集中',
+  pending_review: '待评审',
+  published: '已发布',
+  expired: '已过期',
+  matched: '已匹配',
+  closed: '已解析',
 }
 
 const severityLabel: Record<EventItem['severity'], string> = {
@@ -2691,7 +2710,7 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
     : item.event_id
       ? [item.event_id]
       : []
-  const normalizedStatus = item.status.trim().toLowerCase()
+  const normalizedStatus = normalizeQuestionStatus(item.status)
   return {
     id: item.id,
     eventIds,
@@ -2706,12 +2725,8 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
     answerSpace: item.answer_space ?? '',
     hypothesis: item.hypothesis?.trim() ?? '',
     deadline: item.deadline,
-    status: normalizedStatus === 'resolved' || normalizedStatus === 'closed'
-      ? 'resolved'
-      : normalizedStatus === 'locked' || normalizedStatus === 'pending_review'
-        ? 'locked'
-        : 'collecting',
-    groundTruth: normalizedStatus === 'resolved' || normalizedStatus === 'closed'
+    status: normalizedStatus,
+    groundTruth: normalizedStatus === 'closed'
       ? '后端状态显示已解析，请补充真实结果详情。'
       : '待真实结果回填。',
     deleteReason: item.delete_reason ?? '',
@@ -2814,7 +2829,30 @@ function toQuestionCommentItem(item: BackendQuestionCommentItem): QuestionCommen
 }
 
 function isQuestionCollecting(question: QuestionItem): boolean {
-  return question.status === 'collecting'
+  return question.status === 'draft'
+}
+
+function normalizeQuestionStatus(value: string): QuestionStatus {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'draft') {
+    return 'draft'
+  }
+  if (normalized === 'pending_review') {
+    return 'pending_review'
+  }
+  if (normalized === 'published') {
+    return 'published'
+  }
+  if (normalized === 'expired') {
+    return 'expired'
+  }
+  if (normalized === 'matched') {
+    return 'matched'
+  }
+  if (normalized === 'closed') {
+    return 'closed'
+  }
+  return 'draft'
 }
 
 function isQuestionBeforeDeadline(question: QuestionItem): boolean {
@@ -3093,7 +3131,10 @@ function handleQuestionEventSelectScroll(mode: 'create' | 'edit', event: Event):
   void loadMoreQuestionEventOptions()
 }
 
-async function ensureQuestionEventOptionsByIds(eventIds: string[]): Promise<void> {
+async function ensureQuestionEventOptionsByIds(eventIds: string[], requestSeq?: number): Promise<void> {
+  if (requestSeq !== undefined && requestSeq !== questionFeedReloadSeq.value) {
+    return
+  }
   if (!backendOnline.value || eventIds.length === 0) {
     return
   }
@@ -3112,6 +3153,9 @@ async function ensureQuestionEventOptionsByIds(eventIds: string[]): Promise<void
       }
     }),
   )
+  if (requestSeq !== undefined && requestSeq !== questionFeedReloadSeq.value) {
+    return
+  }
   const merged = [...questionEventOptions.value]
   for (const item of fetched) {
     if (!item) {
@@ -3653,6 +3697,7 @@ async function fetchManageQuestions(page: number): Promise<void> {
 }
 
 function resetQuestionFeed(): void {
+  questionFeedReloadSeq.value += 1
   questionFeedItems.value = []
   questionFeedPage.value = 0
   questionFeedTotal.value = 0
@@ -3661,7 +3706,22 @@ function resetQuestionFeed(): void {
   questionFeedParticipation.value = {}
 }
 
+function requestQuestionFeedReload(): void {
+  questionFeedReloadPending = false
+  resetQuestionFeed()
+  if (questionFeedLoading.value) {
+    questionFeedReloadPending = true
+    return
+  }
+  void loadQuestionFeedNextPage()
+}
+
 function resetQuestionFeedFilters(): void {
+  questionFeedFilterResetting = true
+  if (questionFeedSearchTimer !== undefined) {
+    window.clearTimeout(questionFeedSearchTimer)
+    questionFeedSearchTimer = undefined
+  }
   questionFeedSearchKeyword.value = ''
   questionFeedFilterEventDomain.value = ''
   questionFeedFilterEventType.value = ''
@@ -3669,6 +3729,10 @@ function resetQuestionFeedFilters(): void {
   questionFeedFilterDeadlineTo.value = ''
   questionFeedFilterStatus.value = ''
   questionFeedFilterLevel.value = ''
+  questionFeedFilterResetting = false
+  if (backendOnline.value && currentView.value === 'questionStream') {
+    requestQuestionFeedReload()
+  }
 }
 
 function ensureQuestionFeedCounts(questionIds: string[]): void {
@@ -3686,9 +3750,14 @@ function ensureQuestionFeedCounts(questionIds: string[]): void {
   questionFeedParticipation.value = participationNext
 }
 
-async function hydrateQuestionFeedCounts(questionIds: string[]): Promise<void> {
+async function hydrateQuestionFeedCounts(questionIds: string[], requestSeq?: number): Promise<void> {
+  if (requestSeq !== undefined && requestSeq !== questionFeedReloadSeq.value) {
+    return
+  }
   if (!backendOnline.value || !isAuthenticated.value || questionIds.length === 0) {
-    ensureQuestionFeedCounts(questionIds)
+    if (requestSeq === undefined || requestSeq === questionFeedReloadSeq.value) {
+      ensureQuestionFeedCounts(questionIds)
+    }
     return
   }
 
@@ -3698,40 +3767,35 @@ async function hydrateQuestionFeedCounts(questionIds: string[]): Promise<void> {
   }
 
   try {
-    const rows = await Promise.all(
-      uniqueIds.map(async (questionId) => {
-        const [predictionResult, commentResult] = await Promise.all([
-          fetchJson<{ items: BackendCommunityPredictionItem[] }>(
-            `/community-predictions?question_id=${encodeURIComponent(questionId)}`,
-          ),
-          fetchJson<{ items: BackendQuestionCommentItem[] }>(`/question-comments?question_id=${encodeURIComponent(questionId)}`),
-        ])
-        return {
-          questionId,
-          predictionCount: predictionResult.items.length,
-          commentCount: commentResult.items.length,
-          hasPrediction: predictionResult.items.some((item) => item.user_id === authUser.value?.id),
-          myCommentCount: commentResult.items.filter((item) => item.user_id === authUser.value?.id).length,
-        }
-      }),
+    const query = new URLSearchParams()
+    for (const questionId of uniqueIds) {
+      query.append('question_ids', questionId)
+    }
+    const statsResult = await fetchJson<BackendQuestionCommunityStatsResponse>(
+      `/questions/community-stats?${query.toString()}`,
     )
+    if (requestSeq !== undefined && requestSeq !== questionFeedReloadSeq.value) {
+      return
+    }
 
     const next = { ...questionFeedInteractionCounts.value }
     const participationNext = { ...questionFeedParticipation.value }
-    for (const row of rows) {
-      next[row.questionId] = {
-        predictionCount: row.predictionCount,
-        commentCount: row.commentCount,
+    for (const row of statsResult.items) {
+      next[row.question_id] = {
+        predictionCount: row.prediction_count,
+        commentCount: row.comment_count,
       }
-      participationNext[row.questionId] = {
-        hasPrediction: row.hasPrediction,
-        myCommentCount: row.myCommentCount,
+      participationNext[row.question_id] = {
+        hasPrediction: row.has_prediction,
+        myCommentCount: row.my_comment_count,
       }
     }
     questionFeedInteractionCounts.value = next
     questionFeedParticipation.value = participationNext
   } catch {
-    ensureQuestionFeedCounts(uniqueIds)
+    if (requestSeq === undefined || requestSeq === questionFeedReloadSeq.value) {
+      ensureQuestionFeedCounts(uniqueIds)
+    }
   }
 }
 
@@ -3740,6 +3804,7 @@ async function loadQuestionFeedNextPage(): Promise<void> {
     return
   }
 
+  const requestSeq = questionFeedReloadSeq.value
   questionFeedLoading.value = true
   try {
     const nextPage = questionFeedPage.value + 1
@@ -3749,6 +3814,9 @@ async function loadQuestionFeedNextPage(): Promise<void> {
       )
       const start = (nextPage - 1) * 10
       const batch = source.slice(start, start + 10)
+      if (requestSeq !== questionFeedReloadSeq.value) {
+        return
+      }
       questionFeedItems.value = [...questionFeedItems.value, ...batch]
       questionFeedPage.value = nextPage
       questionFeedTotal.value = source.length
@@ -3786,19 +3854,31 @@ async function loadQuestionFeedNextPage(): Promise<void> {
     query.set('page', String(nextPage))
     query.set('page_size', '10')
     const pageData = await fetchJson<BackendPage<BackendQuestionItem>>(`/questions/search?${query.toString()}`)
+    if (requestSeq !== questionFeedReloadSeq.value) {
+      return
+    }
     const batch = pageData.items.map(toQuestionItem)
     const batchEventIds = Array.from(new Set(batch.flatMap((item) => item.eventIds)))
-    await ensureQuestionEventOptionsByIds(batchEventIds)
+    await ensureQuestionEventOptionsByIds(batchEventIds, requestSeq)
+    if (requestSeq !== questionFeedReloadSeq.value) {
+      return
+    }
     questionFeedItems.value = [...questionFeedItems.value, ...batch]
     questionFeedPage.value = nextPage
     questionFeedTotal.value = pageData.total
     questionFeedHasMore.value = questionFeedItems.value.length < pageData.total && batch.length > 0
-    await hydrateQuestionFeedCounts(batch.map((item) => item.id))
+    await hydrateQuestionFeedCounts(batch.map((item) => item.id), requestSeq)
   } catch {
-    backendStatus.value = '问题社区加载失败：请检查后端问题搜索接口'
-    questionFeedHasMore.value = false
+    if (requestSeq === questionFeedReloadSeq.value) {
+      backendStatus.value = '问题社区加载失败：请检查后端问题搜索接口'
+      questionFeedHasMore.value = false
+    }
   } finally {
     questionFeedLoading.value = false
+    if (questionFeedReloadPending) {
+      questionFeedReloadPending = false
+      void loadQuestionFeedNextPage()
+    }
   }
 }
 
@@ -4052,8 +4132,7 @@ function loadViewData(view: AppView): void {
     }
   }
   if (view === 'questionStream') {
-    resetQuestionFeed()
-    void loadQuestionFeedNextPage()
+    requestQuestionFeedReload()
   }
   if (view === 'templates') {
     if (backendOnline.value) {
@@ -4274,6 +4353,9 @@ watch(
 )
 
 watch(questionFeedSearchKeyword, () => {
+  if (questionFeedFilterResetting) {
+    return
+  }
   if (!backendOnline.value || currentView.value !== 'questionStream') {
     return
   }
@@ -4281,8 +4363,7 @@ watch(questionFeedSearchKeyword, () => {
     window.clearTimeout(questionFeedSearchTimer)
   }
   questionFeedSearchTimer = window.setTimeout(() => {
-    resetQuestionFeed()
-    void loadQuestionFeedNextPage()
+    requestQuestionFeedReload()
   }, 250)
 })
 
@@ -4296,11 +4377,13 @@ watch(
     questionFeedFilterLevel,
   ],
   () => {
+    if (questionFeedFilterResetting) {
+      return
+    }
     if (!backendOnline.value || currentView.value !== 'questionStream') {
       return
     }
-    resetQuestionFeed()
-    void loadQuestionFeedNextPage()
+    requestQuestionFeedReload()
   },
 )
 
@@ -4364,8 +4447,7 @@ watch(backendOnline, (online) => {
     void fetchManageQuestions(1)
   }
   if (currentView.value === 'questionStream') {
-    resetQuestionFeed()
-    void loadQuestionFeedNextPage()
+    requestQuestionFeedReload()
   }
   if (online && currentView.value === 'templates') {
     void fetchTemplates(1)
@@ -5464,9 +5546,12 @@ watch(backendStatus, (status, prev) => {
         <div class="field-block">
           <label>状态</label>
           <select v-model="questionEditForm.status">
-            <option value="collecting">收集中</option>
-            <option value="locked">已封存</option>
-            <option value="resolved">已解析</option>
+            <option value="draft">收集中</option>
+            <option value="pending_review">待评审</option>
+            <option value="published">已发布</option>
+            <option value="expired">已过期</option>
+            <option value="matched">已匹配</option>
+            <option value="closed">已解析</option>
           </select>
         </div>
         <div class="action-row">
@@ -5805,9 +5890,12 @@ watch(backendStatus, (status, prev) => {
         <div class="field-block">
           <label>初始状态</label>
           <select v-model="draftQuestion.status">
-            <option value="collecting">收集中</option>
-            <option value="locked">已封存</option>
-            <option value="resolved">已解析</option>
+            <option value="draft">收集中</option>
+            <option value="pending_review">待评审</option>
+            <option value="published">已发布</option>
+            <option value="expired">已过期</option>
+            <option value="matched">已匹配</option>
+            <option value="closed">已解析</option>
           </select>
         </div>
         <div v-if="draftQuestion.level === 'L1' || draftQuestion.level === 'L2'" class="field-block">

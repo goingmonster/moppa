@@ -70,3 +70,15 @@ class QuestionUpdateModel(BaseModel):
 class QuestionBatchDeleteRequest(BaseModel):
     ids: list[str] = Field(min_length=1)
     delete_reason: str = Field(min_length=1)
+
+
+class QuestionCommunityStatsItemModel(BaseModel):
+    question_id: str
+    prediction_count: int
+    comment_count: int
+    has_prediction: bool
+    my_comment_count: int
+
+
+class QuestionCommunityStatsResponse(BaseModel):
+    items: list[QuestionCommunityStatsItemModel]

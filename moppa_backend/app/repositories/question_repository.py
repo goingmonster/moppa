@@ -187,9 +187,20 @@ class QuestionRepository:
 
         normalized_status = status.strip()
         if normalized_status:
-            resolved_status = self._normalize_status(normalized_status)
-            base_query = base_query.where(QuestionEntity.status == resolved_status)
-            count_query = count_query.where(QuestionEntity.status == resolved_status)
+            lowered_status = normalized_status.lower()
+            status_group_map = {
+                "collecting": ["draft"],
+                "locked": ["pending_review", "published", "expired", "matched"],
+                "resolved": ["closed"],
+            }
+            grouped_statuses = status_group_map.get(lowered_status)
+            if grouped_statuses is not None:
+                base_query = base_query.where(QuestionEntity.status.in_(grouped_statuses))
+                count_query = count_query.where(QuestionEntity.status.in_(grouped_statuses))
+            else:
+                resolved_status = self._normalize_status(normalized_status)
+                base_query = base_query.where(QuestionEntity.status == resolved_status)
+                count_query = count_query.where(QuestionEntity.status == resolved_status)
 
         if level is not None:
             base_query = base_query.where(QuestionEntity.level == level)
@@ -294,7 +305,7 @@ class QuestionRepository:
 
     @staticmethod
     def _normalize_status(value: str) -> str:
-        normalized = value.strip()
+        normalized = value.strip().lower()
         mapping = {
             "collecting": "draft",
             "locked": "pending_review",

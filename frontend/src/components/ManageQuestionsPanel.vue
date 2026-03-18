@@ -13,7 +13,7 @@ interface QuestionItem {
   inputType: string
   background: string
   answerSpace: string
-  status: 'collecting' | 'locked' | 'resolved'
+  status: 'draft' | 'pending_review' | 'published' | 'expired' | 'matched' | 'closed'
   hypothesis: string
   deadline: string
   groundTruth: string
@@ -80,16 +80,22 @@ const emit = defineEmits<{
 const manageToolbarCollapsed = ref(true)
 
 const statusLabel: Record<QuestionItem['status'], string> = {
-  collecting: '收集中',
-  locked: '已封存 / 待真实结果',
-  resolved: '已解析',
+  draft: '收集中',
+  pending_review: '待评审',
+  published: '已发布',
+  expired: '已过期',
+  matched: '已匹配',
+  closed: '已解析',
 }
 
 function questionStatusBadgeTone(status: QuestionItem['status']): string {
-  if (status === 'resolved') {
+  if (status === 'closed') {
     return 'badge-success'
   }
-  if (status === 'locked') {
+  if (status === 'expired') {
+    return 'badge-error'
+  }
+  if (status === 'pending_review' || status === 'published' || status === 'matched') {
     return 'badge-info'
   }
   return 'badge-warning'
@@ -155,9 +161,12 @@ function eventLabel(eventIds: string[], allKnownEvents: EventOption[]): string {
               @change="emit('update:filter-status', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">全部状态</option>
-              <option value="collecting">收集中</option>
-              <option value="locked">已封存</option>
-              <option value="resolved">已解析</option>
+              <option value="draft">收集中</option>
+              <option value="pending_review">待评审</option>
+              <option value="published">已发布</option>
+              <option value="expired">已过期</option>
+              <option value="matched">已匹配</option>
+              <option value="closed">已解析</option>
             </select>
           </div>
           <div class="manage-question-filter-row">

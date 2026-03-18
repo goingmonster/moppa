@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import AppUserEntity, FeedbackEntity
@@ -27,6 +27,39 @@ class QuestionCommentRepository:
             )
         )
         return [(entity, username) for entity, username in rows]
+
+    def get_stats_by_questions(self, question_ids: list[UUID], user_id: UUID) -> tuple[dict[str, int], dict[str, int]]:
+        if not question_ids:
+            return {}, {}
+
+        total_rows = list(
+            self.db.execute(
+                select(FeedbackEntity.target_id, func.count())
+                .where(
+                    FeedbackEntity.feedback_type == "comment",
+                    FeedbackEntity.target_type == "question",
+                    FeedbackEntity.target_id.in_(question_ids),
+                    FeedbackEntity.deleted_at.is_(None),
+                )
+                .group_by(FeedbackEntity.target_id)
+            )
+        )
+        my_rows = list(
+            self.db.execute(
+                select(FeedbackEntity.target_id, func.count())
+                .where(
+                    FeedbackEntity.feedback_type == "comment",
+                    FeedbackEntity.target_type == "question",
+                    FeedbackEntity.target_id.in_(question_ids),
+                    FeedbackEntity.user_id == user_id,
+                    FeedbackEntity.deleted_at.is_(None),
+                )
+                .group_by(FeedbackEntity.target_id)
+            )
+        )
+        totals = {str(question_id): int(total) for question_id, total in total_rows}
+        mine = {str(question_id): int(total) for question_id, total in my_rows}
+        return totals, mine
 
     def get_by_id(self, comment_id: UUID) -> FeedbackEntity | None:
         entity = self.db.get(FeedbackEntity, comment_id)
