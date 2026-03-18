@@ -2635,6 +2635,22 @@ function levelToNumber(value: Level): number {
   return 4
 }
 
+function parseLevelFilter(value: string): number | null {
+  if (value === 'L1') {
+    return 1
+  }
+  if (value === 'L2') {
+    return 2
+  }
+  if (value === 'L3') {
+    return 3
+  }
+  if (value === 'L4') {
+    return 4
+  }
+  return null
+}
+
 function makeTraceId(): string {
   const cryptoApi = globalThis.crypto
   if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
@@ -3595,7 +3611,7 @@ async function fetchManageQuestions(page: number): Promise<void> {
     const eventDomain = questionManageFilterEventDomain.value.trim()
     const eventType = questionManageFilterEventType.value.trim()
     const status = questionManageFilterStatus.value.trim()
-    const level = questionManageFilterLevel.value.trim()
+    const level = parseLevelFilter(questionManageFilterLevel.value.trim())
     const deadlineFrom = toIsoFromLocalDateTime(questionManageFilterDeadlineFrom.value)
     const deadlineTo = toIsoFromLocalDateTime(questionManageFilterDeadlineTo.value)
     if (eventDomain) {
@@ -3607,8 +3623,8 @@ async function fetchManageQuestions(page: number): Promise<void> {
     if (status) {
       query.set('status', status)
     }
-    if (level) {
-      query.set('level', level)
+    if (level !== null) {
+      query.set('level', String(level))
     }
     if (deadlineFrom) {
       query.set('deadline_from', deadlineFrom)
