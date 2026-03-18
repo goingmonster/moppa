@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 interface QuestionItem {
   id: string
@@ -40,11 +40,29 @@ const props = defineProps<{
   hasMore: boolean
   backendOnline: boolean
   allKnownEvents: EventOption[]
+  searchKeyword: string
+  filterEventDomain: string
+  filterEventType: string
+  filterDeadlineFrom: string
+  filterDeadlineTo: string
+  filterStatus: string
+  filterLevel: string
+  loadedCount: number
+  filteredCount: number
+  filtersApplied: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'load-more'): void
   (e: 'open-question', item: QuestionItem): void
+  (e: 'update:search-keyword', value: string): void
+  (e: 'update:filter-event-domain', value: string): void
+  (e: 'update:filter-event-type', value: string): void
+  (e: 'update:filter-deadline-from', value: string): void
+  (e: 'update:filter-deadline-to', value: string): void
+  (e: 'update:filter-status', value: string): void
+  (e: 'update:filter-level', value: string): void
+  (e: 'clear-filters'): void
 }>()
 
 const sentinelRef = ref<HTMLElement | null>(null)
@@ -83,10 +101,19 @@ const eventTitleMap = computed(() => {
 })
 
 function eventLabel(ids: string[]): string {
+  if (ids.length === 0) {
+    return '未关联事件'
+  }
   const labels = ids
     .map((id) => eventTitleMap.value.get(id))
     .filter((title): title is string => Boolean(title))
-  return labels.length > 0 ? labels.join('、') : '未关联事件'
+  if (labels.length === ids.length) {
+    return labels.join('、')
+  }
+  if (labels.length > 0) {
+    return `${labels.join('、')}（另有 ${ids.length - labels.length} 个事件待加载）`
+  }
+  return `已关联 ${ids.length} 个事件（名称加载中）`
 }
 
 function interactionCount(questionId: string): QuestionInteractionCount {
@@ -102,6 +129,36 @@ const participatedItems = computed(() =>
     return summary.hasPrediction || summary.myCommentCount > 0
   }),
 )
+
+const participationPage = ref(1)
+const participationPageSize = 3
+
+const participationTotalPages = computed(() =>
+  Math.max(1, Math.ceil(participatedItems.value.length / participationPageSize)),
+)
+
+const pagedParticipatedItems = computed(() => {
+  const start = (participationPage.value - 1) * participationPageSize
+  return participatedItems.value.slice(start, start + participationPageSize)
+})
+
+watch(participatedItems, () => {
+  const totalPages = participationTotalPages.value
+  if (participationPage.value > totalPages) {
+    participationPage.value = totalPages
+  }
+  if (participationPage.value < 1) {
+    participationPage.value = 1
+  }
+})
+
+function goParticipationPage(offset: number): void {
+  const next = participationPage.value + offset
+  if (next < 1 || next > participationTotalPages.value) {
+    return
+  }
+  participationPage.value = next
+}
 
 function setupObserver(): void {
   if (observer || !sentinelRef.value) {
@@ -148,7 +205,9 @@ onBeforeUnmount(() => {
         {{ backendOnline ? '数据源：后端实时问题流' : '数据源：离线本地问题流' }}
       </p>
 
-      <div v-if="items.length === 0 && !loading" class="empty-state">暂无可展示问题</div>
+      <div v-if="items.length === 0 && !loading && (filtersApplied || !hasMore)" class="empty-state">
+        {{ filtersApplied ? '当前筛选条件下暂无匹配问题，继续下滑可加载更多候选数据' : '暂无可展示问题' }}
+      </div>
 
       <ul v-else class="question-stream-list">
         <li
@@ -192,27 +251,100 @@ onBeforeUnmount(() => {
       </div>
     </article>
 
-    <aside class="panel participation-panel">
-      <div class="panel-head">
-        <h2>我的参与</h2>
-        <span>预测/评论</span>
-      </div>
-      <p v-if="participatedItems.length === 0" class="item-subtle">你还没有参与当前列表中的问题</p>
-      <div v-else class="participation-list">
-        <button
-          v-for="item in participatedItems"
-          :key="`participation-${item.id}`"
-          type="button"
-          class="participation-item"
-          @click="emit('open-question', item)"
-        >
-          <strong>{{ item.title }}</strong>
-          <span class="item-subtle">
-            {{ participation[item.id]?.hasPrediction ? '已预测' : '未预测' }}
-            · 我评论 {{ participation[item.id]?.myCommentCount ?? 0 }} 条
-          </span>
-        </button>
-      </div>
+    <aside class="question-community-side">
+      <section class="panel participation-panel">
+        <div class="panel-head">
+          <h2>我的参与</h2>
+          <span>预测/评论</span>
+        </div>
+        <p v-if="participatedItems.length === 0" class="item-subtle">你还没有参与当前列表中的问题</p>
+        <div v-else class="participation-list participation-scroll-box">
+          <button
+            v-for="item in pagedParticipatedItems"
+            :key="`participation-${item.id}`"
+            type="button"
+            class="participation-item"
+            @click="emit('open-question', item)"
+          >
+            <strong>{{ item.title }}</strong>
+            <span class="item-subtle">
+              {{ participation[item.id]?.hasPrediction ? '已预测' : '未预测' }}
+              · 我评论 {{ participation[item.id]?.myCommentCount ?? 0 }} 条
+            </span>
+          </button>
+        </div>
+        <div v-if="participatedItems.length > participationPageSize" class="action-row mini-pagination participation-pagination">
+          <button class="action-btn mini-btn" :disabled="participationPage <= 1" @click="goParticipationPage(-1)">上一页</button>
+          <span>第 {{ participationPage }} / {{ participationTotalPages }} 页</span>
+          <button
+            class="action-btn mini-btn"
+            :disabled="participationPage >= participationTotalPages"
+            @click="goParticipationPage(1)"
+          >
+            下一页
+          </button>
+        </div>
+      </section>
+
+      <section class="panel participation-filter-panel">
+        <div class="panel-head">
+          <h2>搜索与过滤</h2>
+          <span>独立筛选区</span>
+        </div>
+        <div class="question-feed-filter-scroll-box">
+          <div class="action-row manage-toolbar question-feed-filter-bar">
+            <input
+              :value="searchKeyword"
+              class="toolbar-grow"
+              placeholder="模糊搜索：标题/背景/答案范围/假设/真实结果"
+              @input="emit('update:search-keyword', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="filterEventDomain"
+              placeholder="事件域（模糊）"
+              @input="emit('update:filter-event-domain', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="filterEventType"
+              placeholder="事件类型（模糊）"
+              @input="emit('update:filter-event-type', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="filterDeadlineFrom"
+              type="datetime-local"
+              placeholder="截止时间起"
+              @input="emit('update:filter-deadline-from', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="filterDeadlineTo"
+              type="datetime-local"
+              placeholder="截止时间止"
+              @input="emit('update:filter-deadline-to', ($event.target as HTMLInputElement).value)"
+            />
+            <select
+              :value="filterStatus"
+              @change="emit('update:filter-status', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">全部状态</option>
+              <option value="collecting">收集中</option>
+              <option value="locked">已封存</option>
+              <option value="resolved">已解析</option>
+            </select>
+            <select
+              :value="filterLevel"
+              @change="emit('update:filter-level', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">全部等级</option>
+              <option value="L1">L1</option>
+              <option value="L2">L2</option>
+              <option value="L3">L3</option>
+              <option value="L4">L4</option>
+            </select>
+            <button class="action-btn" :disabled="!filtersApplied" @click="emit('clear-filters')">清空筛选</button>
+            <small class="toolbar-note">当前匹配 {{ filteredCount }} 条（已加载 {{ loadedCount }} 条）</small>
+          </div>
+        </div>
+      </section>
     </aside>
   </main>
 </template>

@@ -102,6 +102,7 @@ interface BackendQuestionItem {
   event_type?: string | null
   background?: string | null
   answer_space?: string | null
+  hypothesis?: string | null
   deadline: string
   status: string
   trace_id: string
@@ -592,6 +593,13 @@ const questionFeedPage = ref(0)
 const questionFeedTotal = ref(0)
 const questionFeedLoading = ref(false)
 const questionFeedHasMore = ref(true)
+const questionFeedSearchKeyword = ref('')
+const questionFeedFilterEventDomain = ref('')
+const questionFeedFilterEventType = ref('')
+const questionFeedFilterDeadlineFrom = ref('')
+const questionFeedFilterDeadlineTo = ref('')
+const questionFeedFilterStatus = ref('')
+const questionFeedFilterLevel = ref('')
 const questionFeedInteractionCounts = ref<Record<string, QuestionInteractionCount>>({})
 const questionFeedParticipation = ref<Record<string, QuestionParticipationSummary>>({})
 const selectedManageQuestionIds = ref<string[]>([])
@@ -798,6 +806,69 @@ const allKnownEvents = computed(() => {
   }
   return Array.from(map.values())
 })
+const questionFeedEventTitleMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const item of allKnownEvents.value) {
+    map.set(item.id, item.title)
+  }
+  return map
+})
+const questionFeedFiltersApplied = computed(() =>
+  Boolean(
+    questionFeedSearchKeyword.value.trim()
+    || questionFeedFilterEventDomain.value.trim()
+    || questionFeedFilterEventType.value.trim()
+    || questionFeedFilterDeadlineFrom.value.trim()
+    || questionFeedFilterDeadlineTo.value.trim()
+    || questionFeedFilterStatus.value.trim()
+    || questionFeedFilterLevel.value.trim(),
+  ),
+)
+const filteredQuestionFeedItems = computed(() => {
+  const keyword = questionFeedSearchKeyword.value.trim().toLowerCase()
+  const eventDomain = questionFeedFilterEventDomain.value.trim().toLowerCase()
+  const eventType = questionFeedFilterEventType.value.trim().toLowerCase()
+  const deadlineFromMs = parseLocalDateTimeToMs(questionFeedFilterDeadlineFrom.value)
+  const deadlineToMs = parseLocalDateTimeToMs(questionFeedFilterDeadlineTo.value)
+  const status = questionFeedFilterStatus.value.trim()
+  const level = questionFeedFilterLevel.value.trim()
+
+  return questionFeedItems.value.filter((item) => {
+    if (status && item.status !== status) {
+      return false
+    }
+
+    if (level && item.level !== level) {
+      return false
+    }
+
+    if (eventDomain && !item.eventDomain.toLowerCase().includes(eventDomain)) {
+      return false
+    }
+
+    if (eventType && !item.eventType.toLowerCase().includes(eventType)) {
+      return false
+    }
+
+    const deadlineMs = Date.parse(item.deadline)
+    if (deadlineFromMs !== null && Number.isFinite(deadlineMs) && deadlineMs < deadlineFromMs) {
+      return false
+    }
+    if (deadlineToMs !== null && Number.isFinite(deadlineMs) && deadlineMs > deadlineToMs) {
+      return false
+    }
+
+    if (!keyword) {
+      return true
+    }
+
+    const linkedEventTitles = item.eventIds
+      .map((id) => questionFeedEventTitleMap.value.get(id) ?? id)
+      .join('\n')
+    const haystack = `${item.title}\n${item.background}\n${item.answerSpace}\n${item.hypothesis}\n${item.groundTruth}\n${item.eventDomain}\n${item.eventType}\n${linkedEventTitles}`.toLowerCase()
+    return haystack.includes(keyword)
+  })
+})
 const activeQuestionPredictions = computed(() => {
   const questionId = manageDetailQuestion.value?.id
   if (!questionId) {
@@ -992,6 +1063,10 @@ function openManageDetail(eventItem: EventItem): void {
 }
 
 function openEventEdit(eventItem: EventItem): void {
+  if (!isAdmin.value) {
+    backendStatus.value = '当前账号无权限编辑事件'
+    return
+  }
   void fetchSourceSystemOptions()
   selectedEventId.value = eventItem.id
   eventEditForm.id = eventItem.id
@@ -1014,6 +1089,28 @@ function openManageQuestionDetail(questionItem: QuestionItem): void {
   commentDraft.value = ''
   void loadQuestionInteractions(questionItem.id)
   questionDetailDialogOpen.value = true
+}
+
+function findKnownEventById(eventId: string): EventItem | null {
+  return allKnownEvents.value.find((item) => item.id === eventId) ?? null
+}
+
+function linkedEventDisplayLabel(eventId: string): string {
+  const matched = findKnownEventById(eventId)
+  if (matched) {
+    return `${matched.title} · ${matched.theater}`
+  }
+  return `事件 ${eventId}`
+}
+
+async function openQuestionLinkedEventDetail(eventId: string): Promise<void> {
+  await ensureQuestionEventOptionsByIds([eventId])
+  const matched = findKnownEventById(eventId)
+  if (!matched) {
+    backendStatus.value = `未找到关联事件详情：${eventId}`
+    return
+  }
+  openManageDetail(matched)
 }
 
 function openQuestionEdit(questionItem: QuestionItem): void {
@@ -2405,7 +2502,7 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
     eventType: item.event_type ?? '',
     background: item.background ?? '',
     answerSpace: item.answer_space ?? '',
-    hypothesis: '由后端问题内容导入，待补充可证伪假设。',
+    hypothesis: item.hypothesis?.trim() ?? '',
     deadline: item.deadline,
     status: item.status === 'resolved' ? 'resolved' : item.status === 'locked' ? 'locked' : 'collecting',
     groundTruth: item.status === 'resolved' ? '后端状态显示已解析，请补充真实结果详情。' : '待真实结果回填。',
@@ -3329,6 +3426,16 @@ function resetQuestionFeed(): void {
   questionFeedParticipation.value = {}
 }
 
+function resetQuestionFeedFilters(): void {
+  questionFeedSearchKeyword.value = ''
+  questionFeedFilterEventDomain.value = ''
+  questionFeedFilterEventType.value = ''
+  questionFeedFilterDeadlineFrom.value = ''
+  questionFeedFilterDeadlineTo.value = ''
+  questionFeedFilterStatus.value = ''
+  questionFeedFilterLevel.value = ''
+}
+
 function ensureQuestionFeedCounts(questionIds: string[]): void {
   const next = { ...questionFeedInteractionCounts.value }
   const participationNext = { ...questionFeedParticipation.value }
@@ -3419,6 +3526,8 @@ async function loadQuestionFeedNextPage(): Promise<void> {
       `/questions/search?keyword=&page=${nextPage}&page_size=10`,
     )
     const batch = pageData.items.map(toQuestionItem)
+    const batchEventIds = Array.from(new Set(batch.flatMap((item) => item.eventIds)))
+    await ensureQuestionEventOptionsByIds(batchEventIds)
     questionFeedItems.value = [...questionFeedItems.value, ...batch]
     questionFeedPage.value = nextPage
     questionFeedTotal.value = pageData.total
@@ -4155,15 +4264,33 @@ watch(backendStatus, (status, prev) => {
 
     <QuestionFeedPanel
       v-if="currentView === 'questionStream'"
-      :items="questionFeedItems"
+      :items="filteredQuestionFeedItems"
       :interaction-counts="questionFeedInteractionCounts"
       :participation="questionFeedParticipation"
       :loading="questionFeedLoading"
       :has-more="questionFeedHasMore"
       :backend-online="backendOnline"
       :all-known-events="allKnownEvents"
+      :search-keyword="questionFeedSearchKeyword"
+      :filter-event-domain="questionFeedFilterEventDomain"
+      :filter-event-type="questionFeedFilterEventType"
+      :filter-deadline-from="questionFeedFilterDeadlineFrom"
+      :filter-deadline-to="questionFeedFilterDeadlineTo"
+      :filter-status="questionFeedFilterStatus"
+      :filter-level="questionFeedFilterLevel"
+      :loaded-count="questionFeedItems.length"
+      :filtered-count="filteredQuestionFeedItems.length"
+      :filters-applied="questionFeedFiltersApplied"
       @load-more="loadQuestionFeedNextPage"
       @open-question="openManageQuestionDetail"
+      @update:search-keyword="questionFeedSearchKeyword = $event"
+      @update:filter-event-domain="questionFeedFilterEventDomain = $event"
+      @update:filter-event-type="questionFeedFilterEventType = $event"
+      @update:filter-deadline-from="questionFeedFilterDeadlineFrom = $event"
+      @update:filter-deadline-to="questionFeedFilterDeadlineTo = $event"
+      @update:filter-status="questionFeedFilterStatus = $event"
+      @update:filter-level="questionFeedFilterLevel = $event"
+      @clear-filters="resetQuestionFeedFilters"
     />
 
     <ManageTemplatesPanel
@@ -4598,47 +4725,63 @@ watch(backendStatus, (status, prev) => {
     </div>
 
     <div v-if="homeDetailDialogOpen && homeDetailEvent" class="dialog-backdrop" @click.self="homeDetailDialogOpen = false">
-      <section class="dialog-panel">
+      <section class="dialog-panel event-detail-dialog">
         <div class="panel-head">
           <h2>事件详情（只读）</h2>
           <button class="action-btn" @click="homeDetailDialogOpen = false">关闭</button>
         </div>
-        <div class="detail-grid">
-          <p><strong>ID：</strong>{{ homeDetailEvent.id }}</p>
-          <p><strong>标题：</strong>{{ homeDetailEvent.title }}</p>
-          <p><strong>event_key：</strong>{{ homeDetailEvent.codename }}</p>
-          <p><strong>来源系统：</strong>{{ homeDetailEvent.theater }}</p>
-          <p><strong>URL：</strong>{{ homeDetailEvent.url || '-' }}</p>
-          <p><strong>可信等级：</strong>{{ severityLabel[homeDetailEvent.severity] }}</p>
-          <p><strong>filter_status：</strong>{{ homeDetailEvent.filterStatus }}</p>
-          <p><strong>tags：</strong>{{ homeDetailEvent.tags.length > 0 ? homeDetailEvent.tags.join(', ') : '-' }}</p>
-          <p><strong>事件时间：</strong>{{ formatDate(homeDetailEvent.timestamp) }}</p>
-          <p><strong>内容：</strong>{{ homeDetailEvent.summary }}</p>
+        <div class="detail-grid detail-grid-2 detail-metric-grid">
+          <article class="detail-item"><small class="detail-item-label">ID</small><p class="detail-item-value">{{ homeDetailEvent.id }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">event_key</small><p class="detail-item-value">{{ homeDetailEvent.codename }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">标题</small><p class="detail-item-value">{{ homeDetailEvent.title }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">来源系统</small><p class="detail-item-value">{{ homeDetailEvent.theater }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">可信等级</small><p class="detail-item-value">{{ severityLabel[homeDetailEvent.severity] }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">filter_status</small><p class="detail-item-value">{{ homeDetailEvent.filterStatus }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">事件时间</small><p class="detail-item-value">{{ formatDate(homeDetailEvent.timestamp) }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">URL</small><p class="detail-item-value">{{ homeDetailEvent.url || '-' }}</p></article>
         </div>
+        <section class="detail-block detail-summary-block">
+          <h3>事件内容</h3>
+          <p>{{ homeDetailEvent.summary }}</p>
+          <div class="tag-group detail-tags">
+            <span v-if="homeDetailEvent.tags.length === 0" class="badge badge-muted">无 tags</span>
+            <span v-for="tag in homeDetailEvent.tags" :key="`event-home-tag-${homeDetailEvent.id}-${tag}`" class="badge">{{ tag }}</span>
+          </div>
+        </section>
       </section>
     </div>
 
-    <div v-if="eventDetailDialogOpen && manageDetailEvent" class="dialog-backdrop" @click.self="eventDetailDialogOpen = false">
-      <section class="dialog-panel">
+    <div
+      v-if="eventDetailDialogOpen && manageDetailEvent"
+      class="dialog-backdrop dialog-backdrop-stacked"
+      @click.self="eventDetailDialogOpen = false"
+    >
+      <section class="dialog-panel event-detail-dialog">
         <div class="panel-head">
           <h2>事件详情（只读）</h2>
           <div class="action-row">
-            <button class="action-btn" @click="openEventEdit(manageDetailEvent)">编辑</button>
+            <button v-if="isAdmin" class="action-btn" @click="openEventEdit(manageDetailEvent)">编辑</button>
             <button class="action-btn" @click="eventDetailDialogOpen = false">关闭</button>
           </div>
         </div>
-        <div class="detail-grid">
-          <p><strong>ID：</strong>{{ manageDetailEvent.id }}</p>
-          <p><strong>标题：</strong>{{ manageDetailEvent.title }}</p>
-          <p><strong>event_key：</strong>{{ manageDetailEvent.codename }}</p>
-          <p><strong>来源系统：</strong>{{ manageDetailEvent.theater }}</p>
-          <p><strong>URL：</strong>{{ manageDetailEvent.url || '-' }}</p>
-          <p><strong>可信等级：</strong>{{ severityLabel[manageDetailEvent.severity] }}</p>
-          <p><strong>filter_status：</strong>{{ manageDetailEvent.filterStatus }}</p>
-          <p><strong>tags：</strong>{{ manageDetailEvent.tags.length > 0 ? manageDetailEvent.tags.join(', ') : '-' }}</p>
-          <p><strong>事件时间：</strong>{{ formatDate(manageDetailEvent.timestamp) }}</p>
-          <p><strong>内容：</strong>{{ manageDetailEvent.summary }}</p>
+        <div class="detail-grid detail-grid-2 detail-metric-grid">
+          <article class="detail-item"><small class="detail-item-label">ID</small><p class="detail-item-value">{{ manageDetailEvent.id }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">event_key</small><p class="detail-item-value">{{ manageDetailEvent.codename }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">标题</small><p class="detail-item-value">{{ manageDetailEvent.title }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">来源系统</small><p class="detail-item-value">{{ manageDetailEvent.theater }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">可信等级</small><p class="detail-item-value">{{ severityLabel[manageDetailEvent.severity] }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">filter_status</small><p class="detail-item-value">{{ manageDetailEvent.filterStatus }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">事件时间</small><p class="detail-item-value">{{ formatDate(manageDetailEvent.timestamp) }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">URL</small><p class="detail-item-value">{{ manageDetailEvent.url || '-' }}</p></article>
         </div>
+        <section class="detail-block detail-summary-block">
+          <h3>事件内容</h3>
+          <p>{{ manageDetailEvent.summary }}</p>
+          <div class="tag-group detail-tags">
+            <span v-if="manageDetailEvent.tags.length === 0" class="badge badge-muted">无 tags</span>
+            <span v-for="tag in manageDetailEvent.tags" :key="`event-manage-tag-${manageDetailEvent.id}-${tag}`" class="badge">{{ tag }}</span>
+          </div>
+        </section>
       </section>
     </div>
 
@@ -4703,7 +4846,7 @@ watch(backendStatus, (status, prev) => {
     </div>
 
     <div v-if="questionDetailDialogOpen && manageDetailQuestion" class="dialog-backdrop" @click.self="questionDetailDialogOpen = false">
-      <section class="dialog-panel">
+      <section class="dialog-panel question-detail-dialog">
         <div class="panel-head">
           <h2>问题详情（只读）</h2>
           <div class="action-row">
@@ -4711,29 +4854,47 @@ watch(backendStatus, (status, prev) => {
             <button class="action-btn" @click="questionDetailDialogOpen = false">关闭</button>
           </div>
         </div>
-        <div class="detail-grid">
-          <p><strong>ID：</strong>{{ manageDetailQuestion.id }}</p>
-          <p>
-            <strong>关联事件：</strong>
-            {{
-              (manageDetailQuestion?.eventIds ?? [])
-                .map((eventId) => allKnownEvents.find((item) => item.id === eventId)?.title)
-                .filter((title): title is string => Boolean(title))
-                .join('、') || '未匹配事件'
-            }}
-          </p>
-          <p><strong>等级：</strong>{{ manageDetailQuestion.level }}</p>
-          <p><strong>状态：</strong>{{ statusLabel[manageDetailQuestion.status] }}</p>
-          <p><strong>截止时间：</strong>{{ formatDate(manageDetailQuestion.deadline) }}</p>
-          <p><strong>标题：</strong>{{ manageDetailQuestion.title }}</p>
-          <p><strong>匹配分数：</strong>{{ manageDetailQuestion.matchScore ?? '-' }}</p>
-          <p><strong>事件域：</strong>{{ manageDetailQuestion.eventDomain || '-' }}</p>
-          <p><strong>事件类型：</strong>{{ manageDetailQuestion.eventType || '-' }}</p>
-          <p><strong>背景：</strong>{{ manageDetailQuestion.background || '-' }}</p>
-          <p><strong>答案范围：</strong>{{ manageDetailQuestion.answerSpace || '未填写' }}</p>
-          <p><strong>假设：</strong>{{ manageDetailQuestion.hypothesis }}</p>
-          <p><strong>真实结果：</strong>{{ manageDetailQuestion.groundTruth }}</p>
+        <div class="detail-grid detail-grid-2 detail-metric-grid">
+          <article class="detail-item"><small class="detail-item-label">ID</small><p class="detail-item-value">{{ manageDetailQuestion.id }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">等级</small><p class="detail-item-value">{{ manageDetailQuestion.level }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">状态</small><p class="detail-item-value">{{ statusLabel[manageDetailQuestion.status] }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">截止时间</small><p class="detail-item-value">{{ formatDate(manageDetailQuestion.deadline) }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">事件域</small><p class="detail-item-value">{{ manageDetailQuestion.eventDomain || '-' }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">事件类型</small><p class="detail-item-value">{{ manageDetailQuestion.eventType || '-' }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">匹配分数</small><p class="detail-item-value">{{ manageDetailQuestion.matchScore ?? '-' }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">答案范围</small><p class="detail-item-value">{{ manageDetailQuestion.answerSpace || '未填写' }}</p></article>
         </div>
+        <section class="detail-block detail-summary-block">
+          <h3>问题标题</h3>
+          <p>{{ manageDetailQuestion.title }}</p>
+        </section>
+        <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.background">
+          <h3>背景信息</h3>
+          <p>{{ manageDetailQuestion.background }}</p>
+        </section>
+        <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.hypothesis">
+          <h3>假设</h3>
+          <p>{{ manageDetailQuestion.hypothesis }}</p>
+        </section>
+        <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.groundTruth">
+          <h3>真实结果</h3>
+          <p>{{ manageDetailQuestion.groundTruth }}</p>
+        </section>
+        <section class="detail-block detail-related-block">
+          <h3>关联事件</h3>
+          <div v-if="manageDetailQuestion.eventIds.length > 0" class="detail-related-events">
+            <button
+              v-for="eventId in manageDetailQuestion.eventIds"
+              :key="`detail-event-${manageDetailQuestion.id}-${eventId}`"
+              type="button"
+              class="action-btn mini-btn linked-event-chip"
+              @click="void openQuestionLinkedEventDetail(eventId)"
+            >
+              {{ linkedEventDisplayLabel(eventId) }}
+            </button>
+          </div>
+          <p v-else class="item-subtle">未关联事件</p>
+        </section>
 
         <div class="field-block">
           <label>社区互动</label>

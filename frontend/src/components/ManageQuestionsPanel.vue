@@ -70,6 +70,22 @@ function questionStatusBadgeTone(status: QuestionItem['status']): string {
   }
   return 'badge-warning'
 }
+
+function eventLabel(eventIds: string[], allKnownEvents: EventOption[]): string {
+  if (eventIds.length === 0) {
+    return '未关联事件'
+  }
+  const labels = eventIds
+    .map((eventId) => allKnownEvents.find((eventItem) => eventItem.id === eventId)?.title)
+    .filter((title): title is string => Boolean(title))
+  if (labels.length === eventIds.length) {
+    return labels.join('、')
+  }
+  if (labels.length > 0) {
+    return `${labels.join('、')}（另有 ${eventIds.length - labels.length} 个事件待加载）`
+  }
+  return `已关联 ${eventIds.length} 个事件（名称加载中）`
+}
 </script>
 
 <template>
@@ -115,12 +131,7 @@ function questionStatusBadgeTone(status: QuestionItem['status']): string {
           <p class="item-title">{{ question.title }}</p>
           <small class="item-meta">
             关联事件：
-            {{
-              question.eventIds
-                .map((eventId) => allKnownEvents.find((eventItem) => eventItem.id === eventId)?.title)
-                .filter((title): title is string => Boolean(title))
-                .join('、') || '未匹配事件'
-            }}
+            {{ eventLabel(question.eventIds, allKnownEvents) }}
           </small>
           <small class="item-meta">事件域：{{ question.eventDomain || '-' }} ｜ 事件类型：{{ question.eventType || '-' }} ｜ 匹配分：{{ question.matchScore ?? '-' }}</small>
           <div class="action-row action-right card-actions">

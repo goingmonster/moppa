@@ -574,6 +574,39 @@ textarea {
   gap: 0.7rem;
 }
 
+.question-feed-filter-bar {
+  align-items: center;
+}
+
+.question-feed-filter-bar input,
+.question-feed-filter-bar select {
+  min-width: 170px;
+}
+
+.question-feed-filter-bar .toolbar-grow {
+  flex: 1 1 320px;
+}
+
+.question-community-side {
+  position: sticky;
+  top: 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+  align-self: start;
+}
+
+.participation-pagination {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.participation-scroll-box,
+.question-feed-filter-scroll-box {
+  max-height: 260px;
+  overflow: auto;
+  min-height: 0;
+}
+
 .question-stream-list {
   margin: 0;
   padding: 0;
@@ -1096,6 +1129,10 @@ select:focus-visible {
   padding: 1rem;
 }
 
+.dialog-backdrop-stacked {
+  z-index: 40;
+}
+
 .dialog-panel {
   width: min(760px, 100%);
   max-height: 88vh;
@@ -1150,6 +1187,67 @@ select:focus-visible {
 .detail-grid {
   display: grid;
   gap: 0.45rem;
+}
+
+.detail-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-metric-grid {
+  gap: 0.58rem;
+}
+
+.detail-item {
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--surface-3);
+  padding: 0.5rem 0.58rem;
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.detail-item-label {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.detail-item-value {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.34;
+  word-break: break-word;
+}
+
+.detail-summary-block h3,
+.detail-related-block h3 {
+  color: var(--accent-strong);
+  font-size: 1.05rem;
+}
+
+.detail-summary-block p {
+  line-height: 1.46;
+}
+
+.detail-tags {
+  justify-content: flex-start;
+}
+
+.detail-related-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.linked-event-chip {
+  border-style: dashed;
+}
+
+.dialog-panel.event-detail-dialog,
+.dialog-panel.question-detail-dialog {
+  width: min(880px, 100%);
 }
 
 .detail-grid strong {
@@ -1290,8 +1388,7 @@ select:focus-visible {
 }
 
 .participation-panel {
-  position: sticky;
-  top: 0.75rem;
+  position: static;
 }
 
 .participation-list {
@@ -1407,6 +1504,10 @@ select:focus-visible {
     position: static;
   }
 
+  .question-community-side {
+    position: static;
+  }
+
   .metric-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1496,6 +1597,10 @@ select:focus-visible {
   }
 
   .dialog-inline-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-grid-2 {
     grid-template-columns: 1fr;
   }
 
