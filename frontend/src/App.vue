@@ -639,6 +639,7 @@ const questionFeedFilterDeadlineFrom = ref('')
 const questionFeedFilterDeadlineTo = ref('')
 const questionFeedFilterStatus = ref('')
 const questionFeedFilterLevel = ref('')
+let questionFeedSearchTimer: number | undefined
 const questionFeedInteractionCounts = ref<Record<string, QuestionInteractionCount>>({})
 const questionFeedParticipation = ref<Record<string, QuestionParticipationSummary>>({})
 const selectedManageQuestionIds = ref<string[]>([])
@@ -3756,9 +3757,35 @@ async function loadQuestionFeedNextPage(): Promise<void> {
       return
     }
 
-    const pageData = await fetchJson<BackendPage<BackendQuestionItem>>(
-      `/questions/search?keyword=&page=${nextPage}&page_size=10`,
-    )
+    const query = new URLSearchParams()
+    query.set('keyword', questionFeedSearchKeyword.value.trim())
+    const eventDomain = questionFeedFilterEventDomain.value.trim()
+    const eventType = questionFeedFilterEventType.value.trim()
+    const status = questionFeedFilterStatus.value.trim()
+    const level = parseLevelFilter(questionFeedFilterLevel.value.trim())
+    const deadlineFrom = toIsoFromLocalDateTime(questionFeedFilterDeadlineFrom.value)
+    const deadlineTo = toIsoFromLocalDateTime(questionFeedFilterDeadlineTo.value)
+    if (eventDomain) {
+      query.set('event_domain', eventDomain)
+    }
+    if (eventType) {
+      query.set('event_type', eventType)
+    }
+    if (status) {
+      query.set('status', status)
+    }
+    if (level !== null) {
+      query.set('level', String(level))
+    }
+    if (deadlineFrom) {
+      query.set('deadline_from', deadlineFrom)
+    }
+    if (deadlineTo) {
+      query.set('deadline_to', deadlineTo)
+    }
+    query.set('page', String(nextPage))
+    query.set('page_size', '10')
+    const pageData = await fetchJson<BackendPage<BackendQuestionItem>>(`/questions/search?${query.toString()}`)
     const batch = pageData.items.map(toQuestionItem)
     const batchEventIds = Array.from(new Set(batch.flatMap((item) => item.eventIds)))
     await ensureQuestionEventOptionsByIds(batchEventIds)
@@ -4243,6 +4270,37 @@ watch(
       return
     }
     void fetchManageQuestions(1)
+  },
+)
+
+watch(questionFeedSearchKeyword, () => {
+  if (!backendOnline.value || currentView.value !== 'questionStream') {
+    return
+  }
+  if (questionFeedSearchTimer !== undefined) {
+    window.clearTimeout(questionFeedSearchTimer)
+  }
+  questionFeedSearchTimer = window.setTimeout(() => {
+    resetQuestionFeed()
+    void loadQuestionFeedNextPage()
+  }, 250)
+})
+
+watch(
+  [
+    questionFeedFilterEventDomain,
+    questionFeedFilterEventType,
+    questionFeedFilterDeadlineFrom,
+    questionFeedFilterDeadlineTo,
+    questionFeedFilterStatus,
+    questionFeedFilterLevel,
+  ],
+  () => {
+    if (!backendOnline.value || currentView.value !== 'questionStream') {
+      return
+    }
+    resetQuestionFeed()
+    void loadQuestionFeedNextPage()
   },
 )
 
