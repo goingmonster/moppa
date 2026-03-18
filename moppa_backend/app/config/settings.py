@@ -43,6 +43,7 @@ class Settings:
     source_fetch_limit: int
     source_bootstrap_limit: int
     source_overlap_minutes: int
+    s1_pull_event_scope: str
     scheduler_enabled: bool
     auto_review_enabled: bool
     auto_review_cron: str
@@ -146,6 +147,7 @@ def load_settings() -> Settings:
         source_fetch_limit=env_int("SOURCE_FETCH_LIMIT", 200),
         source_bootstrap_limit=env_int("SOURCE_BOOTSTRAP_LIMIT", 500),
         source_overlap_minutes=env_int("SOURCE_OVERLAP_MINUTES", 10),
+        s1_pull_event_scope=normalize_event_scope(os.getenv("S1_PULL_EVENT_SCOPE", "today"), "today"),
         scheduler_enabled=env_bool("SCHEDULER_ENABLED", True),
         auto_review_enabled=env_bool("AUTO_REVIEW_ENABLED", False),
         auto_review_cron=os.getenv("AUTO_REVIEW_CRON", "0 * * * *"),

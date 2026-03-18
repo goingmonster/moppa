@@ -21,6 +21,41 @@ class SourceNewsRow(TypedDict):
 
 
 class SourceNewsRepository:
+    def fetch_rows_by_published_range(
+        self,
+        published_from: datetime | None,
+        published_to: datetime | None,
+        limit: int,
+    ) -> list[SourceNewsRow]:
+        schema = self._safe_identifier(settings.source_db_schema)
+        where_clauses = ["published IS NOT NULL"]
+        params: dict[str, object] = {"limit": limit}
+        if published_from is not None:
+            where_clauses.append("published >= :published_from")
+            params["published_from"] = published_from
+        if published_to is not None:
+            where_clauses.append("published < :published_to")
+            params["published_to"] = published_to
+        where_sql = " AND ".join(where_clauses)
+
+        query = text(
+            f"""
+            SELECT source_information, create_time, source_site, published, url, title_translate, text_translate, "type", entities
+            FROM {schema}.data_test
+            WHERE {where_sql}
+            ORDER BY published DESC, create_time DESC, COALESCE(url, '') DESC
+            LIMIT :limit
+            """
+        )
+
+        engine = create_engine(settings.source_database_url, future=True, pool_pre_ping=True)
+        try:
+            with engine.connect() as connection:
+                rows = connection.execute(query, params).mappings().all()
+            return self._normalize_rows(rows)
+        finally:
+            engine.dispose()
+
     def fetch_latest_rows(self, limit: int) -> list[SourceNewsRow]:
         schema = self._safe_identifier(settings.source_db_schema)
         query = text(

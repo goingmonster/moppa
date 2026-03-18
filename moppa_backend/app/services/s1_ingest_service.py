@@ -1,5 +1,5 @@
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import cast
 from uuid import uuid4
 
@@ -88,25 +88,15 @@ class S1IngestService:
             source_system = payload.source_system or settings.source_system_name
             self.data_source_repository.ensure_source_system(source_system)
 
-            watermark = self._get_pull_watermark()
-            latest_mode = watermark is None
-            if latest_mode:
-                rows = cast(
-                    list[SourceNewsRow],
-                    self.source_news_repository.fetch_latest_rows(
-                        limit=self._resolve_source_fetch_limit(latest_mode=True),
-                    ),
-                )
-            else:
-                watermark_time = cast(datetime, watermark["last_create_time"])
-                rows = cast(
-                    list[SourceNewsRow],
-                    self.source_news_repository.fetch_incremental_rows(
-                        since=watermark_time,
-                        overlap_minutes=self._resolve_source_overlap_minutes(),
-                        limit=self._resolve_source_fetch_limit(latest_mode=False),
-                    ),
-                )
+            published_from, published_to = self._resolve_pull_published_range(datetime.now(timezone.utc))
+            rows = cast(
+                list[SourceNewsRow],
+                self.source_news_repository.fetch_rows_by_published_range(
+                    published_from=published_from,
+                    published_to=published_to,
+                    limit=self._resolve_source_fetch_limit(latest_mode=False),
+                ),
+            )
             malformed = 0
             events: list[S1EventInputModel] = []
             for row in rows:
@@ -121,16 +111,10 @@ class S1IngestService:
             )
             result["fetched"] = len(rows)
             result["skipped_malformed"] = malformed
-            result["pull_mode"] = "latest_bootstrap" if latest_mode else "incremental"
-            if rows:
-                latest_row = max(
-                    rows,
-                    key=lambda row: (self._coerce_datetime(row["create_time"], field_name="create_time"), str(row.get("url") or "")),
-                )
-                self._set_pull_watermark(
-                    last_create_time=self._coerce_datetime(latest_row["create_time"], field_name="create_time"),
-                    last_url=str(latest_row.get("url") or ""),
-                )
+            result["pull_mode"] = "published_scope"
+            result["pull_scope"] = settings.s1_pull_event_scope
+            result["published_from"] = published_from.isoformat() if published_from is not None else None
+            result["published_to"] = published_to.isoformat() if published_to is not None else None
 
             completed = self.task_repository.mark_completed(task.id, result=result, metrics=metrics)
             return self._to_task_response(completed or task)
@@ -360,3 +344,25 @@ class S1IngestService:
             description="S1 pull last consumed create_time",
             category="task",
         )
+
+    def _resolve_pull_published_range(self, now: datetime) -> tuple[datetime | None, datetime | None]:
+        scope = settings.s1_pull_event_scope
+        if scope == "all":
+            return None, None
+        if scope == "today":
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            return start, start + timedelta(days=1)
+        if scope == "week":
+            day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            start = day_start - timedelta(days=day_start.weekday())
+            return start, start + timedelta(days=7)
+        if scope == "month":
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if start.month == 12:
+                end = start.replace(year=start.year + 1, month=1)
+            else:
+                end = start.replace(month=start.month + 1)
+            return start, end
+        start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = start.replace(year=start.year + 1)
+        return start, end
