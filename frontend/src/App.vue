@@ -2828,10 +2828,6 @@ function toQuestionCommentItem(item: BackendQuestionCommentItem): QuestionCommen
   }
 }
 
-function isQuestionCollecting(question: QuestionItem): boolean {
-  return question.status === 'draft'
-}
-
 function normalizeQuestionStatus(value: string): QuestionStatus {
   const normalized = value.trim().toLowerCase()
   if (normalized === 'draft') {
@@ -2855,19 +2851,11 @@ function normalizeQuestionStatus(value: string): QuestionStatus {
   return 'draft'
 }
 
-function isQuestionBeforeDeadline(question: QuestionItem): boolean {
-  const deadline = new Date(question.deadline)
-  if (Number.isNaN(deadline.getTime())) {
-    return false
-  }
-  return deadline.getTime() > Date.now()
-}
-
 function canInteractWithQuestion(question: QuestionItem | null): boolean {
   if (!question) {
     return false
   }
-  return isQuestionCollecting(question) && isQuestionBeforeDeadline(question)
+  return question.status !== 'expired'
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {
@@ -3332,7 +3320,7 @@ function openQuestionComposer(mode: 'prediction' | 'comment'): void {
     return
   }
   if (!canInteractWithQuestion(question)) {
-    backendStatus.value = '当前问题不可互动：仅收集中且截止前允许预测和评论'
+    backendStatus.value = '当前问题不可互动：仅已过期问题禁止预测和评论'
     return
   }
   questionComposerMode.value = mode
@@ -3344,7 +3332,7 @@ async function submitMyPrediction(): Promise<void> {
     return
   }
   if (!canInteractWithQuestion(question)) {
-    backendStatus.value = '仅在问题收集中且截止前可提交或修改预测'
+    backendStatus.value = '仅已过期问题不可提交或修改预测'
     return
   }
   const predictionContent = predictionForm.predictionContent.trim()
@@ -3387,7 +3375,7 @@ async function submitQuestionComment(): Promise<void> {
     return
   }
   if (!canInteractWithQuestion(question)) {
-    backendStatus.value = '仅在问题收集中且截止前可发表评论'
+    backendStatus.value = '仅已过期问题不可发表评论'
     return
   }
   const content = commentDraft.value.trim()

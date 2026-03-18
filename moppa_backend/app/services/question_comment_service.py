@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
@@ -28,7 +27,7 @@ class QuestionCommentService:
         question = self.question_repository.get_by_id(str(question_uuid))
         if question is None:
             raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
-        self._validate_question_open(question.status, question.deadline)
+        self._validate_question_open(question.status)
 
         content = payload.content.strip()
         if not content:
@@ -67,15 +66,10 @@ class QuestionCommentService:
         self.repository.soft_delete(entity)
 
     @staticmethod
-    def _validate_question_open(status: str, deadline: datetime) -> None:
-        normalized = status.strip()
-        if normalized not in {"draft", "collecting"}:
-            raise ApiError(status_code=409, code="QUESTION_NOT_COLLECTING", message="Question is not collecting comments")
-
-        now = datetime.now(timezone.utc)
-        effective_deadline = deadline if deadline.tzinfo is not None else deadline.replace(tzinfo=timezone.utc)
-        if effective_deadline <= now:
-            raise ApiError(status_code=409, code="QUESTION_DEADLINE_PASSED", message="Question deadline has passed")
+    def _validate_question_open(status: str) -> None:
+        normalized = status.strip().lower()
+        if normalized == "expired":
+            raise ApiError(status_code=409, code="QUESTION_EXPIRED", message="Expired question does not accept comments")
 
     @staticmethod
     def _parse_uuid(raw: str, field_name: str) -> UUID:
