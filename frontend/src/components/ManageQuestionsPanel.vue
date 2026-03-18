@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+
 interface QuestionItem {
   id: string
   eventIds: string[]
@@ -7,12 +9,16 @@ interface QuestionItem {
   matchScore: number | null
   eventDomain: string
   eventType: string
+  area: string
+  inputType: string
   background: string
   answerSpace: string
   status: 'collecting' | 'locked' | 'resolved'
   hypothesis: string
   deadline: string
   groundTruth: string
+  deleteReason: string
+  deletedAt: string
 }
 
 interface EventOption {
@@ -25,6 +31,14 @@ defineProps<{
   questionManageTotalPages: number
   allQuestionsOnPageSelected: boolean
   questionManageSearchKeyword: string
+  questionManageFilterEventDomain: string
+  questionManageFilterEventType: string
+  questionManageFilterDeadlineFrom: string
+  questionManageFilterDeadlineTo: string
+  questionManageFilterStatus: string
+  questionManageFilterLevel: string
+  questionManageDeletedMode: 'active_only' | 'with_deleted' | 'deleted_only'
+  questionManageFiltersApplied: boolean
   questionManageSearchLoading: boolean
   backendOnline: boolean
   questionManageTotal: number
@@ -45,6 +59,14 @@ const emit = defineEmits<{
   (e: 'toggle-select-all'): void
   (e: 'delete-selected-batch'): void
   (e: 'update:search-keyword', value: string): void
+  (e: 'update:filter-event-domain', value: string): void
+  (e: 'update:filter-event-type', value: string): void
+  (e: 'update:filter-deadline-from', value: string): void
+  (e: 'update:filter-deadline-to', value: string): void
+  (e: 'update:filter-status', value: string): void
+  (e: 'update:filter-level', value: string): void
+  (e: 'update:deleted-mode', value: 'active_only' | 'with_deleted' | 'deleted_only'): void
+  (e: 'clear-filters'): void
   (e: 'select-question', id: string): void
   (e: 'open-manage-detail', item: QuestionItem): void
   (e: 'toggle-selection', id: string): void
@@ -54,6 +76,8 @@ const emit = defineEmits<{
   (e: 'update:jump-page', value: string): void
   (e: 'jump-to-page'): void
 }>()
+
+const manageToolbarCollapsed = ref(true)
 
 const statusLabel: Record<QuestionItem['status'], string> = {
   collecting: '收集中',
@@ -90,23 +114,85 @@ function eventLabel(eventIds: string[], allKnownEvents: EventOption[]): string {
 
 <template>
   <main class="manage-grid">
-    <article class="panel list-panel">
+    <article class="panel list-panel manage-question-list-panel">
       <div class="panel-head">
         <h2>问题列表</h2>
         <span>第 {{ questionManagePage }} / {{ questionManageTotalPages }} 页</span>
       </div>
-      <div class="action-row manage-toolbar">
-        <button class="action-btn" @click="emit('open-create-question')">新增问题</button>
-        <button class="action-btn" @click="emit('toggle-select-all')">{{ allQuestionsOnPageSelected ? '取消全选本页' : '全选本页' }}</button>
-        <button class="action-btn danger" @click="emit('delete-selected-batch')">批量删除所选</button>
-        <input
-          :value="questionManageSearchKeyword"
-          class="toolbar-grow"
-          placeholder="搜索问题标题"
-          @input="emit('update:search-keyword', ($event.target as HTMLInputElement).value)"
-        />
-        <small class="toolbar-note">{{ questionManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? questionManageTotal : localFilteredManageQuestionsLength} 条` }}</small>
-      </div>
+      <section class="manage-question-toolbar-top compact-control-panel">
+        <div class="panel-head toolbar-head">
+          <h2>操作与筛选</h2>
+          <button class="action-btn mini-btn" @click="manageToolbarCollapsed = !manageToolbarCollapsed">
+            {{ manageToolbarCollapsed ? '展开' : '折叠' }}
+          </button>
+        </div>
+        <p v-if="manageToolbarCollapsed" class="item-subtle">已折叠（点击展开查看操作与筛选）</p>
+        <template v-else>
+          <div class="manage-question-toolbar-actions">
+            <button class="action-btn" @click="emit('open-create-question')">新增问题</button>
+            <button class="action-btn" @click="emit('toggle-select-all')">{{ allQuestionsOnPageSelected ? '取消全选本页' : '全选本页' }}</button>
+            <button class="action-btn danger" @click="emit('delete-selected-batch')">批量删除所选</button>
+            <button class="action-btn" :disabled="!questionManageFiltersApplied" @click="emit('clear-filters')">清空筛选</button>
+          </div>
+          <div class="manage-question-filter-row">
+            <input
+              :value="questionManageSearchKeyword"
+              placeholder="模糊搜索：标题/背景/事件域/删除原因"
+              @input="emit('update:search-keyword', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="questionManageFilterEventDomain"
+              placeholder="事件域（模糊）"
+              @input="emit('update:filter-event-domain', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="questionManageFilterEventType"
+              placeholder="事件类型（模糊）"
+              @input="emit('update:filter-event-type', ($event.target as HTMLInputElement).value)"
+            />
+            <select
+              :value="questionManageFilterStatus"
+              @change="emit('update:filter-status', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">全部状态</option>
+              <option value="collecting">收集中</option>
+              <option value="locked">已封存</option>
+              <option value="resolved">已解析</option>
+            </select>
+          </div>
+          <div class="manage-question-filter-row">
+            <input
+              :value="questionManageFilterDeadlineFrom"
+              type="datetime-local"
+              @input="emit('update:filter-deadline-from', ($event.target as HTMLInputElement).value)"
+            />
+            <input
+              :value="questionManageFilterDeadlineTo"
+              type="datetime-local"
+              @input="emit('update:filter-deadline-to', ($event.target as HTMLInputElement).value)"
+            />
+            <select
+              :value="questionManageFilterLevel"
+              @change="emit('update:filter-level', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">全部等级</option>
+              <option value="L1">L1</option>
+              <option value="L2">L2</option>
+              <option value="L3">L3</option>
+              <option value="L4">L4</option>
+            </select>
+            <select
+              :value="questionManageDeletedMode"
+              @change="emit('update:deleted-mode', ($event.target as HTMLSelectElement).value as 'active_only' | 'with_deleted' | 'deleted_only')"
+            >
+              <option value="active_only">仅未删除</option>
+              <option value="with_deleted">包含已删除</option>
+              <option value="deleted_only">仅已删除</option>
+            </select>
+          </div>
+          <small class="toolbar-note">{{ questionManageSearchLoading ? '搜索中...' : `匹配 ${backendOnline ? questionManageTotal : localFilteredManageQuestionsLength} 条` }}</small>
+        </template>
+      </section>
       <div v-if="questionManageSearchLoading" class="skeleton-list" aria-hidden="true">
         <article v-for="row in skeletonRows" :key="`question-skeleton-${row}`" class="skeleton-card"></article>
       </div>
@@ -120,12 +206,18 @@ function eventLabel(eventIds: string[], allKnownEvents: EventOption[]): string {
         >
           <div class="row-between">
             <label class="select-row" @click.stop>
-              <input type="checkbox" :checked="selectedManageQuestionIds.includes(question.id)" @change="emit('toggle-selection', question.id)" />
+              <input
+                type="checkbox"
+                :checked="selectedManageQuestionIds.includes(question.id)"
+                :disabled="Boolean(question.deletedAt)"
+                @change="emit('toggle-selection', question.id)"
+              />
               <span>选择</span>
             </label>
             <div class="tag-group">
               <span class="badge">{{ question.level }}</span>
               <span :class="['badge', questionStatusBadgeTone(question.status)]">{{ statusLabel[question.status] }}</span>
+              <span v-if="question.deletedAt" class="badge badge-danger">已删除</span>
             </div>
           </div>
           <p class="item-title">{{ question.title }}</p>
@@ -133,7 +225,9 @@ function eventLabel(eventIds: string[], allKnownEvents: EventOption[]): string {
             关联事件：
             {{ eventLabel(question.eventIds, allKnownEvents) }}
           </small>
-          <small class="item-meta">事件域：{{ question.eventDomain || '-' }} ｜ 事件类型：{{ question.eventType || '-' }} ｜ 匹配分：{{ question.matchScore ?? '-' }}</small>
+          <small class="item-meta">事件域：{{ question.eventDomain || '-' }} ｜ 事件类型：{{ question.eventType || '-' }} ｜ 区域：{{ question.area || '-' }}</small>
+          <small class="item-meta">输入类型：{{ question.inputType || '-' }} ｜ 匹配分：{{ question.matchScore ?? '-' }}</small>
+          <small v-if="question.deletedAt" class="item-meta">删除原因：{{ question.deleteReason || '未填写' }}</small>
           <div class="action-row action-right card-actions">
             <button class="action-btn" @click.stop="emit('open-edit', question)">编辑</button>
           </div>

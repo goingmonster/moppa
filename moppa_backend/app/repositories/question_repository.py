@@ -23,6 +23,8 @@ class QuestionRepository:
             match_score=payload.match_score,
             event_domain=payload.event_domain,
             event_type=payload.event_type,
+            area=payload.area,
+            input_type=payload.input_type,
             background=payload.background,
             answer_space=payload.answer_space,
             verification_conditions=payload.verification_conditions,
@@ -37,33 +39,74 @@ class QuestionRepository:
         self.db.commit()
         return str(entity.id)
 
-    def list_paginated(self, page: int, page_size: int) -> tuple[list[QuestionEntity], int]:
+    def list_paginated(
+        self,
+        page: int,
+        page_size: int,
+        *,
+        event_domain: str = "",
+        event_type: str = "",
+        status: str = "",
+        level: int | None = None,
+        deadline_from: datetime | None = None,
+        deadline_to: datetime | None = None,
+        deleted_mode: str = "active_only",
+    ) -> tuple[list[QuestionEntity], int]:
         offset = (page - 1) * page_size
+        base_query = select(QuestionEntity)
+        count_query = select(func.count()).select_from(QuestionEntity)
+        base_query, count_query = self._apply_manage_filters(
+            base_query=base_query,
+            count_query=count_query,
+            keyword="",
+            event_domain=event_domain,
+            event_type=event_type,
+            status=status,
+            level=level,
+            deadline_from=deadline_from,
+            deadline_to=deadline_to,
+            deleted_mode=deleted_mode,
+        )
         items = list(
             self.db.scalars(
-                select(QuestionEntity)
-                .where(QuestionEntity.deleted_at.is_(None))
+                base_query
                 .order_by(QuestionEntity.created_at.desc())
                 .offset(offset)
                 .limit(page_size)
             )
         )
-        total = self.db.scalar(
-            select(func.count()).select_from(QuestionEntity).where(QuestionEntity.deleted_at.is_(None))
-        )
+        total = self.db.scalar(count_query)
         return items, int(total or 0)
 
-    def search_paginated(self, keyword: str, page: int, page_size: int) -> tuple[list[QuestionEntity], int]:
+    def search_paginated(
+        self,
+        keyword: str,
+        page: int,
+        page_size: int,
+        *,
+        event_domain: str = "",
+        event_type: str = "",
+        status: str = "",
+        level: int | None = None,
+        deadline_from: datetime | None = None,
+        deadline_to: datetime | None = None,
+        deleted_mode: str = "active_only",
+    ) -> tuple[list[QuestionEntity], int]:
         offset = (page - 1) * page_size
-        base_query = select(QuestionEntity).where(QuestionEntity.deleted_at.is_(None))
-        count_query = select(func.count()).select_from(QuestionEntity).where(QuestionEntity.deleted_at.is_(None))
-
-        normalized = keyword.strip()
-        if normalized:
-            escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            pattern = f"%{escaped}%"
-            base_query = base_query.where(QuestionEntity.content.ilike(pattern, escape="\\"))
-            count_query = count_query.where(QuestionEntity.content.ilike(pattern, escape="\\"))
+        base_query = select(QuestionEntity)
+        count_query = select(func.count()).select_from(QuestionEntity)
+        base_query, count_query = self._apply_manage_filters(
+            base_query=base_query,
+            count_query=count_query,
+            keyword=keyword,
+            event_domain=event_domain,
+            event_type=event_type,
+            status=status,
+            level=level,
+            deadline_from=deadline_from,
+            deadline_to=deadline_to,
+            deleted_mode=deleted_mode,
+        )
 
         items = list(
             self.db.scalars(
@@ -82,6 +125,86 @@ class QuestionRepository:
             return None
         return entity
 
+    def _apply_manage_filters(
+        self,
+        *,
+        base_query,
+        count_query,
+        keyword: str,
+        event_domain: str,
+        event_type: str,
+        status: str,
+        level: int | None,
+        deadline_from: datetime | None,
+        deadline_to: datetime | None,
+        deleted_mode: str,
+    ):
+        normalized_deleted_mode = deleted_mode.strip().lower()
+        if normalized_deleted_mode == "active_only":
+            base_query = base_query.where(QuestionEntity.deleted_at.is_(None))
+            count_query = count_query.where(QuestionEntity.deleted_at.is_(None))
+        elif normalized_deleted_mode == "deleted_only":
+            base_query = base_query.where(QuestionEntity.deleted_at.is_not(None))
+            count_query = count_query.where(QuestionEntity.deleted_at.is_not(None))
+        elif normalized_deleted_mode == "with_deleted":
+            pass
+        else:
+            raise ValueError(f"invalid deleted mode: {deleted_mode}")
+
+        normalized_keyword = keyword.strip()
+        if normalized_keyword:
+            escaped = normalized_keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            filters = (
+                QuestionEntity.content.ilike(pattern, escape="\\"),
+                QuestionEntity.background.ilike(pattern, escape="\\"),
+                QuestionEntity.answer_space.ilike(pattern, escape="\\"),
+                QuestionEntity.event_domain.ilike(pattern, escape="\\"),
+                QuestionEntity.event_type.ilike(pattern, escape="\\"),
+                QuestionEntity.area.ilike(pattern, escape="\\"),
+                QuestionEntity.input_type.ilike(pattern, escape="\\"),
+                QuestionEntity.delete_reason.ilike(pattern, escape="\\"),
+            )
+            keyword_clause = filters[0]
+            for clause in filters[1:]:
+                keyword_clause = keyword_clause | clause
+            base_query = base_query.where(keyword_clause)
+            count_query = count_query.where(keyword_clause)
+
+        normalized_event_domain = event_domain.strip()
+        if normalized_event_domain:
+            escaped = normalized_event_domain.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            base_query = base_query.where(QuestionEntity.event_domain.ilike(pattern, escape="\\"))
+            count_query = count_query.where(QuestionEntity.event_domain.ilike(pattern, escape="\\"))
+
+        normalized_event_type = event_type.strip()
+        if normalized_event_type:
+            escaped = normalized_event_type.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
+            base_query = base_query.where(QuestionEntity.event_type.ilike(pattern, escape="\\"))
+            count_query = count_query.where(QuestionEntity.event_type.ilike(pattern, escape="\\"))
+
+        normalized_status = status.strip()
+        if normalized_status:
+            resolved_status = self._normalize_status(normalized_status)
+            base_query = base_query.where(QuestionEntity.status == resolved_status)
+            count_query = count_query.where(QuestionEntity.status == resolved_status)
+
+        if level is not None:
+            base_query = base_query.where(QuestionEntity.level == level)
+            count_query = count_query.where(QuestionEntity.level == level)
+
+        if deadline_from is not None:
+            base_query = base_query.where(QuestionEntity.deadline >= deadline_from)
+            count_query = count_query.where(QuestionEntity.deadline >= deadline_from)
+
+        if deadline_to is not None:
+            base_query = base_query.where(QuestionEntity.deadline <= deadline_to)
+            count_query = count_query.where(QuestionEntity.deadline <= deadline_to)
+
+        return base_query, count_query
+
     def update(self, question_id: str, payload: QuestionUpdateModel) -> QuestionEntity | None:
         entity = self.get_by_id(question_id)
         if entity is None:
@@ -97,6 +220,10 @@ class QuestionRepository:
             entity.event_domain = payload.event_domain
         if payload.event_type is not None:
             entity.event_type = payload.event_type
+        if payload.area is not None:
+            entity.area = payload.area
+        if payload.input_type is not None:
+            entity.input_type = payload.input_type
         if payload.background is not None:
             entity.background = payload.background
         if payload.answer_space is not None:
@@ -114,14 +241,16 @@ class QuestionRepository:
         self.db.refresh(entity)
         return entity
 
-    def batch_soft_delete(self, ids: list[str]) -> int:
+    def batch_soft_delete(self, ids: list[str], delete_reason: str) -> int:
         uuid_ids = [UUID(value) for value in ids]
         entities = list(self.db.scalars(select(QuestionEntity).where(QuestionEntity.id.in_(uuid_ids))))
         now = datetime.now(timezone.utc)
+        normalized_reason = delete_reason.strip()
         changed = 0
         for entity in entities:
             if entity.deleted_at is None:
                 entity.deleted_at = now
+                entity.delete_reason = normalized_reason
                 changed += 1
         self.db.commit()
         return changed

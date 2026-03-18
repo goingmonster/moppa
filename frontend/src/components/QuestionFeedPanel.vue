@@ -9,12 +9,16 @@ interface QuestionItem {
   matchScore: number | null
   eventDomain: string
   eventType: string
+  area: string
+  inputType: string
   background: string
   answerSpace: string
   hypothesis: string
   deadline: string
   status: 'collecting' | 'locked' | 'resolved'
   groundTruth: string
+  deleteReason: string
+  deletedAt: string
 }
 
 interface EventOption {
@@ -225,6 +229,7 @@ onBeforeUnmount(() => {
           </div>
           <p class="item-title">{{ question.title }}</p>
           <p class="item-meta"><strong>事件域：</strong>{{ question.eventDomain || '-' }} ｜ <strong>事件类型：</strong>{{ question.eventType || '-' }}</p>
+          <p class="item-meta"><strong>区域：</strong>{{ question.area || '-' }} ｜ <strong>输入类型：</strong>{{ question.inputType || '-' }}</p>
           <p class="item-meta"><strong>匹配分：</strong>{{ question.matchScore ?? '-' }}</p>
           <p class="item-meta"><strong>答案范围：</strong>{{ question.answerSpace || '未设置' }}</p>
           <p class="item-meta"><strong>关联事件：</strong>{{ eventLabel(question.eventIds) }}</p>

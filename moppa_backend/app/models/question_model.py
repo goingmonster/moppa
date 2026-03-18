@@ -13,6 +13,8 @@ class QuestionCreateModel(BaseModel):
     match_score: float | None = None
     event_domain: str | None = None
     event_type: str | None = None
+    area: str | None = None
+    input_type: str | None = None
     background: str | None = None
     answer_space: str | None = None
     verification_conditions: str | None = None
@@ -31,12 +33,16 @@ class QuestionListItemModel(BaseModel):
     match_score: float | None = None
     event_domain: str | None = None
     event_type: str | None = None
+    area: str | None = None
+    input_type: str | None = None
     background: str | None = None
     answer_space: str | None = None
     verification_conditions: str | None = None
     deadline: str
     status: str
     trace_id: str
+    delete_reason: str | None = None
+    deleted_at: str | None = None
 
 
 class QuestionPaginationResponse(BaseModel):
@@ -52,8 +58,15 @@ class QuestionUpdateModel(BaseModel):
     match_score: float | None = None
     event_domain: str | None = None
     event_type: str | None = None
+    area: str | None = None
+    input_type: str | None = None
     background: str | None = None
     answer_space: str | None = None
     deadline: datetime | None = None
     status: str | None = Field(default=None, min_length=1)
     event_ids: list[UUID] | None = None
+
+
+class QuestionBatchDeleteRequest(BaseModel):
+    ids: list[str] = Field(min_length=1)
+    delete_reason: str = Field(min_length=1)

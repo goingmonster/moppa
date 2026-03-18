@@ -42,12 +42,16 @@ interface QuestionItem {
   matchScore: number | null
   eventDomain: string
   eventType: string
+  area: string
+  inputType: string
   background: string
   answerSpace: string
   hypothesis: string
   deadline: string
   status: 'collecting' | 'locked' | 'resolved'
   groundTruth: string
+  deleteReason: string
+  deletedAt: string
 }
 
 interface RankRow {
@@ -100,12 +104,16 @@ interface BackendQuestionItem {
   match_score?: number | null
   event_domain?: string | null
   event_type?: string | null
+  area?: string | null
+  input_type?: string | null
   background?: string | null
   answer_space?: string | null
   hypothesis?: string | null
   deadline: string
   status: string
   trace_id: string
+  delete_reason?: string | null
+  deleted_at?: string | null
 }
 
 interface BackendPage<T> {
@@ -309,6 +317,14 @@ interface ThemeOption {
 }
 
 const levels: Level[] = ['L1', 'L2', 'L3', 'L4']
+const questionDeleteReasonOptions = [
+  '问题设计不合理',
+  '问题事件不关联',
+  '问题表述不清晰',
+  '判定标准不可验证',
+  '问题时效性不足',
+  '事件信息质量不足',
+]
 const themeOptions: ThemeOption[] = [
   { id: 'olive', label: '橄榄夜幕' },
   { id: 'blue', label: '蓝白简约' },
@@ -365,12 +381,16 @@ const questions = ref<QuestionItem[]>([
     matchScore: null,
     eventDomain: '',
     eventType: '',
+    area: '',
+    inputType: '',
     background: '',
     answerSpace: '会上升\n不会上升\n不确定',
     hypothesis: '若流量持续上升 20%，可判定存在前置部署行为。',
     deadline: '2026-03-12T00:00:00Z',
     status: 'collecting',
     groundTruth: '待遥测数据复核。',
+    deleteReason: '',
+    deletedAt: '',
   },
   {
     id: 'q-102',
@@ -380,12 +400,16 @@ const questions = ref<QuestionItem[]>([
     matchScore: null,
     eventDomain: '',
     eventType: '',
+    area: '',
+    inputType: '',
     background: '',
     answerSpace: '会\n不会',
     hypothesis: '若异常高于基线持续 18 小时，说明来源并非环境因素。',
     deadline: '2026-03-11T06:00:00Z',
     status: 'locked',
     groundTruth: '待信号归因报告。',
+    deleteReason: '',
+    deletedAt: '',
   },
   {
     id: 'q-103',
@@ -395,12 +419,16 @@ const questions = ref<QuestionItem[]>([
     matchScore: null,
     eventDomain: '',
     eventType: '',
+    area: '',
+    inputType: '',
     background: '',
     answerSpace: '',
     hypothesis: '天气与干扰叠加可能导致吞吐持续下降。',
     deadline: '2026-03-15T12:00:00Z',
     status: 'resolved',
     groundTruth: '观测平均吞吐 61.7%，已确认跌破阈值。',
+    deleteReason: '',
+    deletedAt: '',
   },
 ])
 
@@ -480,6 +508,8 @@ const draftQuestion = reactive({
   matchScore: '',
   eventDomain: '',
   eventType: '',
+  area: '',
+  inputType: '',
   background: '',
   answerSpace: '',
 })
@@ -522,6 +552,8 @@ const questionEditForm = reactive({
   matchScore: '',
   eventDomain: '',
   eventType: '',
+  area: '',
+  inputType: '',
   background: '',
   answerSpace: '',
   eventIds: [] as string[],
@@ -583,6 +615,13 @@ const questionManagePage = ref(1)
 const questionManagePageSize = ref(10)
 const questionManageJumpPage = ref('1')
 const questionManageSearchKeyword = ref('')
+const questionManageFilterEventDomain = ref('')
+const questionManageFilterEventType = ref('')
+const questionManageFilterDeadlineFrom = ref('')
+const questionManageFilterDeadlineTo = ref('')
+const questionManageFilterStatus = ref('')
+const questionManageFilterLevel = ref('')
+const questionManageDeletedMode = ref<'active_only' | 'with_deleted' | 'deleted_only'>('active_only')
 const questionManageSearchLoading = ref(false)
 const questionManageSearchSeq = ref(0)
 let questionManageSearchTimer: number | undefined
@@ -603,6 +642,11 @@ const questionFeedFilterLevel = ref('')
 const questionFeedInteractionCounts = ref<Record<string, QuestionInteractionCount>>({})
 const questionFeedParticipation = ref<Record<string, QuestionParticipationSummary>>({})
 const selectedManageQuestionIds = ref<string[]>([])
+const questionDeleteReasonDialogOpen = ref(false)
+const questionDeleteReasonPreset = ref('')
+const questionDeleteReasonCustom = ref('')
+const pendingDeleteQuestionIds = ref<string[]>([])
+const pendingDeleteCloseQuestionEdit = ref(false)
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const questionPredictions = ref<Record<string, CommunityPredictionItem[]>>({})
 const questionComments = ref<Record<string, QuestionCommentItem[]>>({})
@@ -761,14 +805,58 @@ const selectedPendingManageEventIds = computed(() =>
 
 const localFilteredManageQuestions = computed(() => {
   const keyword = questionManageSearchKeyword.value.trim().toLowerCase()
-  if (!keyword) {
-    return questions.value
-  }
+  const eventDomain = questionManageFilterEventDomain.value.trim().toLowerCase()
+  const eventType = questionManageFilterEventType.value.trim().toLowerCase()
+  const deadlineFromMs = parseLocalDateTimeToMs(questionManageFilterDeadlineFrom.value)
+  const deadlineToMs = parseLocalDateTimeToMs(questionManageFilterDeadlineTo.value)
+  const status = questionManageFilterStatus.value.trim()
+  const level = questionManageFilterLevel.value.trim()
+  const deletedMode = questionManageDeletedMode.value
   return questions.value.filter((item) => {
-    const haystack = `${item.title}\n${item.hypothesis}\n${item.groundTruth}`.toLowerCase()
+    if (deletedMode === 'active_only' && item.deletedAt) {
+      return false
+    }
+    if (deletedMode === 'deleted_only' && !item.deletedAt) {
+      return false
+    }
+    if (status && item.status !== status) {
+      return false
+    }
+    if (level && item.level !== level) {
+      return false
+    }
+    if (eventDomain && !item.eventDomain.toLowerCase().includes(eventDomain)) {
+      return false
+    }
+    if (eventType && !item.eventType.toLowerCase().includes(eventType)) {
+      return false
+    }
+    const deadlineMs = Date.parse(item.deadline)
+    if (deadlineFromMs !== null && Number.isFinite(deadlineMs) && deadlineMs < deadlineFromMs) {
+      return false
+    }
+    if (deadlineToMs !== null && Number.isFinite(deadlineMs) && deadlineMs > deadlineToMs) {
+      return false
+    }
+    if (!keyword) {
+      return true
+    }
+    const haystack = `${item.title}\n${item.hypothesis}\n${item.groundTruth}\n${item.background}\n${item.answerSpace}\n${item.eventDomain}\n${item.eventType}\n${item.area}\n${item.inputType}\n${item.deleteReason}`.toLowerCase()
     return haystack.includes(keyword)
   })
 })
+const questionManageFiltersApplied = computed(() =>
+  Boolean(
+    questionManageSearchKeyword.value.trim()
+    || questionManageFilterEventDomain.value.trim()
+    || questionManageFilterEventType.value.trim()
+    || questionManageFilterDeadlineFrom.value.trim()
+    || questionManageFilterDeadlineTo.value.trim()
+    || questionManageFilterStatus.value.trim()
+    || questionManageFilterLevel.value.trim()
+    || questionManageDeletedMode.value !== 'active_only',
+  ),
+)
 const questionManageTotalPages = computed(() => {
   const total = backendOnline.value ? questionManageTotal.value : localFilteredManageQuestions.value.length
   return Math.max(1, Math.ceil(total / questionManagePageSize.value))
@@ -782,7 +870,10 @@ const pagedManageQuestions = computed(() => {
 })
 const hasManageQuestions = computed(() => pagedManageQuestions.value.length > 0)
 const allQuestionsOnPageSelected = computed(() =>
-  pagedManageQuestions.value.length > 0 && pagedManageQuestions.value.every((item) => selectedManageQuestionIds.value.includes(item.id)),
+  pagedManageQuestions.value.filter((item) => !item.deletedAt).length > 0
+  && pagedManageQuestions.value
+    .filter((item) => !item.deletedAt)
+    .every((item) => selectedManageQuestionIds.value.includes(item.id)),
 )
 const hasTemplates = computed(() => templates.value.length > 0)
 const hasTasks = computed(() => tasks.value.length > 0)
@@ -865,7 +956,7 @@ const filteredQuestionFeedItems = computed(() => {
     const linkedEventTitles = item.eventIds
       .map((id) => questionFeedEventTitleMap.value.get(id) ?? id)
       .join('\n')
-    const haystack = `${item.title}\n${item.background}\n${item.answerSpace}\n${item.hypothesis}\n${item.groundTruth}\n${item.eventDomain}\n${item.eventType}\n${linkedEventTitles}`.toLowerCase()
+    const haystack = `${item.title}\n${item.background}\n${item.answerSpace}\n${item.hypothesis}\n${item.groundTruth}\n${item.eventDomain}\n${item.eventType}\n${item.area}\n${item.inputType}\n${linkedEventTitles}`.toLowerCase()
     return haystack.includes(keyword)
   })
 })
@@ -1126,6 +1217,8 @@ function openQuestionEdit(questionItem: QuestionItem): void {
   questionEditForm.matchScore = questionItem.matchScore !== null ? String(questionItem.matchScore) : ''
   questionEditForm.eventDomain = questionItem.eventDomain
   questionEditForm.eventType = questionItem.eventType
+  questionEditForm.area = questionItem.area
+  questionEditForm.inputType = questionItem.inputType
   questionEditForm.background = questionItem.background
   questionEditForm.answerSpace = questionItem.answerSpace
   questionEditForm.eventIds = [...questionItem.eventIds]
@@ -1157,6 +1250,8 @@ function closeCreateQuestionDialog(): void {
   resetQuestionEventSearchState()
   questionEventSearch.value = ''
   selectedEventIdsForQuestion.value = []
+  draftQuestion.area = ''
+  draftQuestion.inputType = ''
   createQuestionDialogOpen.value = false
 }
 
@@ -1175,6 +1270,7 @@ function closeAllDialogs(): void {
   eventEditDialogOpen.value = false
   questionDetailDialogOpen.value = false
   questionEditDialogOpen.value = false
+  closeQuestionDeleteReasonDialog()
   templateDetailDialogOpen.value = false
   templateEditDialogOpen.value = false
   createTemplateDialogOpen.value = false
@@ -1200,6 +1296,7 @@ function hasAnyDialogOpen(): boolean {
     eventEditDialogOpen.value ||
     questionDetailDialogOpen.value ||
     questionEditDialogOpen.value ||
+    questionDeleteReasonDialogOpen.value ||
     templateDetailDialogOpen.value ||
     templateEditDialogOpen.value ||
     createTemplateDialogOpen.value ||
@@ -1279,7 +1376,6 @@ function setEventManagePageSize(size: number): void {
   eventManagePageSize.value = size
   eventManagePage.value = 1
   eventManageJumpPage.value = '1'
-  selectedManageEventIds.value = []
   if (backendOnline.value) {
     void fetchManageEvents(1)
   }
@@ -1332,6 +1428,10 @@ function goManageEventPage(delta: number): void {
 }
 
 function toggleManageQuestionSelection(questionId: string): void {
+  const target = pagedManageQuestions.value.find((item) => item.id === questionId)
+  if (target?.deletedAt) {
+    return
+  }
   if (selectedManageQuestionIds.value.includes(questionId)) {
     selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter((id) => id !== questionId)
     return
@@ -1340,22 +1440,23 @@ function toggleManageQuestionSelection(questionId: string): void {
 }
 
 function toggleSelectAllQuestionsOnPage(): void {
+  const selectablePageIds = pagedManageQuestions.value
+    .filter((item) => !item.deletedAt)
+    .map((item) => item.id)
   if (allQuestionsOnPageSelected.value) {
     selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter(
-      (id) => !pagedManageQuestions.value.some((item) => item.id === id),
+      (id) => !selectablePageIds.includes(id),
     )
     return
   }
 
-  const pageIds = pagedManageQuestions.value.map((item) => item.id)
-  selectedManageQuestionIds.value = Array.from(new Set([...selectedManageQuestionIds.value, ...pageIds]))
+  selectedManageQuestionIds.value = Array.from(new Set([...selectedManageQuestionIds.value, ...selectablePageIds]))
 }
 
 function setQuestionManagePageSize(size: number): void {
   questionManagePageSize.value = size
   questionManagePage.value = 1
   questionManageJumpPage.value = '1'
-  selectedManageQuestionIds.value = []
   if (backendOnline.value) {
     void fetchManageQuestions(1)
   }
@@ -1375,7 +1476,6 @@ function goToQuestionManagePage(page: number): void {
   }
   questionManagePage.value = page
   questionManageJumpPage.value = String(page)
-  selectedManageQuestionIds.value = []
   if (backendOnline.value) {
     void fetchManageQuestions(page)
   }
@@ -1397,6 +1497,17 @@ function jumpToQuestionPageFromInput(): void {
   goToQuestionManagePage(Math.min(Math.max(1, Math.trunc(page)), questionManageTotalPages.value))
 }
 
+function resetQuestionManageFilters(): void {
+  questionManageSearchKeyword.value = ''
+  questionManageFilterEventDomain.value = ''
+  questionManageFilterEventType.value = ''
+  questionManageFilterDeadlineFrom.value = ''
+  questionManageFilterDeadlineTo.value = ''
+  questionManageFilterStatus.value = ''
+  questionManageFilterLevel.value = ''
+  questionManageDeletedMode.value = 'active_only'
+}
+
 function openTaskDetail(task: TaskItem): void {
   selectedTask.value = task
   taskDetailDialogOpen.value = true
@@ -1412,18 +1523,18 @@ function toggleManageTaskSelection(taskId: string): void {
 }
 
 function toggleSelectAllTasksOnPage(): void {
+  const pageIds = tasks.value.map((item) => item.id)
   if (allTasksOnPageSelected.value) {
-    selectedManageTaskIds.value = []
+    selectedManageTaskIds.value = selectedManageTaskIds.value.filter((id) => !pageIds.includes(id))
     return
   }
-  selectedManageTaskIds.value = tasks.value.map((item) => item.id)
+  selectedManageTaskIds.value = Array.from(new Set([...selectedManageTaskIds.value, ...pageIds]))
 }
 
 function setTaskManagePageSize(size: number): void {
   taskManagePageSize.value = size
   taskManagePage.value = 1
   taskManageJumpPage.value = '1'
-  selectedManageTaskIds.value = []
   if (backendOnline.value) {
     void fetchTasks(1)
   }
@@ -1443,7 +1554,6 @@ function goToTaskManagePage(page: number): void {
   }
   taskManagePage.value = page
   taskManageJumpPage.value = String(page)
-  selectedManageTaskIds.value = []
   if (backendOnline.value) {
     void fetchTasks(page)
   }
@@ -1463,7 +1573,6 @@ async function fetchTasks(page = 1): Promise<void> {
   taskManageTotal.value = pageData.total
   taskManagePage.value = pageData.page
   taskManageJumpPage.value = String(pageData.page)
-  selectedManageTaskIds.value = []
 }
 
 async function fetchTaskDetail(taskId: string): Promise<void> {
@@ -1568,9 +1677,11 @@ async function deleteSelectedTasksBatch(): Promise<void> {
     return
   }
   try {
-    await sendJson('/tasks', 'DELETE', { ids: selectedManageTaskIds.value })
+    const ids = [...selectedManageTaskIds.value]
+    await sendJson('/tasks', 'DELETE', { ids })
     await fetchTasks(taskManagePage.value)
-    backendStatus.value = `任务批量删除成功（${selectedManageTaskIds.value.length} 条）`
+    selectedManageTaskIds.value = selectedManageTaskIds.value.filter((id) => !ids.includes(id))
+    backendStatus.value = `任务批量删除成功（${ids.length} 条）`
   } catch {
     backendStatus.value = '任务批量删除失败：请检查后端接口或参数格式'
   }
@@ -1645,7 +1756,6 @@ async function fetchDataSources(page = 1): Promise<void> {
   dataSourceManageTotal.value = pageData.total
   dataSourceManagePage.value = pageData.page
   dataSourceManageJumpPage.value = String(pageData.page)
-  selectedManageDataSourceIds.value = []
 }
 
 function openDataSourceDetail(item: DataSourceItem): void {
@@ -1677,18 +1787,18 @@ function toggleManageDataSourceSelection(id: string): void {
 }
 
 function toggleSelectAllDataSourcesOnPage(): void {
+  const pageIds = dataSources.value.map((item) => item.id)
   if (allDataSourcesOnPageSelected.value) {
-    selectedManageDataSourceIds.value = []
+    selectedManageDataSourceIds.value = selectedManageDataSourceIds.value.filter((id) => !pageIds.includes(id))
     return
   }
-  selectedManageDataSourceIds.value = dataSources.value.map((item) => item.id)
+  selectedManageDataSourceIds.value = Array.from(new Set([...selectedManageDataSourceIds.value, ...pageIds]))
 }
 
 function setDataSourceManagePageSize(size: number): void {
   dataSourceManagePageSize.value = size
   dataSourceManagePage.value = 1
   dataSourceManageJumpPage.value = '1'
-  selectedManageDataSourceIds.value = []
   if (backendOnline.value) {
     void fetchDataSources(1)
   }
@@ -1708,7 +1818,6 @@ function goToDataSourceManagePage(page: number): void {
   }
   dataSourceManagePage.value = page
   dataSourceManageJumpPage.value = String(page)
-  selectedManageDataSourceIds.value = []
   if (backendOnline.value) {
     void fetchDataSources(page)
   }
@@ -1785,10 +1894,11 @@ async function deleteSelectedDataSourcesBatch(): Promise<void> {
     return
   }
   try {
-    const count = selectedManageDataSourceIds.value.length
-    await sendJson('/data-sources', 'DELETE', { ids: selectedManageDataSourceIds.value })
+    const ids = [...selectedManageDataSourceIds.value]
+    await sendJson('/data-sources', 'DELETE', { ids })
     await fetchDataSources(dataSourceManagePage.value)
-    backendStatus.value = `数据源批量删除成功（${count} 条）`
+    selectedManageDataSourceIds.value = selectedManageDataSourceIds.value.filter((id) => !ids.includes(id))
+    backendStatus.value = `数据源批量删除成功（${ids.length} 条）`
   } catch {
     backendStatus.value = '数据源批量删除失败：请检查后端接口'
   }
@@ -1802,7 +1912,6 @@ async function fetchFilterRules(page = 1): Promise<void> {
   filterRuleManageTotal.value = pageData.total
   filterRuleManagePage.value = pageData.page
   filterRuleManageJumpPage.value = String(pageData.page)
-  selectedManageFilterRuleIds.value = []
 }
 
 function openFilterRuleDetail(item: FilterRuleItem): void {
@@ -1834,18 +1943,18 @@ function toggleManageFilterRuleSelection(id: string): void {
 }
 
 function toggleSelectAllFilterRulesOnPage(): void {
+  const pageIds = filterRules.value.map((item) => item.id)
   if (allFilterRulesOnPageSelected.value) {
-    selectedManageFilterRuleIds.value = []
+    selectedManageFilterRuleIds.value = selectedManageFilterRuleIds.value.filter((id) => !pageIds.includes(id))
     return
   }
-  selectedManageFilterRuleIds.value = filterRules.value.map((item) => item.id)
+  selectedManageFilterRuleIds.value = Array.from(new Set([...selectedManageFilterRuleIds.value, ...pageIds]))
 }
 
 function setFilterRuleManagePageSize(size: number): void {
   filterRuleManagePageSize.value = size
   filterRuleManagePage.value = 1
   filterRuleManageJumpPage.value = '1'
-  selectedManageFilterRuleIds.value = []
   if (backendOnline.value) {
     void fetchFilterRules(1)
   }
@@ -1865,7 +1974,6 @@ function goToFilterRuleManagePage(page: number): void {
   }
   filterRuleManagePage.value = page
   filterRuleManageJumpPage.value = String(page)
-  selectedManageFilterRuleIds.value = []
   if (backendOnline.value) {
     void fetchFilterRules(page)
   }
@@ -1945,6 +2053,7 @@ async function deleteSelectedFilterRulesBatch(): Promise<void> {
     const ids = [...selectedManageFilterRuleIds.value]
     await Promise.all(ids.map((id) => sendJson(`/event-filter-rules/${id}`, 'DELETE', {})))
     await fetchFilterRules(filterRuleManagePage.value)
+    selectedManageFilterRuleIds.value = selectedManageFilterRuleIds.value.filter((id) => !ids.includes(id))
     backendStatus.value = `过滤规则批量删除成功（${ids.length} 条）`
   } catch {
     backendStatus.value = '过滤规则批量删除失败：请检查后端接口'
@@ -1963,7 +2072,6 @@ async function fetchTemplates(page = 1): Promise<void> {
   templateManageTotal.value = pageData.total
   templateManagePage.value = pageData.page
   templateManageJumpPage.value = String(pageData.page)
-  selectedManageTemplateIds.value = []
 }
 
 function openTemplateDetail(item: QuestionTemplateItem): void {
@@ -1996,18 +2104,18 @@ function toggleManageTemplateSelection(id: string): void {
 }
 
 function toggleSelectAllTemplatesOnPage(): void {
+  const pageIds = templates.value.map((item) => item.id)
   if (allTemplatesOnPageSelected.value) {
-    selectedManageTemplateIds.value = []
+    selectedManageTemplateIds.value = selectedManageTemplateIds.value.filter((id) => !pageIds.includes(id))
     return
   }
-  selectedManageTemplateIds.value = templates.value.map((item) => item.id)
+  selectedManageTemplateIds.value = Array.from(new Set([...selectedManageTemplateIds.value, ...pageIds]))
 }
 
 function setTemplateManagePageSize(size: number): void {
   templateManagePageSize.value = size
   templateManagePage.value = 1
   templateManageJumpPage.value = '1'
-  selectedManageTemplateIds.value = []
   if (backendOnline.value) {
     void fetchTemplates(1)
   }
@@ -2027,7 +2135,6 @@ function goToTemplateManagePage(page: number): void {
   }
   templateManagePage.value = page
   templateManageJumpPage.value = String(page)
-  selectedManageTemplateIds.value = []
   if (backendOnline.value) {
     void fetchTemplates(page)
   }
@@ -2128,10 +2235,11 @@ async function deleteSelectedTemplatesBatch(): Promise<void> {
     return
   }
   try {
-    const count = selectedManageTemplateIds.value.length
-    await sendJson('/question-templates', 'DELETE', { ids: selectedManageTemplateIds.value })
+    const ids = [...selectedManageTemplateIds.value]
+    await sendJson('/question-templates', 'DELETE', { ids })
     await fetchTemplates(templateManagePage.value)
-    backendStatus.value = `问题模板批量删除成功（${count} 条）`
+    selectedManageTemplateIds.value = selectedManageTemplateIds.value.filter((id) => !ids.includes(id))
+    backendStatus.value = `问题模板批量删除成功（${ids.length} 条）`
   } catch {
     backendStatus.value = '问题模板批量删除失败：请检查后端接口'
   }
@@ -2206,32 +2314,91 @@ async function reviewSelectedEvents(targetStatus: 'passed' | 'filtered'): Promis
   }
 }
 
+function openQuestionDeleteReasonDialog(ids: string[], closeQuestionEditAfterDelete: boolean): void {
+  pendingDeleteQuestionIds.value = [...ids]
+  pendingDeleteCloseQuestionEdit.value = closeQuestionEditAfterDelete
+  questionDeleteReasonPreset.value = questionDeleteReasonOptions[0] ?? ''
+  questionDeleteReasonCustom.value = ''
+  questionDeleteReasonDialogOpen.value = true
+}
+
+function closeQuestionDeleteReasonDialog(): void {
+  questionDeleteReasonDialogOpen.value = false
+  questionDeleteReasonPreset.value = ''
+  questionDeleteReasonCustom.value = ''
+  pendingDeleteQuestionIds.value = []
+  pendingDeleteCloseQuestionEdit.value = false
+}
+
+function resolvedQuestionDeleteReason(): string {
+  if (questionDeleteReasonPreset.value === '__custom__') {
+    return questionDeleteReasonCustom.value.trim()
+  }
+  return questionDeleteReasonPreset.value.trim()
+}
+
+async function deleteQuestionsByIds(ids: string[], deleteReason: string): Promise<void> {
+  if (!backendOnline.value) {
+    const deletedAt = new Date().toISOString()
+    for (const item of questions.value) {
+      if (!ids.includes(item.id) || item.deletedAt) {
+        continue
+      }
+      item.deletedAt = deletedAt
+      item.deleteReason = deleteReason
+    }
+    backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟问题`
+  } else {
+    await sendJson('/questions', 'DELETE', { ids, delete_reason: deleteReason })
+    await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
+    backendStatus.value = `问题删除成功（${ids.length} 条）`
+  }
+  if (ids.includes(selectedQuestionId.value)) {
+    selectedQuestionId.value = questions.value[0]?.id ?? ''
+  }
+  selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter((id) => !ids.includes(id))
+  if (questionManagePage.value > questionManageTotalPages.value) {
+    questionManagePage.value = questionManageTotalPages.value
+  }
+}
+
+async function confirmQuestionDeleteWithReason(): Promise<void> {
+  const ids = [...pendingDeleteQuestionIds.value]
+  if (ids.length === 0) {
+    closeQuestionDeleteReasonDialog()
+    return
+  }
+  const deleteReason = resolvedQuestionDeleteReason()
+  if (!deleteReason) {
+    backendStatus.value = '删除失败：请填写删除原因'
+    return
+  }
+  const shouldCloseQuestionEdit = pendingDeleteCloseQuestionEdit.value
+  try {
+    await deleteQuestionsByIds(ids, deleteReason)
+    closeQuestionDeleteReasonDialog()
+    if (shouldCloseQuestionEdit) {
+      questionEditDialogOpen.value = false
+    }
+  } catch {
+    backendStatus.value = '问题删除失败：请检查后端接口或参数格式'
+  }
+}
+
 async function deleteSelectedQuestionsBatch(): Promise<void> {
   if (selectedManageQuestionIds.value.length === 0) {
     backendStatus.value = '请先勾选要删除的问题'
     return
   }
-
-  try {
-    const ids = [...selectedManageQuestionIds.value]
-    if (!backendOnline.value) {
-      questions.value = questions.value.filter((item) => !ids.includes(item.id))
-      backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟问题`
-    } else {
-      await sendJson('/questions', 'DELETE', { ids })
-      await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
-      backendStatus.value = `问题批量删除成功（${ids.length} 条）`
-    }
-    if (ids.includes(selectedQuestionId.value)) {
-      selectedQuestionId.value = questions.value[0]?.id ?? ''
-    }
-    selectedManageQuestionIds.value = []
-    if (questionManagePage.value > questionManageTotalPages.value) {
-      questionManagePage.value = questionManageTotalPages.value
-    }
-  } catch {
-    backendStatus.value = '问题批量删除失败：请检查后端接口或参数格式'
+  const deletableIds = selectedManageQuestionIds.value.filter((id) => {
+    const matched = questions.value.find((item) => item.id === id)
+    return Boolean(matched) && !matched?.deletedAt
+  })
+  if (deletableIds.length === 0) {
+    backendStatus.value = '所选问题均已删除，无法重复删除'
+    return
   }
+  openQuestionDeleteReasonDialog(deletableIds, false)
 }
 
 async function submitQuestionEdit(): Promise<void> {
@@ -2251,6 +2418,8 @@ async function submitQuestionEdit(): Promise<void> {
     const answerSpace = questionEditForm.answerSpace.trim()
     const eventDomain = questionEditForm.eventDomain.trim()
     const eventType = questionEditForm.eventType.trim()
+    const area = questionEditForm.area.trim()
+    const inputType = questionEditForm.inputType.trim()
     const background = questionEditForm.background.trim()
     const matchScoreText = questionEditForm.matchScore.trim()
     const matchScore = matchScoreText ? Number(matchScoreText) : null
@@ -2281,6 +2450,8 @@ async function submitQuestionEdit(): Promise<void> {
         target.matchScore = matchScore
         target.eventDomain = eventDomain
         target.eventType = eventType
+        target.area = area
+        target.inputType = inputType
         target.background = background
         target.answerSpace = answerSpace
         target.eventIds = eventIds
@@ -2298,6 +2469,8 @@ async function submitQuestionEdit(): Promise<void> {
       match_score: matchScore,
       event_domain: eventDomain || null,
       event_type: eventType || null,
+      area: area || null,
+      input_type: inputType || null,
       background: background || null,
       answer_space: answerSpace || null,
       event_ids: eventIds,
@@ -2319,8 +2492,17 @@ async function deleteQuestionInEditDialog(): Promise<void> {
     questionEditDialogOpen.value = false
     return
   }
-  await deleteSelectedQuestion()
-  questionEditDialogOpen.value = false
+  const currentId = questionEditForm.id || selectedQuestionId.value
+  if (!currentId) {
+    backendStatus.value = '删除失败：未找到问题 ID'
+    return
+  }
+  const target = questions.value.find((item) => item.id === currentId)
+  if (target?.deletedAt) {
+    backendStatus.value = '已删除问题不允许再次删除'
+    return
+  }
+  openQuestionDeleteReasonDialog([currentId], true)
 }
 
 async function submitEventEdit(): Promise<void> {
@@ -2492,6 +2674,7 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
     : item.event_id
       ? [item.event_id]
       : []
+  const normalizedStatus = item.status.trim().toLowerCase()
   return {
     id: item.id,
     eventIds,
@@ -2500,12 +2683,22 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
     matchScore: typeof item.match_score === 'number' ? item.match_score : null,
     eventDomain: item.event_domain ?? '',
     eventType: item.event_type ?? '',
+    area: item.area ?? '',
+    inputType: item.input_type ?? '',
     background: item.background ?? '',
     answerSpace: item.answer_space ?? '',
     hypothesis: item.hypothesis?.trim() ?? '',
     deadline: item.deadline,
-    status: item.status === 'resolved' ? 'resolved' : item.status === 'locked' ? 'locked' : 'collecting',
-    groundTruth: item.status === 'resolved' ? '后端状态显示已解析，请补充真实结果详情。' : '待真实结果回填。',
+    status: normalizedStatus === 'resolved' || normalizedStatus === 'closed'
+      ? 'resolved'
+      : normalizedStatus === 'locked' || normalizedStatus === 'pending_review'
+        ? 'locked'
+        : 'collecting',
+    groundTruth: normalizedStatus === 'resolved' || normalizedStatus === 'closed'
+      ? '后端状态显示已解析，请补充真实结果详情。'
+      : '待真实结果回填。',
+    deleteReason: item.delete_reason ?? '',
+    deletedAt: item.deleted_at ?? '',
   }
 }
 
@@ -3397,10 +3590,36 @@ async function fetchManageQuestions(page: number): Promise<void> {
   questionManageSearchLoading.value = true
 
   try {
-    const keyword = encodeURIComponent(questionManageSearchKeyword.value.trim())
-    const questionPage = await fetchJson<BackendPage<BackendQuestionItem>>(
-      `/questions/search?keyword=${keyword}&page=${page}&page_size=${questionManagePageSize.value}`,
-    )
+    const query = new URLSearchParams()
+    query.set('keyword', questionManageSearchKeyword.value.trim())
+    const eventDomain = questionManageFilterEventDomain.value.trim()
+    const eventType = questionManageFilterEventType.value.trim()
+    const status = questionManageFilterStatus.value.trim()
+    const level = questionManageFilterLevel.value.trim()
+    const deadlineFrom = toIsoFromLocalDateTime(questionManageFilterDeadlineFrom.value)
+    const deadlineTo = toIsoFromLocalDateTime(questionManageFilterDeadlineTo.value)
+    if (eventDomain) {
+      query.set('event_domain', eventDomain)
+    }
+    if (eventType) {
+      query.set('event_type', eventType)
+    }
+    if (status) {
+      query.set('status', status)
+    }
+    if (level) {
+      query.set('level', level)
+    }
+    if (deadlineFrom) {
+      query.set('deadline_from', deadlineFrom)
+    }
+    if (deadlineTo) {
+      query.set('deadline_to', deadlineTo)
+    }
+    query.set('deleted_mode', questionManageDeletedMode.value)
+    query.set('page', String(page))
+    query.set('page_size', String(questionManagePageSize.value))
+    const questionPage = await fetchJson<BackendPage<BackendQuestionItem>>(`/questions/search?${query.toString()}`)
     if (requestSeq !== questionManageSearchSeq.value) {
       return
     }
@@ -3409,7 +3628,6 @@ async function fetchManageQuestions(page: number): Promise<void> {
     questionManageTotal.value = questionPage.total
     questionManagePage.value = page
     questionManageJumpPage.value = String(page)
-    selectedManageQuestionIds.value = []
   } finally {
     if (requestSeq === questionManageSearchSeq.value) {
       questionManageSearchLoading.value = false
@@ -3636,6 +3854,8 @@ async function createQuestion(): Promise<void> {
     const answerSpace = draftQuestion.answerSpace.trim()
     const eventDomain = draftQuestion.eventDomain.trim()
     const eventType = draftQuestion.eventType.trim()
+    const area = draftQuestion.area.trim()
+    const inputType = draftQuestion.inputType.trim()
     const background = draftQuestion.background.trim()
     const matchScoreText = draftQuestion.matchScore.trim()
     const matchScore = matchScoreText ? Number(matchScoreText) : null
@@ -3669,12 +3889,16 @@ async function createQuestion(): Promise<void> {
         matchScore,
         eventDomain,
         eventType,
+        area,
+        inputType,
         background,
         answerSpace,
         hypothesis: '由人工创建，待补充假设。',
         deadline: normalizedDeadline,
         status: draftQuestion.status,
         groundTruth: '待真实结果回填。',
+        deleteReason: '',
+        deletedAt: '',
       })
       selectedQuestionId.value = localId
       backendStatus.value = '后端离线：已在模拟数据中新增问题'
@@ -3682,6 +3906,8 @@ async function createQuestion(): Promise<void> {
       draftQuestion.matchScore = ''
       draftQuestion.eventDomain = ''
       draftQuestion.eventType = ''
+      draftQuestion.area = ''
+      draftQuestion.inputType = ''
       draftQuestion.background = ''
       draftQuestion.answerSpace = ''
       return
@@ -3694,6 +3920,8 @@ async function createQuestion(): Promise<void> {
       match_score: matchScore,
       event_domain: eventDomain || null,
       event_type: eventType || null,
+      area: area || null,
+      input_type: inputType || null,
       background: background || null,
       answer_space: answerSpace || null,
       deadline: normalizedDeadline,
@@ -3705,32 +3933,12 @@ async function createQuestion(): Promise<void> {
     draftQuestion.matchScore = ''
     draftQuestion.eventDomain = ''
     draftQuestion.eventType = ''
+    draftQuestion.area = ''
+    draftQuestion.inputType = ''
     draftQuestion.background = ''
     draftQuestion.answerSpace = ''
   } catch {
     backendStatus.value = '问题新增失败：请检查后端接口或参数格式'
-  }
-}
-
-async function deleteSelectedQuestion(): Promise<void> {
-  try {
-    const currentId = selectedQuestionId.value
-    if (!currentId) {
-      return
-    }
-
-    if (!backendOnline.value) {
-      questions.value = questions.value.filter((item) => item.id !== currentId)
-      selectedQuestionId.value = questions.value.find((item) => item.eventIds.includes(selectedEventId.value))?.id ?? ''
-      backendStatus.value = '后端离线：已在模拟数据中删除问题'
-      return
-    }
-
-    await sendJson('/questions', 'DELETE', { ids: [currentId] })
-    await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
-    backendStatus.value = '问题删除成功（后端）'
-  } catch {
-    backendStatus.value = '问题删除失败：请检查后端接口或参数格式'
   }
 }
 
@@ -4001,6 +4209,27 @@ watch(questionManageSearchKeyword, () => {
   }, 250)
 })
 
+watch(
+  [
+    questionManageFilterEventDomain,
+    questionManageFilterEventType,
+    questionManageFilterDeadlineFrom,
+    questionManageFilterDeadlineTo,
+    questionManageFilterStatus,
+    questionManageFilterLevel,
+    questionManageDeletedMode,
+  ],
+  () => {
+    questionManagePage.value = 1
+    questionManageJumpPage.value = '1'
+    selectedManageQuestionIds.value = []
+    if (!backendOnline.value || currentView.value !== 'questions') {
+      return
+    }
+    void fetchManageQuestions(1)
+  },
+)
+
 watch(templateManageSearchKeyword, () => {
   templateManagePage.value = 1
   templateManageJumpPage.value = '1'
@@ -4235,6 +4464,14 @@ watch(backendStatus, (status, prev) => {
       :question-manage-total-pages="questionManageTotalPages"
       :all-questions-on-page-selected="allQuestionsOnPageSelected"
       :question-manage-search-keyword="questionManageSearchKeyword"
+      :question-manage-filter-event-domain="questionManageFilterEventDomain"
+      :question-manage-filter-event-type="questionManageFilterEventType"
+      :question-manage-filter-deadline-from="questionManageFilterDeadlineFrom"
+      :question-manage-filter-deadline-to="questionManageFilterDeadlineTo"
+      :question-manage-filter-status="questionManageFilterStatus"
+      :question-manage-filter-level="questionManageFilterLevel"
+      :question-manage-deleted-mode="questionManageDeletedMode"
+      :question-manage-filters-applied="questionManageFiltersApplied"
       :question-manage-search-loading="questionManageSearchLoading"
       :backend-online="backendOnline"
       :question-manage-total="questionManageTotal"
@@ -4252,6 +4489,14 @@ watch(backendStatus, (status, prev) => {
       @toggle-select-all="toggleSelectAllQuestionsOnPage"
       @delete-selected-batch="deleteSelectedQuestionsBatch"
       @update:search-keyword="questionManageSearchKeyword = $event"
+      @update:filter-event-domain="questionManageFilterEventDomain = $event"
+      @update:filter-event-type="questionManageFilterEventType = $event"
+      @update:filter-deadline-from="questionManageFilterDeadlineFrom = $event"
+      @update:filter-deadline-to="questionManageFilterDeadlineTo = $event"
+      @update:filter-status="questionManageFilterStatus = $event"
+      @update:filter-level="questionManageFilterLevel = $event"
+      @update:deleted-mode="questionManageDeletedMode = $event"
+      @clear-filters="resetQuestionManageFilters"
       @select-question="selectedQuestionId = $event"
       @open-manage-detail="openManageQuestionDetail"
       @toggle-selection="toggleManageQuestionSelection"
@@ -4850,7 +5095,13 @@ watch(backendStatus, (status, prev) => {
         <div class="panel-head">
           <h2>问题详情（只读）</h2>
           <div class="action-row">
-            <button v-if="isAdmin" class="action-btn" @click="openQuestionEdit(manageDetailQuestion!)">编辑</button>
+            <button
+              v-if="isAdmin"
+              class="action-btn"
+              @click="openQuestionEdit(manageDetailQuestion!)"
+            >
+              编辑
+            </button>
             <button class="action-btn" @click="questionDetailDialogOpen = false">关闭</button>
           </div>
         </div>
@@ -4861,6 +5112,9 @@ watch(backendStatus, (status, prev) => {
           <article class="detail-item"><small class="detail-item-label">截止时间</small><p class="detail-item-value">{{ formatDate(manageDetailQuestion.deadline) }}</p></article>
           <article class="detail-item"><small class="detail-item-label">事件域</small><p class="detail-item-value">{{ manageDetailQuestion.eventDomain || '-' }}</p></article>
           <article class="detail-item"><small class="detail-item-label">事件类型</small><p class="detail-item-value">{{ manageDetailQuestion.eventType || '-' }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">区域</small><p class="detail-item-value">{{ manageDetailQuestion.area || '-' }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">输入类型</small><p class="detail-item-value">{{ manageDetailQuestion.inputType || '-' }}</p></article>
+          <article class="detail-item"><small class="detail-item-label">删除时间</small><p class="detail-item-value">{{ manageDetailQuestion.deletedAt ? formatDate(manageDetailQuestion.deletedAt) : '-' }}</p></article>
           <article class="detail-item"><small class="detail-item-label">匹配分数</small><p class="detail-item-value">{{ manageDetailQuestion.matchScore ?? '-' }}</p></article>
           <article class="detail-item"><small class="detail-item-label">答案范围</small><p class="detail-item-value">{{ manageDetailQuestion.answerSpace || '未填写' }}</p></article>
         </div>
@@ -4879,6 +5133,10 @@ watch(backendStatus, (status, prev) => {
         <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.groundTruth">
           <h3>真实结果</h3>
           <p>{{ manageDetailQuestion.groundTruth }}</p>
+        </section>
+        <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.deleteReason">
+          <h3>删除原因</h3>
+          <p>{{ manageDetailQuestion.deleteReason }}</p>
         </section>
         <section class="detail-block detail-related-block">
           <h3>关联事件</h3>
@@ -5110,6 +5368,14 @@ watch(backendStatus, (status, prev) => {
           <input v-model="questionEditForm.eventType" placeholder="例如 外交对话" />
         </div>
         <div class="field-block">
+          <label>区域（可选）</label>
+          <input v-model="questionEditForm.area" placeholder="例如 伊朗 - 以色列" />
+        </div>
+        <div class="field-block">
+          <label>输入类型（可选）</label>
+          <input v-model="questionEditForm.inputType" placeholder="例如 news" />
+        </div>
+        <div class="field-block">
           <label>背景（可选）</label>
           <textarea v-model="questionEditForm.background" rows="3" placeholder="问题背景描述"></textarea>
         </div>
@@ -5131,7 +5397,47 @@ watch(backendStatus, (status, prev) => {
         </div>
         <div class="action-row">
           <button class="action-btn" @click="submitQuestionEdit">保存修改</button>
-          <button class="action-btn danger" @click="deleteQuestionInEditDialog">删除该问题</button>
+          <button
+            class="action-btn danger"
+            :disabled="Boolean(questions.find((item) => item.id === questionEditForm.id)?.deletedAt)"
+            @click="deleteQuestionInEditDialog"
+          >
+            删除该问题
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="questionDeleteReasonDialogOpen"
+      class="dialog-backdrop dialog-backdrop-stacked"
+      @click.self="closeQuestionDeleteReasonDialog"
+    >
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>填写删除原因</h2>
+          <button class="action-btn" @click="closeQuestionDeleteReasonDialog">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>删除原因</label>
+          <select v-model="questionDeleteReasonPreset">
+            <option value="" disabled>请选择删除原因</option>
+            <option v-for="reason in questionDeleteReasonOptions" :key="`question-delete-reason-${reason}`" :value="reason">
+              {{ reason }}
+            </option>
+            <option value="__custom__">其他（手动填写）</option>
+          </select>
+        </div>
+        <div v-if="questionDeleteReasonPreset === '__custom__'" class="field-block">
+          <label>自定义原因</label>
+          <textarea v-model="questionDeleteReasonCustom" rows="3" placeholder="请填写删除原因"></textarea>
+        </div>
+        <small>将删除 {{ pendingDeleteQuestionIds.length }} 条问题记录</small>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="closeQuestionDeleteReasonDialog">取消</button>
+          <button class="action-btn danger" :disabled="!resolvedQuestionDeleteReason()" @click="void confirmQuestionDeleteWithReason()">
+            确认删除
+          </button>
         </div>
       </section>
     </div>
@@ -5409,6 +5715,14 @@ watch(backendStatus, (status, prev) => {
         <div class="field-block">
           <label>事件类型（可选）</label>
           <input v-model="draftQuestion.eventType" placeholder="例如 外交对话" />
+        </div>
+        <div class="field-block">
+          <label>区域（可选）</label>
+          <input v-model="draftQuestion.area" placeholder="例如 伊朗 - 以色列" />
+        </div>
+        <div class="field-block">
+          <label>输入类型（可选）</label>
+          <input v-model="draftQuestion.inputType" placeholder="例如 news" />
         </div>
         <div class="field-block">
           <label>背景（可选）</label>

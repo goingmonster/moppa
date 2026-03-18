@@ -378,6 +378,8 @@ class AutoQuestionService:
             match_score = self._parse_match_score(item.get("match_score"))
             event_domain = item.get("event_domain") if isinstance(item.get("event_domain"), str) else None
             event_type = item.get("event_type") if isinstance(item.get("event_type"), str) else None
+            area = item.get("area") if isinstance(item.get("area"), str) else None
+            input_type = item.get("input_type") if isinstance(item.get("input_type"), str) else None
             background = item.get("background") if isinstance(item.get("background"), str) else None
 
             resolution_criteria_value = item.get("resolution_criteria")
@@ -403,6 +405,8 @@ class AutoQuestionService:
                 match_score=match_score,
                 event_domain=event_domain.strip() if event_domain else None,
                 event_type=event_type.strip() if event_type else None,
+                area=area.strip() if area else None,
+                input_type=input_type.strip() if input_type else None,
                 background=background.strip() if background else None,
                 answer_space=answer_space,
                 verification_conditions=verification_conditions,
