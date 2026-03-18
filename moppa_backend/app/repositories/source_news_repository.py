@@ -21,21 +21,21 @@ class SourceNewsRow(TypedDict):
 
 
 class SourceNewsRepository:
-    def fetch_rows_by_published_range(
+    def fetch_rows_by_create_time_range(
         self,
-        published_from: datetime | None,
-        published_to: datetime | None,
+        create_time_from: datetime | None,
+        create_time_to: datetime | None,
         limit: int,
     ) -> list[SourceNewsRow]:
         schema = self._safe_identifier(settings.source_db_schema)
-        where_clauses = ["published IS NOT NULL"]
+        where_clauses = ["create_time IS NOT NULL"]
         params: dict[str, object] = {"limit": limit}
-        if published_from is not None:
-            where_clauses.append("published >= :published_from")
-            params["published_from"] = published_from
-        if published_to is not None:
-            where_clauses.append("published < :published_to")
-            params["published_to"] = published_to
+        if create_time_from is not None:
+            where_clauses.append("create_time >= :create_time_from")
+            params["create_time_from"] = create_time_from
+        if create_time_to is not None:
+            where_clauses.append("create_time < :create_time_to")
+            params["create_time_to"] = create_time_to
         where_sql = " AND ".join(where_clauses)
 
         query = text(
@@ -43,7 +43,7 @@ class SourceNewsRepository:
             SELECT source_information, create_time, source_site, published, url, title_translate, text_translate, "type", entities
             FROM {schema}.data_test
             WHERE {where_sql}
-            ORDER BY published DESC, create_time DESC, COALESCE(url, '') DESC
+            ORDER BY create_time DESC, COALESCE(url, '') DESC
             LIMIT :limit
             """
         )

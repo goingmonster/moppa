@@ -88,12 +88,12 @@ class S1IngestService:
             source_system = payload.source_system or settings.source_system_name
             self.data_source_repository.ensure_source_system(source_system)
 
-            published_from, published_to = self._resolve_pull_published_range(datetime.now(timezone.utc))
+            create_time_from, create_time_to = self._resolve_pull_published_range(datetime.now(timezone.utc))
             rows = cast(
                 list[SourceNewsRow],
-                self.source_news_repository.fetch_rows_by_published_range(
-                    published_from=published_from,
-                    published_to=published_to,
+                self.source_news_repository.fetch_rows_by_create_time_range(
+                    create_time_from=create_time_from,
+                    create_time_to=create_time_to,
                     limit=self._resolve_source_fetch_limit(latest_mode=False),
                 ),
             )
@@ -111,10 +111,11 @@ class S1IngestService:
             )
             result["fetched"] = len(rows)
             result["skipped_malformed"] = malformed
-            result["pull_mode"] = "published_scope"
+            result["pull_mode"] = "create_time_scope"
             result["pull_scope"] = settings.s1_pull_event_scope
-            result["published_from"] = published_from.isoformat() if published_from is not None else None
-            result["published_to"] = published_to.isoformat() if published_to is not None else None
+            result["time_field"] = "create_time"
+            result["create_time_from"] = create_time_from.isoformat() if create_time_from is not None else None
+            result["create_time_to"] = create_time_to.isoformat() if create_time_to is not None else None
 
             completed = self.task_repository.mark_completed(task.id, result=result, metrics=metrics)
             return self._to_task_response(completed or task)
