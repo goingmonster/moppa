@@ -332,6 +332,7 @@ CREATE TABLE IF NOT EXISTS question (
     event_type VARCHAR(100),
     area VARCHAR(200),
     input_type VARCHAR(50),
+    coordinates POINT,
     background TEXT,
     answer_space TEXT,
     verification_conditions TEXT,
