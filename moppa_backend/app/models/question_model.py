@@ -23,6 +23,11 @@ class QuestionCreateModel(BaseModel):
     trace_id: UUID
 
 
+class QuestionCoordinatesModel(BaseModel):
+    latitude: float
+    longitude: float
+
+
 class QuestionListItemModel(BaseModel):
     id: str
     event_id: str | None = None
@@ -44,6 +49,7 @@ class QuestionListItemModel(BaseModel):
     delete_reason: str | None = None
     deleted_at: str | None = None
     created_at: str
+    coordinates: QuestionCoordinatesModel | None = None
 
 
 class QuestionPaginationResponse(BaseModel):

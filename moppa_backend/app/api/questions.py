@@ -12,6 +12,7 @@ from app.models.question_model import (
     QuestionBatchDeleteRequest,
     QuestionCommunityStatsItemModel,
     QuestionCommunityStatsResponse,
+    QuestionCoordinatesModel,
     QuestionCreateModel,
     QuestionListItemModel,
     QuestionPaginationResponse,
@@ -24,7 +25,11 @@ from app.services.question_service import QuestionService
 router = APIRouter(prefix="/questions", tags=["questions"])
 
 
-def to_question_list_item(entity: QuestionEntity, event_ids: list[str] | None = None) -> QuestionListItemModel:
+def to_question_list_item(
+    entity: QuestionEntity,
+    event_ids: list[str] | None = None,
+    coordinates: QuestionCoordinatesModel | None = None,
+) -> QuestionListItemModel:
     resolved_event_ids = event_ids if event_ids is not None else ([str(entity.event_id)] if entity.event_id else [])
     return QuestionListItemModel(
         id=str(entity.id),
@@ -47,6 +52,7 @@ def to_question_list_item(entity: QuestionEntity, event_ids: list[str] | None = 
         delete_reason=entity.delete_reason,
         deleted_at=entity.deleted_at.isoformat() if entity.deleted_at is not None else None,
         created_at=entity.created_at.isoformat(),
+        coordinates=coordinates,
     )
 
 
@@ -106,11 +112,14 @@ def list_questions(
         if message.startswith("invalid deleted mode"):
             raise ApiError(status_code=422, code="INVALID_DELETED_MODE", message=message) from exc
         raise
-    event_map = service.get_event_ids_map([str(row.id) for row in rows])
+    question_ids = [str(row.id) for row in rows]
+    event_map = service.get_event_ids_map(question_ids)
+    coordinates_map = service.get_coordinates_map(question_ids)
     items = [
         to_question_list_item(
             row,
             event_map.get(str(row.id), [str(row.event_id)] if row.event_id else []),
+            QuestionCoordinatesModel(**coordinates_map[str(row.id)]) if str(row.id) in coordinates_map else None,
         )
         for row in rows
     ]
@@ -161,11 +170,14 @@ def search_questions(
         if message.startswith("invalid deleted mode"):
             raise ApiError(status_code=422, code="INVALID_DELETED_MODE", message=message) from exc
         raise
-    event_map = service.get_event_ids_map([str(row.id) for row in rows])
+    question_ids = [str(row.id) for row in rows]
+    event_map = service.get_event_ids_map(question_ids)
+    coordinates_map = service.get_coordinates_map(question_ids)
     items = [
         to_question_list_item(
             row,
             event_map.get(str(row.id), [str(row.event_id)] if row.event_id else []),
+            QuestionCoordinatesModel(**coordinates_map[str(row.id)]) if str(row.id) in coordinates_map else None,
         )
         for row in rows
     ]

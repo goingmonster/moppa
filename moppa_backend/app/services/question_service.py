@@ -80,3 +80,6 @@ class QuestionService:
 
     def get_event_ids(self, question_id: str) -> list[str]:
         return self.repository.get_event_ids(question_id)
+
+    def get_coordinates_map(self, question_ids: list[str]) -> dict[str, dict[str, float]]:
+        return self.repository.get_coordinates_map(question_ids)

@@ -138,6 +138,35 @@
   box-shadow: 0 0 0 1px rgba(45, 115, 213, 0.22), 0 10px 24px rgba(72, 120, 187, 0.16);
 }
 
+[data-theme='blue'] .map-overview-panel {
+  background:
+    radial-gradient(circle at 12% 16%, rgba(137, 193, 255, 0.3), transparent 38%),
+    radial-gradient(circle at 85% 10%, rgba(95, 160, 245, 0.22), transparent 34%),
+    linear-gradient(160deg, rgba(223, 239, 255, 0.98), rgba(233, 244, 255, 0.98) 42%, rgba(214, 233, 255, 0.98));
+}
+
+[data-theme='blue'] .map-toggle-label,
+[data-theme='blue'] .map-meta-row {
+  color: #3f6696;
+}
+
+[data-theme='blue'] .map-stage-shell {
+  border-color: rgba(121, 168, 223, 0.5);
+  background:
+    radial-gradient(circle at 30% 12%, rgba(151, 202, 255, 0.3), transparent 44%),
+    linear-gradient(175deg, rgba(235, 246, 255, 0.95), rgba(217, 235, 255, 0.98));
+  box-shadow: inset 0 0 0 1px rgba(136, 179, 230, 0.28), 0 16px 32px rgba(84, 128, 188, 0.2);
+}
+
+[data-theme='blue'] .map-overlay {
+  color: #235183;
+  background: rgba(212, 232, 255, 0.66);
+}
+
+[data-theme='blue'] .map-overlay-error {
+  color: #924b45;
+}
+
 [data-theme='blue'] .level-btn,
 [data-theme='blue'] .action-btn,
 [data-theme='blue'] .inline-comment button {
@@ -462,6 +491,111 @@ textarea {
 .home-stack {
   display: grid;
   gap: 1.15rem;
+}
+
+.map-overview-panel {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(95, 165, 255, 0.22), transparent 38%),
+    radial-gradient(circle at 84% 12%, rgba(56, 106, 183, 0.2), transparent 34%),
+    linear-gradient(160deg, rgba(11, 24, 41, 0.96), rgba(14, 26, 44, 0.92) 40%, rgba(9, 17, 30, 0.96));
+}
+
+.map-panel-head {
+  align-items: flex-start;
+  gap: 0.8rem;
+}
+
+.map-panel-head h2 {
+  letter-spacing: 0.05em;
+}
+
+.map-panel-head span {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.86rem;
+}
+
+.map-control-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.65rem;
+}
+
+.map-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.map-toggle-label {
+  color: rgba(208, 228, 255, 0.8);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.map-toggle-btn {
+  min-height: 32px;
+  padding: 0.18rem 0.52rem;
+  font-size: 0.77rem;
+  border-radius: 999px;
+}
+
+.map-zoom-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.map-stage-shell {
+  position: relative;
+  border: 1px solid rgba(121, 174, 247, 0.35);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 28% 12%, rgba(127, 188, 255, 0.12), transparent 44%),
+    linear-gradient(175deg, rgba(9, 16, 28, 0.85), rgba(7, 13, 24, 0.95));
+  min-height: 440px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(113, 166, 240, 0.1), 0 16px 36px rgba(5, 14, 24, 0.42);
+}
+
+.map-stage {
+  width: 100%;
+  height: 440px;
+}
+
+.map-stage-globe canvas {
+  display: block;
+}
+
+.map-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 1rem;
+  color: rgba(217, 235, 255, 0.92);
+  background: rgba(5, 11, 18, 0.62);
+  backdrop-filter: blur(1px);
+}
+
+.map-overlay-error {
+  color: #ffd3cb;
+}
+
+.map-meta-row {
+  margin-top: 0.58rem;
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  color: rgba(198, 220, 249, 0.86);
+  font-size: 0.82rem;
 }
 
 .home-event-grid {
@@ -1648,6 +1782,12 @@ select:focus-visible {
   .split-grid {
     grid-template-columns: 1fr;
   }
+
+  .map-stage-shell,
+  .map-stage {
+    min-height: 380px;
+    height: 380px;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1733,5 +1873,15 @@ select:focus-visible {
 
   .dialog-panel > .action-row .action-btn {
     flex: 1 1 auto;
+  }
+
+  .map-control-bar {
+    align-items: flex-start;
+  }
+
+  .map-stage-shell,
+  .map-stage {
+    min-height: 300px;
+    height: 300px;
   }
 }

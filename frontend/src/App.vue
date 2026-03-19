@@ -6,6 +6,7 @@ import ManageFilterRulesPanel from './components/ManageFilterRulesPanel.vue'
 import ManageQuestionsPanel from './components/ManageQuestionsPanel.vue'
 import ManageTasksPanel from './components/ManageTasksPanel.vue'
 import ManageTemplatesPanel from './components/ManageTemplatesPanel.vue'
+import HomeOverviewMap from './components/HomeOverviewMap.vue'
 import QuestionFeedPanel from './components/QuestionFeedPanel.vue'
 import SidebarNav from './components/SidebarNav.vue'
 import TopbarPanel from './components/TopbarPanel.vue'
@@ -4511,6 +4512,8 @@ watch(backendStatus, (status, prev) => {
 
       <div class="workspace-main">
         <main v-if="currentView === 'home'" class="home-stack">
+          <HomeOverviewMap :backend-online="backendOnline" />
+
           <article class="panel">
             <div class="panel-head">
               <h2>事件监看</h2>

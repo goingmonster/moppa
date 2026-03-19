@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, literal_column, select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import QuestionEntity, QuestionEventEntity
@@ -289,6 +289,28 @@ class QuestionRepository:
             )
         )
         return [str(value) for value in rows]
+
+    def get_coordinates_map(self, question_ids: list[str]) -> dict[str, dict[str, float]]:
+        if not question_ids:
+            return {}
+        uuid_ids = [UUID(value) for value in question_ids]
+        rows = self.db.execute(
+            select(
+                QuestionEntity.id,
+                literal_column("question.coordinates[1]").label("latitude"),
+                literal_column("question.coordinates[0]").label("longitude"),
+            ).where(QuestionEntity.id.in_(uuid_ids))
+        )
+
+        result: dict[str, dict[str, float]] = {}
+        for question_id, latitude, longitude in rows:
+            if latitude is None or longitude is None:
+                continue
+            result[str(question_id)] = {
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+            }
+        return result
 
     def count_without_coordinates(
         self,
