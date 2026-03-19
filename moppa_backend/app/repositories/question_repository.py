@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import QuestionEntity, QuestionEventEntity
@@ -290,8 +290,77 @@ class QuestionRepository:
         )
         return [str(value) for value in rows]
 
+    def count_without_coordinates(
+        self,
+        range_start: datetime | None,
+        range_end: datetime | None,
+    ) -> int:
+        query = """
+            SELECT COUNT(*)
+            FROM question
+            WHERE deleted_at IS NULL
+              AND coordinates IS NULL
+        """
+        params: dict[str, object] = {}
+        if range_start is not None:
+            query += "\n  AND created_at >= :range_start"
+            params["range_start"] = range_start
+        if range_end is not None:
+            query += "\n  AND created_at < :range_end"
+            params["range_end"] = range_end
+
+        total = self.db.execute(text(query), params).scalar_one()
+        return int(total)
+
+    def list_without_coordinates(
+        self,
+        range_start: datetime | None,
+        range_end: datetime | None,
+    ) -> list[dict[str, object]]:
+        query = """
+            SELECT id, area, content, created_at
+            FROM question
+            WHERE deleted_at IS NULL
+              AND coordinates IS NULL
+        """
+        params: dict[str, object] = {}
+        if range_start is not None:
+            query += "\n  AND created_at >= :range_start"
+            params["range_start"] = range_start
+        if range_end is not None:
+            query += "\n  AND created_at < :range_end"
+            params["range_end"] = range_end
+        query += "\nORDER BY created_at ASC"
+
+        rows = self.db.execute(text(query), params).mappings().all()
+        return [dict(row) for row in rows]
+
+    def update_coordinates(self, question_id: UUID, latitude: float, longitude: float) -> bool:
+        now = datetime.now(timezone.utc)
+        result = self.db.execute(
+            text(
+                """
+                UPDATE question
+                SET coordinates = point(:longitude, :latitude),
+                    updated_at = :updated_at
+                WHERE id = :question_id
+                  AND deleted_at IS NULL
+                  AND coordinates IS NULL
+                """
+            ),
+            {
+                "question_id": str(question_id),
+                "longitude": float(longitude),
+                "latitude": float(latitude),
+                "updated_at": now,
+            },
+        )
+        self.db.commit()
+        rowcount = getattr(result, "rowcount", 0)
+        return int(rowcount or 0) > 0
+
     def _replace_question_events(self, question_id: UUID, event_ids: list[UUID]) -> None:
-        self.db.execute(delete(QuestionEventEntity).where(QuestionEventEntity.question_id == question_id))
+        _ = self.db.execute(delete(QuestionEventEntity).where(QuestionEventEntity.question_id == question_id))
         for event_id in event_ids:
             self.db.add(QuestionEventEntity(question_id=question_id, event_id=event_id))
 

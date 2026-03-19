@@ -691,6 +691,7 @@ const taskDetailDialogOpen = ref(false)
 const triggerPullDialogOpen = ref(false)
 const autoReviewProcessing = ref(false)
 const autoQuestionProcessing = ref(false)
+const locationAnalysisProcessing = ref(false)
 const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
 const taskDetailRefreshing = ref(false)
@@ -1767,6 +1768,28 @@ async function triggerAutoQuestionNow(): Promise<void> {
     backendStatus.value = '自动提问触发失败：请检查后端接口或参数格式'
   } finally {
     autoQuestionProcessing.value = false
+  }
+}
+
+async function triggerLocationAnalysisNow(): Promise<void> {
+  if (!backendOnline.value) {
+    backendStatus.value = '后端离线：无法触发位置分析'
+    return
+  }
+
+  locationAnalysisProcessing.value = true
+  try {
+    const result = await sendJson<S1TaskResponse>('/s1/jobs/question-location-analysis-now', 'POST', {})
+    backendStatus.value = `位置分析已触发：${result.task_id}`
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = '位置分析触发失败：请检查后端接口或参数格式'
+  } finally {
+    locationAnalysisProcessing.value = false
   }
 }
 
@@ -4716,6 +4739,7 @@ watch(backendStatus, (status, prev) => {
       v-if="currentView === 'tasks'"
       :auto-review-processing="autoReviewProcessing"
       :auto-question-processing="autoQuestionProcessing"
+      :location-analysis-processing="locationAnalysisProcessing"
       :all-tasks-on-page-selected="allTasksOnPageSelected"
       :has-tasks="hasTasks"
       :tasks="tasks"
@@ -4727,6 +4751,7 @@ watch(backendStatus, (status, prev) => {
       @open-trigger-pull="triggerPullDialogOpen = true; void fetchSourceSystemOptions()"
       @trigger-auto-review="triggerAutoReviewNow"
       @trigger-auto-question="triggerAutoQuestionNow"
+      @trigger-location-analysis="triggerLocationAnalysisNow"
       @open-create-task="createTaskDialogOpen = true"
       @toggle-select-all="toggleSelectAllTasksOnPage"
       @delete-selected-batch="deleteSelectedTasksBatch"

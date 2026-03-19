@@ -11,6 +11,7 @@ interface TaskItem {
 defineProps<{
   autoReviewProcessing: boolean
   autoQuestionProcessing: boolean
+  locationAnalysisProcessing: boolean
   allTasksOnPageSelected: boolean
   hasTasks: boolean
   tasks: TaskItem[]
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   (e: 'open-trigger-pull'): void
   (e: 'trigger-auto-review'): void
   (e: 'trigger-auto-question'): void
+  (e: 'trigger-location-analysis'): void
   (e: 'open-create-task'): void
   (e: 'toggle-select-all'): void
   (e: 'delete-selected-batch'): void
@@ -67,6 +69,9 @@ function taskStatusBadgeTone(status: TaskItem['status']): string {
         </button>
         <button class="action-btn" :disabled="autoQuestionProcessing" @click="emit('trigger-auto-question')">
           {{ autoQuestionProcessing ? '提问中...' : '自动提问' }}
+        </button>
+        <button class="action-btn" :disabled="locationAnalysisProcessing" @click="emit('trigger-location-analysis')">
+          {{ locationAnalysisProcessing ? '分析中...' : '分析位置' }}
         </button>
         <button class="action-btn" @click="emit('open-create-task')">新增任务</button>
         <button class="action-btn" @click="emit('toggle-select-all')">{{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}</button>

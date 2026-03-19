@@ -60,6 +60,9 @@ class Settings:
     auto_question_event_scope: str
     auto_question_retry_count: int
     auto_question_retry_backoff_seconds: int
+    question_location_analysis_enabled: bool
+    question_location_analysis_cron: str
+    question_location_analysis_scope: str
     log_level: str
     auth_enabled: bool
     auth_access_token_expire_minutes: int
@@ -164,6 +167,15 @@ def load_settings() -> Settings:
         auto_question_event_scope=normalize_event_scope(os.getenv("AUTO_QUESTION_EVENT_SCOPE", "today"), "today"),
         auto_question_retry_count=max(env_int("AUTO_QUESTION_RETRY_COUNT", 2), 0),
         auto_question_retry_backoff_seconds=max(env_int("AUTO_QUESTION_RETRY_BACKOFF_SECONDS", 2), 1),
+        question_location_analysis_enabled=env_bool("QUESTION_LOCATION_ANALYSIS_ENABLED", False),
+        question_location_analysis_cron=normalize_cron(
+            os.getenv("QUESTION_LOCATION_ANALYSIS_CRON", "0 * * * *"),
+            "0 * * * *",
+        ),
+        question_location_analysis_scope=normalize_event_scope(
+            os.getenv("QUESTION_LOCATION_ANALYSIS_SCOPE", "today"),
+            "today",
+        ),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         auth_enabled=env_bool("AUTH_ENABLED", False),
         auth_access_token_expire_minutes=env_int("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", 30),
