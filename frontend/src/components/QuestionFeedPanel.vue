@@ -323,13 +323,13 @@ onBeforeUnmount(() => {
             <input
               :value="filterDeadlineFrom"
               type="datetime-local"
-              placeholder="截止时间起"
+              placeholder="创建时间起"
               @input="emit('update:filter-deadline-from', ($event.target as HTMLInputElement).value)"
             />
             <input
               :value="filterDeadlineTo"
               type="datetime-local"
-              placeholder="截止时间止"
+              placeholder="创建时间止"
               @input="emit('update:filter-deadline-to', ($event.target as HTMLInputElement).value)"
             />
             <select

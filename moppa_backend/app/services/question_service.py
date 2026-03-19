@@ -23,8 +23,8 @@ class QuestionService:
         event_type: str = "",
         status: str = "",
         level: int | None = None,
-        deadline_from: datetime | None = None,
-        deadline_to: datetime | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
         deleted_mode: str = "active_only",
     ) -> tuple[list[QuestionEntity], int]:
         return self.repository.list_paginated(
@@ -34,8 +34,8 @@ class QuestionService:
             event_type=event_type,
             status=status,
             level=level,
-            deadline_from=deadline_from,
-            deadline_to=deadline_to,
+            created_from=created_from,
+            created_to=created_to,
             deleted_mode=deleted_mode,
         )
 
@@ -49,8 +49,8 @@ class QuestionService:
         event_type: str = "",
         status: str = "",
         level: int | None = None,
-        deadline_from: datetime | None = None,
-        deadline_to: datetime | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
         deleted_mode: str = "active_only",
     ) -> tuple[list[QuestionEntity], int]:
         return self.repository.search_paginated(
@@ -61,8 +61,8 @@ class QuestionService:
             event_type=event_type,
             status=status,
             level=level,
-            deadline_from=deadline_from,
-            deadline_to=deadline_to,
+            created_from=created_from,
+            created_to=created_to,
             deleted_mode=deleted_mode,
         )
 

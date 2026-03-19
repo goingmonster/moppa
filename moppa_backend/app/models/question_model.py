@@ -43,6 +43,7 @@ class QuestionListItemModel(BaseModel):
     trace_id: str
     delete_reason: str | None = None
     deleted_at: str | None = None
+    created_at: str
 
 
 class QuestionPaginationResponse(BaseModel):

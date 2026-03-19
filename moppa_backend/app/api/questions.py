@@ -46,6 +46,7 @@ def to_question_list_item(entity: QuestionEntity, event_ids: list[str] | None = 
         trace_id=str(entity.trace_id),
         delete_reason=entity.delete_reason,
         deleted_at=entity.deleted_at.isoformat() if entity.deleted_at is not None else None,
+        created_at=entity.created_at.isoformat(),
     )
 
 
@@ -71,6 +72,8 @@ def list_questions(
     event_type: str = Query(default=""),
     status: str = Query(default=""),
     level: int | None = Query(default=None, ge=1, le=4),
+    created_from: datetime | None = Query(default=None),
+    created_to: datetime | None = Query(default=None),
     deadline_from: datetime | None = Query(default=None),
     deadline_to: datetime | None = Query(default=None),
     deleted_mode: str = Query(default="active_only"),
@@ -79,6 +82,8 @@ def list_questions(
     _: object = Depends(get_current_user),
 ) -> QuestionPaginationResponse:
     service = QuestionService(db)
+    resolved_created_from = created_from if created_from is not None else deadline_from
+    resolved_created_to = created_to if created_to is not None else deadline_to
     resolved_deleted_mode = deleted_mode
     if include_deleted is not None:
         resolved_deleted_mode = "with_deleted" if include_deleted else "active_only"
@@ -90,8 +95,8 @@ def list_questions(
             event_type=event_type,
             status=status,
             level=level,
-            deadline_from=deadline_from,
-            deadline_to=deadline_to,
+            created_from=resolved_created_from,
+            created_to=resolved_created_to,
             deleted_mode=resolved_deleted_mode,
         )
     except ValueError as exc:
@@ -121,6 +126,8 @@ def search_questions(
     event_type: str = Query(default=""),
     status: str = Query(default=""),
     level: int | None = Query(default=None, ge=1, le=4),
+    created_from: datetime | None = Query(default=None),
+    created_to: datetime | None = Query(default=None),
     deadline_from: datetime | None = Query(default=None),
     deadline_to: datetime | None = Query(default=None),
     deleted_mode: str = Query(default="active_only"),
@@ -129,6 +136,8 @@ def search_questions(
     _: object = Depends(get_current_user),
 ) -> QuestionPaginationResponse:
     service = QuestionService(db)
+    resolved_created_from = created_from if created_from is not None else deadline_from
+    resolved_created_to = created_to if created_to is not None else deadline_to
     resolved_deleted_mode = deleted_mode
     if include_deleted is not None:
         resolved_deleted_mode = "with_deleted" if include_deleted else "active_only"
@@ -141,8 +150,8 @@ def search_questions(
             event_type=event_type,
             status=status,
             level=level,
-            deadline_from=deadline_from,
-            deadline_to=deadline_to,
+            created_from=resolved_created_from,
+            created_to=resolved_created_to,
             deleted_mode=resolved_deleted_mode,
         )
     except ValueError as exc:
@@ -239,4 +248,3 @@ def update_question(
         raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
     event_ids = service.get_event_ids(question_id)
     return to_question_list_item(entity, event_ids if event_ids else ([str(entity.event_id)] if entity.event_id else []))
-

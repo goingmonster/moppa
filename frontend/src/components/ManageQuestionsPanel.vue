@@ -173,11 +173,13 @@ function eventLabel(eventIds: string[], allKnownEvents: EventOption[]): string {
             <input
               :value="questionManageFilterDeadlineFrom"
               type="datetime-local"
+              placeholder="创建时间起"
               @input="emit('update:filter-deadline-from', ($event.target as HTMLInputElement).value)"
             />
             <input
               :value="questionManageFilterDeadlineTo"
               type="datetime-local"
+              placeholder="创建时间止"
               @input="emit('update:filter-deadline-to', ($event.target as HTMLInputElement).value)"
             />
             <select

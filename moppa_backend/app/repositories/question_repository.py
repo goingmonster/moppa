@@ -48,8 +48,8 @@ class QuestionRepository:
         event_type: str = "",
         status: str = "",
         level: int | None = None,
-        deadline_from: datetime | None = None,
-        deadline_to: datetime | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
         deleted_mode: str = "active_only",
     ) -> tuple[list[QuestionEntity], int]:
         offset = (page - 1) * page_size
@@ -63,8 +63,8 @@ class QuestionRepository:
             event_type=event_type,
             status=status,
             level=level,
-            deadline_from=deadline_from,
-            deadline_to=deadline_to,
+            created_from=created_from,
+            created_to=created_to,
             deleted_mode=deleted_mode,
         )
         items = list(
@@ -88,8 +88,8 @@ class QuestionRepository:
         event_type: str = "",
         status: str = "",
         level: int | None = None,
-        deadline_from: datetime | None = None,
-        deadline_to: datetime | None = None,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
         deleted_mode: str = "active_only",
     ) -> tuple[list[QuestionEntity], int]:
         offset = (page - 1) * page_size
@@ -103,8 +103,8 @@ class QuestionRepository:
             event_type=event_type,
             status=status,
             level=level,
-            deadline_from=deadline_from,
-            deadline_to=deadline_to,
+            created_from=created_from,
+            created_to=created_to,
             deleted_mode=deleted_mode,
         )
 
@@ -135,8 +135,8 @@ class QuestionRepository:
         event_type: str,
         status: str,
         level: int | None,
-        deadline_from: datetime | None,
-        deadline_to: datetime | None,
+        created_from: datetime | None,
+        created_to: datetime | None,
         deleted_mode: str,
     ):
         normalized_deleted_mode = deleted_mode.strip().lower()
@@ -206,13 +206,13 @@ class QuestionRepository:
             base_query = base_query.where(QuestionEntity.level == level)
             count_query = count_query.where(QuestionEntity.level == level)
 
-        if deadline_from is not None:
-            base_query = base_query.where(QuestionEntity.deadline >= deadline_from)
-            count_query = count_query.where(QuestionEntity.deadline >= deadline_from)
+        if created_from is not None:
+            base_query = base_query.where(QuestionEntity.created_at >= created_from)
+            count_query = count_query.where(QuestionEntity.created_at >= created_from)
 
-        if deadline_to is not None:
-            base_query = base_query.where(QuestionEntity.deadline <= deadline_to)
-            count_query = count_query.where(QuestionEntity.deadline <= deadline_to)
+        if created_to is not None:
+            base_query = base_query.where(QuestionEntity.created_at <= created_to)
+            count_query = count_query.where(QuestionEntity.created_at <= created_to)
 
         return base_query, count_query
 

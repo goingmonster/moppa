@@ -53,6 +53,7 @@ interface QuestionItem {
   groundTruth: string
   deleteReason: string
   deletedAt: string
+  createdAt?: string
 }
 
 interface RankRow {
@@ -115,6 +116,7 @@ interface BackendQuestionItem {
   trace_id: string
   delete_reason?: string | null
   deleted_at?: string | null
+  created_at?: string | null
 }
 
 interface BackendPage<T> {
@@ -824,8 +826,8 @@ const localFilteredManageQuestions = computed(() => {
   const keyword = questionManageSearchKeyword.value.trim().toLowerCase()
   const eventDomain = questionManageFilterEventDomain.value.trim().toLowerCase()
   const eventType = questionManageFilterEventType.value.trim().toLowerCase()
-  const deadlineFromMs = parseLocalDateTimeToMs(questionManageFilterDeadlineFrom.value)
-  const deadlineToMs = parseLocalDateTimeToMs(questionManageFilterDeadlineTo.value)
+  const createdFromMs = parseLocalDateTimeToMs(questionManageFilterDeadlineFrom.value)
+  const createdToMs = parseLocalDateTimeToMs(questionManageFilterDeadlineTo.value)
   const status = questionManageFilterStatus.value.trim()
   const level = questionManageFilterLevel.value.trim()
   const deletedMode = questionManageDeletedMode.value
@@ -848,11 +850,11 @@ const localFilteredManageQuestions = computed(() => {
     if (eventType && !item.eventType.toLowerCase().includes(eventType)) {
       return false
     }
-    const deadlineMs = Date.parse(item.deadline)
-    if (deadlineFromMs !== null && Number.isFinite(deadlineMs) && deadlineMs < deadlineFromMs) {
+    const createdMs = Date.parse(item.createdAt || item.deadline)
+    if (createdFromMs !== null && Number.isFinite(createdMs) && createdMs < createdFromMs) {
       return false
     }
-    if (deadlineToMs !== null && Number.isFinite(deadlineMs) && deadlineMs > deadlineToMs) {
+    if (createdToMs !== null && Number.isFinite(createdMs) && createdMs > createdToMs) {
       return false
     }
     if (!keyword) {
@@ -936,8 +938,8 @@ const filteredQuestionFeedItems = computed(() => {
   const keyword = questionFeedSearchKeyword.value.trim().toLowerCase()
   const eventDomain = questionFeedFilterEventDomain.value.trim().toLowerCase()
   const eventType = questionFeedFilterEventType.value.trim().toLowerCase()
-  const deadlineFromMs = parseLocalDateTimeToMs(questionFeedFilterDeadlineFrom.value)
-  const deadlineToMs = parseLocalDateTimeToMs(questionFeedFilterDeadlineTo.value)
+  const createdFromMs = parseLocalDateTimeToMs(questionFeedFilterDeadlineFrom.value)
+  const createdToMs = parseLocalDateTimeToMs(questionFeedFilterDeadlineTo.value)
   const status = questionFeedFilterStatus.value.trim()
   const level = questionFeedFilterLevel.value.trim()
 
@@ -958,11 +960,11 @@ const filteredQuestionFeedItems = computed(() => {
       return false
     }
 
-    const deadlineMs = Date.parse(item.deadline)
-    if (deadlineFromMs !== null && Number.isFinite(deadlineMs) && deadlineMs < deadlineFromMs) {
+    const createdMs = Date.parse(item.createdAt || item.deadline)
+    if (createdFromMs !== null && Number.isFinite(createdMs) && createdMs < createdFromMs) {
       return false
     }
-    if (deadlineToMs !== null && Number.isFinite(deadlineMs) && deadlineMs > deadlineToMs) {
+    if (createdToMs !== null && Number.isFinite(createdMs) && createdMs > createdToMs) {
       return false
     }
 
@@ -2731,6 +2733,7 @@ function toQuestionItem(item: BackendQuestionItem): QuestionItem {
       : '待真实结果回填。',
     deleteReason: item.delete_reason ?? '',
     deletedAt: item.deleted_at ?? '',
+    createdAt: item.created_at ?? item.deadline,
   }
 }
 
@@ -3645,8 +3648,8 @@ async function fetchManageQuestions(page: number): Promise<void> {
     const eventType = questionManageFilterEventType.value.trim()
     const status = questionManageFilterStatus.value.trim()
     const level = parseLevelFilter(questionManageFilterLevel.value.trim())
-    const deadlineFrom = toIsoFromLocalDateTime(questionManageFilterDeadlineFrom.value)
-    const deadlineTo = toIsoFromLocalDateTime(questionManageFilterDeadlineTo.value)
+    const createdFrom = toIsoFromLocalDateTime(questionManageFilterDeadlineFrom.value)
+    const createdTo = toIsoFromLocalDateTime(questionManageFilterDeadlineTo.value)
     if (eventDomain) {
       query.set('event_domain', eventDomain)
     }
@@ -3659,11 +3662,11 @@ async function fetchManageQuestions(page: number): Promise<void> {
     if (level !== null) {
       query.set('level', String(level))
     }
-    if (deadlineFrom) {
-      query.set('deadline_from', deadlineFrom)
+    if (createdFrom) {
+      query.set('created_from', createdFrom)
     }
-    if (deadlineTo) {
-      query.set('deadline_to', deadlineTo)
+    if (createdTo) {
+      query.set('created_to', createdTo)
     }
     query.set('deleted_mode', questionManageDeletedMode.value)
     query.set('page', String(page))
@@ -3819,8 +3822,8 @@ async function loadQuestionFeedNextPage(): Promise<void> {
     const eventType = questionFeedFilterEventType.value.trim()
     const status = questionFeedFilterStatus.value.trim()
     const level = parseLevelFilter(questionFeedFilterLevel.value.trim())
-    const deadlineFrom = toIsoFromLocalDateTime(questionFeedFilterDeadlineFrom.value)
-    const deadlineTo = toIsoFromLocalDateTime(questionFeedFilterDeadlineTo.value)
+    const createdFrom = toIsoFromLocalDateTime(questionFeedFilterDeadlineFrom.value)
+    const createdTo = toIsoFromLocalDateTime(questionFeedFilterDeadlineTo.value)
     if (eventDomain) {
       query.set('event_domain', eventDomain)
     }
@@ -3833,11 +3836,11 @@ async function loadQuestionFeedNextPage(): Promise<void> {
     if (level !== null) {
       query.set('level', String(level))
     }
-    if (deadlineFrom) {
-      query.set('deadline_from', deadlineFrom)
+    if (createdFrom) {
+      query.set('created_from', createdFrom)
     }
-    if (deadlineTo) {
-      query.set('deadline_to', deadlineTo)
+    if (createdTo) {
+      query.set('created_to', createdTo)
     }
     query.set('page', String(nextPage))
     query.set('page_size', '10')
