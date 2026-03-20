@@ -820,9 +820,6 @@ const allEventsOnPageSelected = computed(() =>
 const selectedManageEvents = computed(() =>
   manageEvents.value.filter((item) => selectedManageEventIds.value.includes(item.id)),
 )
-const selectedPendingManageEventIds = computed(() =>
-  selectedManageEvents.value.filter((item) => item.filterStatus === 'pending').map((item) => item.id),
-)
 
 const localFilteredManageQuestions = computed(() => {
   const keyword = questionManageSearchKeyword.value.trim().toLowerCase()
@@ -2321,9 +2318,9 @@ async function deleteSelectedEventsBatch(): Promise<void> {
 }
 
 async function reviewSelectedEvents(targetStatus: 'passed' | 'filtered'): Promise<void> {
-  const ids = [...selectedPendingManageEventIds.value]
+  const ids = [...selectedManageEventIds.value]
   if (ids.length === 0) {
-    backendStatus.value = '请先勾选待审核（pending）的事件'
+    backendStatus.value = '请先勾选要批量审核的事件'
     return
   }
 
