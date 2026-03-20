@@ -126,6 +126,13 @@ class AutoQuestionService:
                         total_batches=total_batches,
                     )
                     api_call_count += 1
+                    _logger.info(
+                        "Auto question API response payload: task_id=%s batch=%s/%s response=%s",
+                        str(task.id),
+                        processed_batches + 1,
+                        total_batches,
+                        json.dumps(response_data, ensure_ascii=False),
+                    )
                 except RuntimeError as exc:
                     failed_batches += 1
                     failed_events += len(events)
@@ -232,6 +239,12 @@ class AutoQuestionService:
                         str(task.id),
                         processed_batches,
                         json.dumps(questions, ensure_ascii=False),
+                    )
+                    _logger.info(
+                        "Auto question generated question summaries: task_id=%s batch=%s questions=%s",
+                        str(task.id),
+                        processed_batches,
+                        json.dumps(self._build_generated_question_log_entries(questions), ensure_ascii=False),
                     )
 
                 offset += len(events)
@@ -505,14 +518,40 @@ class AutoQuestionService:
         return parsed.astimezone(timezone.utc)
 
     def _build_answer_space(self, value: object) -> str | None:
-        if isinstance(value, list):
-            items = [item.strip() for item in value if isinstance(item, str) and item.strip()]
-            if items:
-                return "\n".join(items)
-            return None
         if isinstance(value, str) and value.strip():
             return value.strip()
-        return None
+        if value is None:
+            return None
+        try:
+            serialized = json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            serialized = str(value)
+        serialized = serialized.strip()
+        if not serialized:
+            return None
+        return serialized
+
+    def _build_generated_question_log_entries(self, questions_obj: object) -> list[dict[str, object]]:
+        if not isinstance(questions_obj, list):
+            return []
+
+        log_entries: list[dict[str, object]] = []
+        for index, item in enumerate(questions_obj, start=1):
+            question_text: str | None = None
+            answer_space: str | None = None
+            if isinstance(item, dict):
+                raw_question = item.get("question")
+                if isinstance(raw_question, str) and raw_question.strip():
+                    question_text = raw_question.strip()
+                answer_space = self._build_answer_space(item.get("candidate_answers"))
+            log_entries.append(
+                {
+                    "index": index,
+                    "question": question_text,
+                    "answer_space": answer_space,
+                }
+            )
+        return log_entries
 
     def _parse_match_score(self, value: object) -> float | None:
         if isinstance(value, (int, float)):
