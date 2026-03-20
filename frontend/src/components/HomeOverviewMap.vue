@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import * as echarts from 'echarts'
-import Globe from 'globe.gl'
+import type { ScreenSpaceEventHandler, Viewer } from 'cesium'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import 'cesium/Build/Cesium/Widgets/widgets.css'
 
 type TimeRange = 'today' | 'week' | 'month' | 'year' | 'all'
 type MapMode = '2d' | '3d'
@@ -32,53 +33,22 @@ interface BackendPage<T> {
 interface QuestionPoint {
   id: string
   title: string
+  content: string
   lat: number
   lng: number
   createdAt: string
 }
 
-interface GlobePoint {
+interface AggregatedPoint {
   id: string
+  title: string
+  content: string
   lat: number
   lng: number
-  size: number
-  altitude: number
-  color: string
-  label: string
-}
-
-interface GlobeControlLike {
-  enableZoom: boolean
-  minDistance?: number
-  maxDistance?: number
-  enablePan?: boolean
-  autoRotate?: boolean
-}
-
-interface GlobeViewLike {
-  lat?: number
-  lng?: number
-  altitude?: number
-}
-
-interface GlobeLike {
-  width: (value: number) => GlobeLike
-  height: (value: number) => GlobeLike
-  globeImageUrl: (value: string) => GlobeLike
-  bumpImageUrl: (value: string) => GlobeLike
-  backgroundColor: (value: string) => GlobeLike
-  atmosphereColor: (value: string) => GlobeLike
-  atmosphereAltitude: (value: number) => GlobeLike
-  pointsData: (value: GlobePoint[]) => GlobeLike
-  pointLat: (value: string | ((point: GlobePoint) => number)) => GlobeLike
-  pointLng: (value: string | ((point: GlobePoint) => number)) => GlobeLike
-  pointRadius: (value: string | ((point: GlobePoint) => number)) => GlobeLike
-  pointAltitude: (value: string | ((point: GlobePoint) => number)) => GlobeLike
-  pointColor: (value: string | ((point: GlobePoint) => string)) => GlobeLike
-  pointLabel: (value: string | ((point: GlobePoint) => string)) => GlobeLike
-  controls: () => GlobeControlLike
-  pointOfView: (value?: GlobeViewLike, transitionMs?: number) => GlobeViewLike
-  _destructor?: () => void
+  count: number
+  createdAt: string
+  items: QuestionPoint[]
+  cluster: boolean
 }
 
 const props = defineProps<{
@@ -106,14 +76,24 @@ const mapPoints = ref<QuestionPoint[]>([])
 const totalQuestions = ref(0)
 const lastUpdatedAt = ref('')
 const map2dZoom = ref(1.25)
+const hoveredPoint = ref<QuestionPoint | null>(null)
+const hoveredPointId = ref<string | null>(null)
+const selectedPoint = ref<QuestionPoint | null>(null)
+const selectedCluster = ref<AggregatedPoint | null>(null)
+const tooltipX = ref(0)
+const tooltipY = ref(0)
 
+const mapStageShellRef = ref<HTMLDivElement | null>(null)
 const map2dRef = ref<HTMLDivElement | null>(null)
 const map3dRef = ref<HTMLDivElement | null>(null)
 
 let map2dChart: echarts.ECharts | null = null
 let map2dGeoRoamBound = false
+let map2dClickBound = false
 let worldMapRegistered = false
-let map3dGlobe: GlobeLike | null = null
+let cesiumViewer: Viewer | null = null
+let cesiumHoverHandler: ScreenSpaceEventHandler | null = null
+let cesiumRuntime: typeof import('cesium') | null = null
 let fetchSeq = 0
 let resizeObserver: ResizeObserver | null = null
 
@@ -144,6 +124,105 @@ function setCachedRange(range: TimeRange, points: QuestionPoint[], total: number
 
 const pointsWithCoordinates = computed(() => mapPoints.value.length)
 
+function getAggregationCellSize(mode: MapMode, zoom: number, pointCount: number): number {
+  if (pointCount <= 80) {
+    return mode === '2d' ? 1.5 : 2.4
+  }
+  if (mode === '2d') {
+    return Math.max(0.4, 10 / Math.max(zoom, 1))
+  }
+  if (pointCount > 800) {
+    return 6
+  }
+  if (pointCount > 300) {
+    return 4
+  }
+  return 2.8
+}
+
+function aggregatePoints(points: QuestionPoint[], mode: MapMode, zoom: number): AggregatedPoint[] {
+  const cellSize = getAggregationCellSize(mode, zoom, points.length)
+  const buckets = new Map<string, QuestionPoint[]>()
+
+  for (const point of points) {
+    const lngBucket = Math.round(point.lng / cellSize)
+    const latBucket = Math.round(point.lat / cellSize)
+    const key = `${lngBucket}:${latBucket}`
+    const bucket = buckets.get(key)
+    if (bucket) {
+      bucket.push(point)
+    } else {
+      buckets.set(key, [point])
+    }
+  }
+
+  return Array.from(buckets.entries()).map(([key, items]) => {
+    const lng = items.reduce((sum, item) => sum + item.lng, 0) / items.length
+    const lat = items.reduce((sum, item) => sum + item.lat, 0) / items.length
+    const latestCreatedAt = items
+      .map((item) => item.createdAt)
+      .filter(Boolean)
+      .sort()
+    const latestCreatedAtValue = latestCreatedAt[latestCreatedAt.length - 1] ?? ''
+
+    if (items.length === 1) {
+      const item = items[0]
+      if (!item) {
+        return {
+          id: `cluster:${mode}:${key}`,
+          title: '0 个问题',
+          content: '',
+          lat,
+          lng,
+          count: 0,
+          createdAt: '',
+          items: [],
+          cluster: true,
+        }
+      }
+      return {
+        id: item.id,
+        title: item.title,
+        content: item.content,
+        lat: item.lat,
+        lng: item.lng,
+        count: 1,
+        createdAt: item.createdAt,
+        items,
+        cluster: false,
+      }
+    }
+
+    const preview = items
+      .slice(0, 3)
+      .map((item) => item.title)
+      .join(' / ')
+
+    return {
+      id: `cluster:${mode}:${key}`,
+      title: `${items.length} 个问题`,
+      content: preview,
+      lat,
+      lng,
+      count: items.length,
+      createdAt: latestCreatedAtValue,
+      items,
+      cluster: true,
+    }
+  })
+}
+
+const aggregatedPoints = computed(() => aggregatePoints(mapPoints.value, selectedMode.value, map2dZoom.value))
+const aggregatedPointCount = computed(() => aggregatedPoints.value.length)
+
+const pointIndexMap = computed(() => {
+  const index = new Map<string, AggregatedPoint>()
+  for (const point of aggregatedPoints.value) {
+    index.set(point.id, point)
+  }
+  return index
+})
+
 const displayUpdatedAt = computed(() => {
   if (!lastUpdatedAt.value) {
     return '--'
@@ -154,6 +233,71 @@ const displayUpdatedAt = computed(() => {
   }
   return parsed.toLocaleString('zh-CN', { hour12: false })
 })
+
+const selectedPointTime = computed(() => {
+  if (!selectedPoint.value?.createdAt) {
+    return '--'
+  }
+  const parsed = new Date(selectedPoint.value.createdAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return '--'
+  }
+  return parsed.toLocaleString('zh-CN', { hour12: false })
+})
+
+const selectedClusterPreview = computed(() => {
+  if (!selectedCluster.value) {
+    return []
+  }
+  return selectedCluster.value.items
+})
+
+function getThemeColor(name: string, fallback: string): string {
+  const base = mapStageShellRef.value ?? document.documentElement
+  const value = getComputedStyle(base).getPropertyValue(name).trim()
+  return value || fallback
+}
+
+function getMapThemePalette(): {
+  singleFill: string
+  singleOutline: string
+  clusterFill: string
+  clusterOutline: string
+  clusterText: string
+  clusterChipBg: string
+  globeBase: string
+  sceneBackground: string
+  atmosphere: string
+  atmosphereGlow: string
+} {
+  return {
+    singleFill: getThemeColor('--accent', '#61b6ff'),
+    singleOutline: getThemeColor('--accent-strong', '#8cd4ff'),
+    clusterFill: getThemeColor('--accent-strong', '#2d73d5'),
+    clusterOutline: getThemeColor('--line', '#8cd4ff'),
+    clusterText: getThemeColor('--surface-3', '#09111e'),
+    clusterChipBg: getThemeColor('--surface-chip', 'rgba(97, 182, 255, 0.16)'),
+    globeBase: getThemeColor('--surface-2', '#122034'),
+    sceneBackground: getThemeColor('--bg-0', '#09111e'),
+    atmosphere: getThemeColor('--accent', '#61b6ff'),
+    atmosphereGlow: getThemeColor('--panel-glow', 'rgba(97, 182, 255, 0.16)'),
+  }
+}
+
+function selectAggregatedPointById(pointId: string | null): void {
+  if (!pointId) {
+    clearSelectedPoint()
+    return
+  }
+  const selected = pointIndexMap.value.get(pointId) ?? null
+  if (selected?.cluster) {
+    selectedCluster.value = selected
+    selectedPoint.value = null
+    return
+  }
+  selectedPoint.value = selected?.items[0] ?? null
+  selectedCluster.value = null
+}
 
 function apiBaseUrl(): string {
   return (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
@@ -169,24 +313,59 @@ function buildCreatedRange(range: TimeRange): { createdFrom: string | null; crea
   }
 
   const now = new Date()
-  const end = now.toISOString()
   let start = toLocalDayStart(now)
+  let end = new Date(start)
 
   if (range === 'week') {
     start = new Date(start)
-    start.setDate(start.getDate() - 6)
+    start.setDate(start.getDate() - start.getDay() + (start.getDay() === 0 ? -6 : 1))
+    end = new Date(start)
+    end.setDate(end.getDate() + 7)
   } else if (range === 'month') {
-    start = new Date(start)
-    start.setDate(start.getDate() - 29)
+    start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0)
   } else if (range === 'year') {
-    start = new Date(start)
-    start.setDate(start.getDate() - 364)
+    start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0)
+    end = new Date(now.getFullYear() + 1, 0, 1, 0, 0, 0, 0)
+  } else {
+    end = new Date(start)
+    end.setDate(end.getDate() + 1)
   }
 
   return {
     createdFrom: start.toISOString(),
-    createdTo: end,
+    createdTo: end.toISOString(),
   }
+}
+
+function clearHoveredPoint(): void {
+  hoveredPoint.value = null
+  hoveredPointId.value = null
+}
+
+function clearSelectedPoint(): void {
+  selectedPoint.value = null
+  selectedCluster.value = null
+}
+
+function updateTooltipPosition(screenX: number, screenY: number): void {
+  const shellRect = mapStageShellRef.value?.getBoundingClientRect()
+  if (!shellRect) {
+    tooltipX.value = screenX + 14
+    tooltipY.value = screenY - 36
+    return
+  }
+
+  tooltipX.value = screenX - shellRect.left + 14
+  tooltipY.value = screenY - shellRect.top - 36
+}
+
+async function loadCesium(): Promise<typeof import('cesium')> {
+  if (cesiumRuntime) {
+    return cesiumRuntime
+  }
+  cesiumRuntime = await import('cesium')
+  return cesiumRuntime
 }
 
 function parseFiniteNumber(value: unknown): number | null {
@@ -278,6 +457,7 @@ function toQuestionPoint(item: BackendQuestionItem): QuestionPoint | null {
   return {
     id: item.id,
     title: item.content || `问题 ${item.id}`,
+    content: item.content || `问题 ${item.id}`,
     lat: coordinates.lat,
     lng: coordinates.lng,
     createdAt: item.created_at ?? '',
@@ -322,11 +502,14 @@ async function ensureWorldMap(): Promise<boolean> {
   return false
 }
 
-function build2DSeriesData(): Array<{ name: string; value: [number, number, number]; createdAt: string }> {
-  return mapPoints.value.map((point, index) => ({
+function build2DSeriesData(): Array<{ id: string; name: string; value: [number, number, number]; createdAt: string; count: number; cluster: boolean }> {
+  return aggregatedPoints.value.map((point, index) => ({
+    id: point.id,
     name: point.title,
-    value: [point.lng, point.lat, 12 + Math.min(10, index % 5)],
+    value: [point.lng, point.lat, 12 + Math.min(18, Math.max(point.count * 2, index % 5))],
     createdAt: point.createdAt,
+    count: point.count,
+    cluster: point.cluster,
   }))
 }
 
@@ -343,10 +526,12 @@ function render2DMap(): void {
         backgroundColor: 'rgba(9, 16, 28, 0.92)',
         borderColor: 'rgba(104, 168, 255, 0.48)',
         textStyle: { color: '#d8e7ff' },
-        formatter: (params: { data?: { name?: string; createdAt?: string } }) => {
+        formatter: (params: { data?: { name?: string; createdAt?: string; count?: number; cluster?: boolean } }) => {
           const title = params.data?.name ?? '未命名问题'
           const createdAt = params.data?.createdAt ? new Date(params.data.createdAt).toLocaleString('zh-CN', { hour12: false }) : '未知时间'
-          return `<strong>${title}</strong><br/>创建时间: ${createdAt}`
+          const count = params.data?.count ?? 1
+          const clusterLabel = params.data?.cluster ? `<br/>聚合数量: ${count}` : ''
+          return `<strong>${title}</strong>${clusterLabel}<br/>创建时间: ${createdAt}`
         },
       },
       geo: {
@@ -422,82 +607,150 @@ async function init2DMap(): Promise<void> {
     map2dGeoRoamBound = true
   }
 
+  if (!map2dClickBound) {
+    map2dChart.on('click', (params: { data?: unknown }) => {
+      const record = params.data && typeof params.data === 'object' ? (params.data as { id?: string }) : undefined
+      selectAggregatedPointById(record?.id ?? null)
+    })
+    map2dClickBound = true
+  }
+
   render2DMap()
   map2dChart.resize()
 }
 
-function toGlobePoints(): GlobePoint[] {
-  return mapPoints.value.map((point, index) => ({
-    id: point.id,
-    lat: point.lat,
-    lng: point.lng,
-    size: 0.12 + ((index % 6) * 0.01),
-    altitude: 0.08,
-    color: index % 2 === 0 ? '#8cd4ff' : '#61b6ff',
-    label: `${point.title}<br/>${point.createdAt ? new Date(point.createdAt).toLocaleString('zh-CN', { hour12: false }) : '未知时间'}`,
-  }))
-}
-
-function resize3DMap(): void {
-  if (!map3dGlobe || !map3dRef.value) {
-    return
-  }
-  const width = Math.max(320, map3dRef.value.clientWidth)
-  const height = Math.max(260, map3dRef.value.clientHeight)
-  map3dGlobe.width(width).height(height)
-}
-
-function render3DPoints(): void {
-  if (!map3dGlobe) {
-    return
-  }
-  map3dGlobe.pointsData(toGlobePoints())
-}
-
-function init3DMap(): void {
+async function init3DMap(): Promise<void> {
   if (!map3dRef.value) {
     return
   }
 
-  if (!map3dGlobe) {
-    const globeFactory = Globe as unknown as () => (element: HTMLElement) => GlobeLike
-    map3dGlobe = globeFactory()(map3dRef.value)
-      .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
-      .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
-      .backgroundColor('rgba(0,0,0,0)')
-      .atmosphereColor('#6ab1ff')
-      .atmosphereAltitude(0.21)
-      .pointLat('lat')
-      .pointLng('lng')
-      .pointRadius('size')
-      .pointAltitude('altitude')
-      .pointColor('color')
-      .pointLabel('label')
-
-    const controls = map3dGlobe.controls()
-    controls.enableZoom = true
-    controls.enablePan = false
-    controls.autoRotate = false
-    controls.minDistance = 120
-    controls.maxDistance = 700
-
-    map3dGlobe.pointOfView({ lat: 20, lng: 10, altitude: 2.25 }, 0)
-  }
-
-  render3DPoints()
-  resize3DMap()
-}
-
-function resizeActiveMap(): void {
-  if (selectedMode.value === '2d') {
-    map2dChart?.resize()
+  if (cesiumViewer) {
+    resize3DMap()
+    render3DPoints()
     return
   }
+
+  const cesium = await loadCesium()
+  const palette = getMapThemePalette()
+
+  cesiumViewer = new cesium.Viewer(map3dRef.value, {
+    baseLayer: false,
+    baseLayerPicker: false,
+    animation: false,
+    timeline: false,
+    sceneModePicker: false,
+    navigationHelpButton: false,
+    homeButton: false,
+    fullscreenButton: false,
+    infoBox: false,
+    selectionIndicator: false,
+    geocoder: false,
+    creditContainer: document.createElement('div'),
+    requestRenderMode: true,
+    maximumRenderTimeChange: Number.POSITIVE_INFINITY,
+  })
+
+  // Add OpenStreetMap as the base imagery layer
+  cesiumViewer.imageryLayers.addImageryProvider(
+    new cesium.OpenStreetMapImageryProvider({
+      url: 'https://tile.openstreetmap.org/',
+    }),
+  )
+
+  // Ensure globe and atmosphere are visible
+  cesiumViewer.scene.skyAtmosphere!.show = true
+  cesiumViewer.scene.globe.show = true
+  cesiumViewer.scene.backgroundColor = cesium.Color.fromCssColorString(palette.sceneBackground)
+  cesiumViewer.scene.globe.baseColor = cesium.Color.fromCssColorString(palette.globeBase)
+  cesiumViewer.scene.skyAtmosphere!.hueShift = 0.08
+  cesiumViewer.scene.skyAtmosphere!.saturationShift = -0.12
+  cesiumViewer.scene.skyAtmosphere!.brightnessShift = -0.18
+  cesiumViewer.scene.globe.showGroundAtmosphere = true
+
+  // Hover detection: show tooltip only when mouse is over a point
+  cesiumHoverHandler = new cesium.ScreenSpaceEventHandler(cesiumViewer.scene.canvas)
+  cesiumHoverHandler.setInputAction((movement: { endPosition: { x: number; y: number } }) => {
+    updateTooltipPosition(movement.endPosition.x, movement.endPosition.y)
+    const picked = cesiumViewer!.scene.pick(movement.endPosition as import('cesium').Cartesian2)
+    if (cesium.defined(picked) && cesium.defined(picked.id)) {
+      const entityId = picked.id.id as string
+      if (hoveredPointId.value === entityId) {
+        return
+      }
+      hoveredPointId.value = entityId
+      const hovered = pointIndexMap.value.get(entityId) ?? null
+      hoveredPoint.value = hovered && !hovered.cluster ? hovered.items[0] ?? null : null
+    } else {
+      clearHoveredPoint()
+    }
+  }, cesium.ScreenSpaceEventType.MOUSE_MOVE)
+
+  cesiumHoverHandler.setInputAction((movement: { position: { x: number; y: number } }) => {
+    const picked = cesiumViewer!.scene.pick(movement.position as import('cesium').Cartesian2)
+    if (cesium.defined(picked) && cesium.defined(picked.id)) {
+      const entityId = picked.id.id as string
+      selectAggregatedPointById(entityId)
+      cesiumViewer!.scene.requestRender()
+      return
+    }
+    clearSelectedPoint()
+  }, cesium.ScreenSpaceEventType.LEFT_CLICK)
+
+  map3dRef.value.addEventListener('mouseleave', clearHoveredPoint)
+
   resize3DMap()
+  render3DPoints()
+  cesiumViewer.scene.requestRender()
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function resize3DMap(): void {
+  if (!cesiumViewer || !map3dRef.value) {
+    return
+  }
+  cesiumViewer.resize()
+}
+
+function render3DPoints(): void {
+  if (!cesiumViewer) {
+    return
+  }
+
+  const cesium = cesiumRuntime
+  if (!cesium) {
+    return
+  }
+  const palette = getMapThemePalette()
+
+  // Remove existing question-point entities
+  cesiumViewer.entities.removeAll()
+
+  for (const point of aggregatedPoints.value) {
+    const timeStr = point.createdAt
+      ? new Date(point.createdAt).toLocaleString('zh-CN', { hour12: false })
+      : '未知时间'
+    cesiumViewer!.entities.add({
+      id: point.id,
+      position: cesium.Cartesian3.fromDegrees(point.lng, point.lat, 0),
+      point: {
+        pixelSize: point.cluster ? Math.min(18, 8 + Math.ceil(point.count / 2)) : 9,
+        color: point.cluster
+          ? cesium.Color.fromCssColorString(palette.clusterFill).withAlpha(0.94)
+          : cesium.Color.fromCssColorString(palette.singleFill).withAlpha(0.9),
+        outlineColor: point.cluster
+          ? cesium.Color.fromCssColorString(palette.clusterOutline)
+          : cesium.Color.fromCssColorString(palette.singleOutline),
+        outlineWidth: point.cluster ? 2.4 : 1.8,
+        heightReference: cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+      description: point.cluster ? `聚合问题数: ${point.count}` : `创建时间: ${timeStr}`,
+    })
+  }
+
+  cesiumViewer.scene.requestRender()
 }
 
 function zoom2D(multiplier: number): void {
@@ -508,19 +761,25 @@ function zoom2D(multiplier: number): void {
 }
 
 function zoom3D(multiplier: number): void {
-  if (!map3dGlobe) {
+  if (!cesiumViewer) {
     return
   }
-  const current = map3dGlobe.pointOfView()
-  const nextAltitude = clamp((current.altitude ?? 2.25) * multiplier, 1.05, 4.2)
-  map3dGlobe.pointOfView(
-    {
-      lat: current.lat ?? 20,
-      lng: current.lng ?? 10,
-      altitude: nextAltitude,
-    },
-    280,
-  )
+  const cesium = cesiumRuntime
+  if (!cesium) {
+    return
+  }
+  const camera = cesiumViewer.camera
+  const height = camera.positionCartographic.height
+  const newHeight = clamp(height * multiplier, 10000, 60000000)
+  camera.flyTo({
+    destination: cesium.Cartesian3.fromRadians(
+      camera.positionCartographic.longitude,
+      camera.positionCartographic.latitude,
+      newHeight,
+    ),
+    duration: 0.3,
+  })
+  cesiumViewer.scene.requestRender()
 }
 
 function zoomIn(): void {
@@ -537,6 +796,14 @@ function zoomOut(): void {
     return
   }
   zoom3D(1.2)
+}
+
+function resizeActiveMap(): void {
+  if (selectedMode.value === '2d') {
+    map2dChart?.resize()
+    return
+  }
+  resize3DMap()
 }
 
 async function fetchQuestionsByRange(): Promise<void> {
@@ -634,7 +901,7 @@ async function fetchQuestionsByRange(): Promise<void> {
       if (selectedMode.value === '2d') {
         await init2DMap()
       } else {
-        init3DMap()
+        await init3DMap()
       }
     }
   }
@@ -645,7 +912,7 @@ function syncMapByMode(): void {
     void init2DMap()
     return
   }
-  init3DMap()
+  void init3DMap()
 }
 
 function observeMapContainers(): void {
@@ -664,16 +931,26 @@ function observeMapContainers(): void {
 }
 
 watch(selectedRange, () => {
+  clearSelectedPoint()
   void fetchQuestionsByRange()
 })
 
 watch(selectedMode, () => {
+  clearHoveredPoint()
+  clearSelectedPoint()
+  if (cesiumViewer) {
+    cesiumViewer.useDefaultRenderLoop = selectedMode.value === '3d'
+    if (selectedMode.value === '3d') {
+      cesiumViewer.scene.requestRender()
+    }
+  }
   nextTick(() => {
     syncMapByMode()
   })
 })
 
 watch(mapPoints, () => {
+  clearSelectedPoint()
   if (selectedMode.value === '2d') {
     render2DMap()
     return
@@ -684,6 +961,8 @@ watch(mapPoints, () => {
 watch(
   () => props.backendOnline,
   () => {
+    clearHoveredPoint()
+    clearSelectedPoint()
     void fetchQuestionsByRange()
   },
 )
@@ -702,10 +981,15 @@ onBeforeUnmount(() => {
     map2dChart.dispose()
     map2dChart = null
   }
-  if (map3dGlobe && typeof map3dGlobe._destructor === 'function') {
-    map3dGlobe._destructor()
+  map3dRef.value?.removeEventListener('mouseleave', clearHoveredPoint)
+  if (cesiumHoverHandler) {
+    cesiumHoverHandler.destroy()
+    cesiumHoverHandler = null
   }
-  map3dGlobe = null
+  if (cesiumViewer) {
+    cesiumViewer.destroy()
+    cesiumViewer = null
+  }
 })
 </script>
 
@@ -747,9 +1031,41 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="map-stage-shell">
+    <div ref="mapStageShellRef" class="map-stage-shell">
       <div ref="map2dRef" v-show="selectedMode === '2d'" class="map-stage"></div>
       <div ref="map3dRef" v-show="selectedMode === '3d'" class="map-stage map-stage-globe"></div>
+      <div v-if="selectedMode === '3d' && hoveredPoint" class="map-tooltip" :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }">{{ hoveredPoint.title }}</div>
+      <div v-if="selectedPoint" class="map-point-detail">
+        <div class="map-point-detail-head">
+          <strong>问题详情</strong>
+          <button class="action-btn mini-btn" @click="clearSelectedPoint">关闭</button>
+        </div>
+        <p>{{ selectedPoint.content }}</p>
+        <div class="map-point-detail-meta">
+          <span>ID: {{ selectedPoint.id }}</span>
+          <span>时间: {{ selectedPointTime }}</span>
+          <span>坐标: {{ selectedPoint.lng.toFixed(4) }}, {{ selectedPoint.lat.toFixed(4) }}</span>
+        </div>
+      </div>
+      <div v-if="selectedCluster" class="map-point-detail">
+        <div class="map-point-detail-head">
+          <strong>聚合详情</strong>
+          <button class="action-btn mini-btn" @click="clearSelectedPoint">关闭</button>
+        </div>
+        <p>当前位置聚合了 {{ selectedCluster.count }} 个问题。</p>
+        <div class="map-point-detail-meta">
+          <span>坐标中心: {{ selectedCluster.lng.toFixed(4) }}, {{ selectedCluster.lat.toFixed(4) }}</span>
+          <span>问题列表:</span>
+        </div>
+        <div class="map-cluster-preview">
+          <article v-for="item in selectedClusterPreview" :key="item.id" class="map-cluster-item">
+            <strong>{{ item.title }}</strong>
+            <small>
+              {{ item.createdAt ? new Date(item.createdAt).toLocaleString('zh-CN', { hour12: false }) : '未知时间' }}
+            </small>
+          </article>
+        </div>
+      </div>
       <div v-if="loading" class="map-overlay">地图加载中...</div>
       <div v-else-if="errorMessage" class="map-overlay map-overlay-error">{{ errorMessage }}</div>
       <div v-else-if="pointsWithCoordinates === 0" class="map-overlay">当前筛选范围内暂无带坐标问题</div>
@@ -758,6 +1074,7 @@ onBeforeUnmount(() => {
     <div class="map-meta-row">
       <span>问题总数: {{ totalQuestions }}</span>
       <span>坐标问题: {{ pointsWithCoordinates }}</span>
+      <span>渲染点位: {{ aggregatedPointCount }}</span>
       <span>更新时间: {{ displayUpdatedAt }}</span>
     </div>
   </article>

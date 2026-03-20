@@ -334,6 +334,106 @@ class QuestionRepository:
         total = self.db.execute(text(query), params).scalar_one()
         return int(total)
 
+    def count_needing_area_backfill(
+        self,
+        range_start: datetime | None,
+        range_end: datetime | None,
+    ) -> int:
+        query = """
+            SELECT COUNT(*)
+            FROM question
+            WHERE deleted_at IS NULL
+              AND coordinates IS NULL
+              AND (area IS NULL OR btrim(area) = '')
+              AND content IS NOT NULL
+              AND btrim(content) <> ''
+        """
+        params: dict[str, object] = {}
+        if range_start is not None:
+            query += "\n  AND created_at >= :range_start"
+            params["range_start"] = range_start
+        if range_end is not None:
+            query += "\n  AND created_at < :range_end"
+            params["range_end"] = range_end
+
+        total = self.db.execute(text(query), params).scalar_one()
+        return int(total)
+
+    def list_needing_area_backfill(
+        self,
+        range_start: datetime | None,
+        range_end: datetime | None,
+    ) -> list[dict[str, object]]:
+        query = """
+            SELECT id, area, content, created_at
+            FROM question
+            WHERE deleted_at IS NULL
+              AND coordinates IS NULL
+              AND (area IS NULL OR btrim(area) = '')
+              AND content IS NOT NULL
+              AND btrim(content) <> ''
+        """
+        params: dict[str, object] = {}
+        if range_start is not None:
+            query += "\n  AND created_at >= :range_start"
+            params["range_start"] = range_start
+        if range_end is not None:
+            query += "\n  AND created_at < :range_end"
+            params["range_end"] = range_end
+        query += "\nORDER BY created_at ASC"
+
+        rows = self.db.execute(text(query), params).mappings().all()
+        return [dict(row) for row in rows]
+
+    def count_needing_coordinate_backfill(
+        self,
+        range_start: datetime | None,
+        range_end: datetime | None,
+    ) -> int:
+        query = """
+            SELECT COUNT(*)
+            FROM question
+            WHERE deleted_at IS NULL
+              AND coordinates IS NULL
+              AND area IS NOT NULL
+              AND btrim(area) <> ''
+        """
+        params: dict[str, object] = {}
+        if range_start is not None:
+            query += "\n  AND created_at >= :range_start"
+            params["range_start"] = range_start
+        if range_end is not None:
+            query += "\n  AND created_at < :range_end"
+            params["range_end"] = range_end
+
+        total = self.db.execute(text(query), params).scalar_one()
+        return int(total)
+
+    def list_needing_coordinate_backfill(
+        self,
+        range_start: datetime | None,
+        range_end: datetime | None,
+    ) -> list[dict[str, object]]:
+        query = """
+            SELECT id, area, content, created_at
+            FROM question
+            WHERE deleted_at IS NULL
+              AND coordinates IS NULL
+              AND area IS NOT NULL
+              AND btrim(area) <> ''
+        """
+        params: dict[str, object] = {}
+        if range_start is not None:
+            query += "\n  AND created_at >= :range_start"
+            params["range_start"] = range_start
+        if range_end is not None:
+            query += "\n  AND created_at < :range_end"
+            params["range_end"] = range_end
+        query += "\nORDER BY created_at ASC"
+
+        rows = self.db.execute(text(query), params).mappings().all()
+        return [dict(row) for row in rows]
+
     def list_without_coordinates(
         self,
         range_start: datetime | None,
@@ -374,6 +474,58 @@ class QuestionRepository:
                 "question_id": str(question_id),
                 "longitude": float(longitude),
                 "latitude": float(latitude),
+                "updated_at": now,
+            },
+        )
+        self.db.commit()
+        rowcount = getattr(result, "rowcount", 0)
+        return int(rowcount or 0) > 0
+
+    def update_area_if_empty(self, question_id: UUID, area: str) -> bool:
+        now = datetime.now(timezone.utc)
+        result = self.db.execute(
+            text(
+                """
+                UPDATE question
+                SET area = :area,
+                    updated_at = :updated_at
+                WHERE id = :question_id
+                  AND deleted_at IS NULL
+                  AND coordinates IS NULL
+                  AND (area IS NULL OR btrim(area) = '')
+                """
+            ),
+            {
+                "question_id": str(question_id),
+                "area": area[:200],
+                "updated_at": now,
+            },
+        )
+        self.db.commit()
+        rowcount = getattr(result, "rowcount", 0)
+        return int(rowcount or 0) > 0
+
+    def update_coordinates_and_area(
+        self, question_id: UUID, latitude: float, longitude: float, area: str
+    ) -> bool:
+        now = datetime.now(timezone.utc)
+        result = self.db.execute(
+            text(
+                """
+                UPDATE question
+                SET coordinates = point(:longitude, :latitude),
+                    area = :area,
+                    updated_at = :updated_at
+                WHERE id = :question_id
+                  AND deleted_at IS NULL
+                  AND coordinates IS NULL
+                """
+            ),
+            {
+                "question_id": str(question_id),
+                "longitude": float(longitude),
+                "latitude": float(latitude),
+                "area": area[:200],
                 "updated_at": now,
             },
         )

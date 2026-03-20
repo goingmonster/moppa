@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cesium": "^1.122.0",
     "echarts": "^6.0.0",
-    "globe.gl": "^2.44.0",
     "vue": "^3.5.25"
   },
   "devDependencies": {

@@ -63,6 +63,8 @@ class Settings:
     question_location_analysis_enabled: bool
     question_location_analysis_cron: str
     question_location_analysis_scope: str
+    question_location_analysis_osm_base_url: str
+    question_location_analysis_osm_timeout_seconds: int
     log_level: str
     auth_enabled: bool
     auth_access_token_expire_minutes: int
@@ -176,6 +178,8 @@ def load_settings() -> Settings:
             os.getenv("QUESTION_LOCATION_ANALYSIS_SCOPE", "today"),
             "today",
         ),
+        question_location_analysis_osm_base_url=os.getenv("QUESTION_LOCATION_ANALYSIS_OSM_BASE_URL", "").strip(),
+        question_location_analysis_osm_timeout_seconds=env_int("QUESTION_LOCATION_ANALYSIS_OSM_TIMEOUT_SECONDS", 10),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         auth_enabled=env_bool("AUTH_ENABLED", False),
         auth_access_token_expire_minutes=env_int("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", 30),

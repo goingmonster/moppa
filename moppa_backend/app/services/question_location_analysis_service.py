@@ -1,9 +1,11 @@
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from typing import cast
 from uuid import UUID, uuid4
 
+import requests
 from openai import OpenAI
 from sqlalchemy.orm import Session
 
@@ -22,6 +24,7 @@ class QuestionLocationAnalysisService:
         self.db: Session = db
         self.question_repository: QuestionRepository = QuestionRepository(db)
         self.task_repository: TaskExecutionRepository = TaskExecutionRepository(db)
+        self._nominatim_next_allowed_at: float = 0.0
         self.client: OpenAI = OpenAI(
             api_key=settings.auto_review_api_key,
             base_url=settings.auto_review_base_url,
@@ -53,7 +56,6 @@ class QuestionLocationAnalysisService:
         _ = self.task_repository.mark_running(task.id)
 
         try:
-            self._validate_runtime_config()
             now = datetime.now(timezone.utc)
             range_start, range_end = self._resolve_question_time_range(now)
             batch_size = max(1, settings.auto_review_batch_size)
@@ -63,7 +65,7 @@ class QuestionLocationAnalysisService:
                 range_end=range_end,
             )
             _logger.info(
-                "Question location analysis started: task_id=%s force_run=%s scope=%s range_start=%s range_end=%s scanned=%s batch_size=%s",
+                "Question location analysis started: task_id=%s force_run=%s scope=%s range_start=%s range_end=%s scanned=%s batch_size=%s osm_enabled=%s",
                 str(task.id),
                 force_run,
                 settings.question_location_analysis_scope,
@@ -71,171 +73,136 @@ class QuestionLocationAnalysisService:
                 range_end.isoformat() if range_end is not None else "all",
                 scanned,
                 batch_size,
+                bool(settings.question_location_analysis_osm_base_url),
             )
 
-            processed = 0
-            updated = 0
-            skipped = 0
-            failed = 0
-            llm_failed = 0
-            failed_items: list[dict[str, object]] = []
-            candidates = self.question_repository.list_without_coordinates(
-                range_start=range_start,
-                range_end=range_end,
-            )
-
-            for row in candidates:
-                question_id_raw = row.get("id")
-                if not isinstance(question_id_raw, UUID):
-                    skipped += 1
-                    failed += 1
-                    failed_items.append(
-                        {
-                            "question_id": str(question_id_raw),
-                            "error": "invalid question id type",
-                        }
-                    )
-                    _logger.error(
-                        "Question location skipped due to invalid id type: task_id=%s question_id=%s",
-                        str(task.id),
-                        str(question_id_raw),
-                    )
-                    continue
-
-                question_id = question_id_raw
-                area_value = row.get("area")
-                content_value = row.get("content")
-                area = area_value.strip() if isinstance(area_value, str) else ""
-                content = content_value.strip() if isinstance(content_value, str) else ""
-                target_text = area if area else content
-
-                processed += 1
-                _logger.info(
-                    "Question location processing: task_id=%s question_id=%s processed=%s/%s source=%s",
-                    str(task.id),
-                    str(question_id),
-                    processed,
-                    scanned,
-                    "area" if area else "content",
+            if settings.question_location_analysis_osm_base_url:
+                area_scanned = self.question_repository.count_needing_area_backfill(
+                    range_start=range_start,
+                    range_end=range_end,
+                )
+                area_candidates = self.question_repository.list_needing_area_backfill(
+                    range_start=range_start,
+                    range_end=range_end,
+                )
+                self._validate_runtime_config(requires_llm=bool(area_candidates))
+                area_phase = self._run_area_backfill_phase(
+                    task_id=task.id,
+                    candidates=area_candidates,
+                    scanned=area_scanned,
                 )
 
-                if not target_text:
-                    skipped += 1
-                    failed += 1
-                    failed_items.append(
-                        {
-                            "question_id": str(question_id),
-                            "error": "area and content are both empty",
-                        }
-                    )
-                    _logger.error(
-                        "Question location failed: task_id=%s question_id=%s reason=empty_input",
-                        str(task.id),
-                        str(question_id),
-                    )
-                    continue
+                coordinate_scanned = self.question_repository.count_needing_coordinate_backfill(
+                    range_start=range_start,
+                    range_end=range_end,
+                )
+                coordinate_candidates = self.question_repository.list_needing_coordinate_backfill(
+                    range_start=range_start,
+                    range_end=range_end,
+                )
+                coordinate_phase = self._run_coordinate_backfill_phase(
+                    task_id=task.id,
+                    candidates=coordinate_candidates,
+                    scanned=coordinate_scanned,
+                )
 
-                try:
-                    coordinates = self._extract_coordinates(target_text)
-                except Exception as exc:
-                    failed += 1
-                    llm_failed += 1
-                    failed_items.append(
-                        {
-                            "question_id": str(question_id),
-                            "error": str(exc),
-                        }
-                    )
-                    _logger.exception(
-                        "Question location extraction failed: task_id=%s question_id=%s",
-                        str(task.id),
-                        str(question_id),
-                    )
-                    continue
+                area_processed = self._int_stat(area_phase, "processed")
+                area_skipped = self._int_stat(area_phase, "skipped")
+                area_failed = self._int_stat(area_phase, "failed")
+                llm_failed = self._int_stat(area_phase, "llm_failed")
+                area_updated = self._int_stat(area_phase, "updated")
+                coordinate_processed = self._int_stat(coordinate_phase, "processed")
+                coordinate_skipped = self._int_stat(coordinate_phase, "skipped")
+                coordinate_failed = self._int_stat(coordinate_phase, "failed")
+                coordinate_osm_failed = self._int_stat(coordinate_phase, "osm_failed")
+                coordinates_updated = self._int_stat(coordinate_phase, "updated")
+                processed = area_processed + coordinate_processed
+                skipped = area_skipped + coordinate_skipped
+                failed = area_failed + coordinate_failed
+                failed_items = self._failed_items(area_phase) + self._failed_items(coordinate_phase)
 
-                if coordinates is None:
-                    failed += 1
-                    llm_failed += 1
-                    failed_items.append(
-                        {
-                            "question_id": str(question_id),
-                            "error": "coordinates_not_found",
-                        }
-                    )
-                    _logger.info(
-                        "Question location not found: task_id=%s question_id=%s source=%s",
-                        str(task.id),
-                        str(question_id),
-                        "area" if area else "content",
-                    )
-                    continue
+                result = {
+                    "mode": "osm_two_phase",
+                    "scope": settings.question_location_analysis_scope,
+                    "range_start": range_start.isoformat() if range_start is not None else None,
+                    "range_end": range_end.isoformat() if range_end is not None else None,
+                    "scanned": scanned,
+                    "processed": processed,
+                    "updated": coordinates_updated,
+                    "area_updated": area_updated,
+                    "coordinates_updated": coordinates_updated,
+                    "skipped": skipped,
+                    "failed": failed,
+                    "llm_failed": llm_failed,
+                    "osm_failed": coordinate_osm_failed,
+                    "area_scanned": area_scanned,
+                    "coordinate_scanned": coordinate_scanned,
+                    "failed_items": failed_items,
+                    "phases": {
+                        "area_backfill": area_phase,
+                        "coordinate_backfill": coordinate_phase,
+                    },
+                }
+                metrics = {
+                    "area_update_rate": (area_updated / area_processed) if area_processed else 0,
+                    "coordinate_update_rate": (coordinates_updated / coordinate_processed)
+                    if coordinate_processed
+                    else 0,
+                    "failure_rate": (failed / processed) if processed else 0,
+                }
+                _logger.info(
+                    "Question location analysis completed: task_id=%s mode=osm_two_phase scanned=%s area_updated=%s coordinates_updated=%s failed=%s",
+                    str(task.id),
+                    scanned,
+                    area_updated,
+                    coordinates_updated,
+                    failed,
+                )
+            else:
+                candidates = self.question_repository.list_without_coordinates(
+                    range_start=range_start,
+                    range_end=range_end,
+                )
+                self._validate_runtime_config(requires_llm=bool(candidates))
+                direct_phase = self._run_direct_coordinate_phase(
+                    task_id=task.id,
+                    candidates=candidates,
+                    scanned=scanned,
+                )
+                direct_processed = self._int_stat(direct_phase, "processed")
+                direct_updated = self._int_stat(direct_phase, "updated")
+                direct_skipped = self._int_stat(direct_phase, "skipped")
+                direct_failed = self._int_stat(direct_phase, "failed")
+                direct_llm_failed = self._int_stat(direct_phase, "llm_failed")
+                result = {
+                    "mode": "llm_direct",
+                    "scope": settings.question_location_analysis_scope,
+                    "range_start": range_start.isoformat() if range_start is not None else None,
+                    "range_end": range_end.isoformat() if range_end is not None else None,
+                    "scanned": scanned,
+                    "processed": direct_processed,
+                    "updated": direct_updated,
+                    "skipped": direct_skipped,
+                    "failed": direct_failed,
+                    "llm_failed": direct_llm_failed,
+                    "failed_items": self._failed_items(direct_phase),
+                }
+                metrics = {
+                    "update_rate": (direct_updated / direct_processed)
+                    if direct_processed
+                    else 0,
+                    "failure_rate": (direct_failed / direct_processed)
+                    if direct_processed
+                    else 0,
+                }
+                _logger.info(
+                    "Question location analysis completed: task_id=%s mode=llm_direct scanned=%s updated=%s failed=%s",
+                    str(task.id),
+                    scanned,
+                    direct_updated,
+                    direct_failed,
+                )
 
-                latitude, longitude = coordinates
-
-                try:
-                    changed = self.question_repository.update_coordinates(
-                        question_id=question_id,
-                        latitude=latitude,
-                        longitude=longitude,
-                    )
-                except Exception as exc:
-                    failed += 1
-                    failed_items.append(
-                        {
-                            "question_id": str(question_id),
-                            "error": f"db_update_failed: {exc}",
-                        }
-                    )
-                    _logger.exception(
-                        "Question location DB update failed: task_id=%s question_id=%s",
-                        str(task.id),
-                        str(question_id),
-                    )
-                    continue
-
-                if changed:
-                    updated += 1
-                    _logger.info(
-                        "Question location updated: task_id=%s question_id=%s latitude=%s longitude=%s",
-                        str(task.id),
-                        str(question_id),
-                        latitude,
-                        longitude,
-                    )
-                else:
-                    skipped += 1
-                    _logger.info(
-                        "Question location skipped update: task_id=%s question_id=%s reason=already_set_or_missing",
-                        str(task.id),
-                        str(question_id),
-                    )
-
-            result: dict[str, object] = {
-                "scope": settings.question_location_analysis_scope,
-                "range_start": range_start.isoformat() if range_start is not None else None,
-                "range_end": range_end.isoformat() if range_end is not None else None,
-                "scanned": scanned,
-                "processed": processed,
-                "updated": updated,
-                "skipped": skipped,
-                "failed": failed,
-                "llm_failed": llm_failed,
-                "failed_items": failed_items,
-            }
-            metrics: dict[str, object] = {
-                "update_rate": (updated / processed) if processed else 0,
-                "failure_rate": (failed / processed) if processed else 0,
-            }
-            _logger.info(
-                "Question location analysis completed: task_id=%s scanned=%s processed=%s updated=%s skipped=%s failed=%s llm_failed=%s",
-                str(task.id),
-                scanned,
-                processed,
-                updated,
-                skipped,
-                failed,
-                llm_failed,
-            )
             completed = self.task_repository.mark_completed(task.id, result=result, metrics=metrics)
             return self._to_task_response(completed or task)
         except Exception as exc:
@@ -243,7 +210,9 @@ class QuestionLocationAnalysisService:
             failed = self.task_repository.mark_failed(task.id, error_message=str(exc), max_attempts=3)
             return self._to_task_response(failed or task)
 
-    def _validate_runtime_config(self) -> None:
+    def _validate_runtime_config(self, requires_llm: bool) -> None:
+        if settings.question_location_analysis_osm_base_url and not requires_llm:
+            return
         if not settings.auto_review_model.strip():
             raise ValueError("AUTO_REVIEW_MODEL is required")
         if not settings.auto_review_base_url.strip():
@@ -273,7 +242,456 @@ class QuestionLocationAnalysisService:
         end = start.replace(year=start.year + 1)
         return start, end
 
-    def _extract_coordinates(self, text: str) -> tuple[float, float] | None:
+    def _run_area_backfill_phase(
+        self,
+        task_id: UUID,
+        candidates: list[dict[str, object]],
+        scanned: int,
+    ) -> dict[str, object]:
+        processed = 0
+        updated = 0
+        skipped = 0
+        failed = 0
+        llm_failed = 0
+        failed_items: list[dict[str, object]] = []
+        _logger.info(
+            "Question location area backfill started: task_id=%s scanned=%s",
+            str(task_id),
+            scanned,
+        )
+
+        for row in candidates:
+            question_id, content, invalid_item = self._normalize_area_candidate(row)
+            if invalid_item is not None:
+                skipped += 1
+                failed += 1
+                failed_items.append(invalid_item)
+                continue
+            assert question_id is not None
+
+            processed += 1
+            _logger.info(
+                "Question location area backfill processing: task_id=%s question_id=%s processed=%s/%s",
+                str(task_id),
+                str(question_id),
+                processed,
+                scanned,
+            )
+
+            try:
+                location_name = self._extract_location_name_from_content(content)
+            except Exception as exc:
+                failed += 1
+                llm_failed += 1
+                failed_items.append({"question_id": str(question_id), "error": str(exc)})
+                _logger.exception(
+                    "Question location area extraction failed: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            if not location_name:
+                failed += 1
+                llm_failed += 1
+                failed_items.append({"question_id": str(question_id), "error": "location_name_not_found"})
+                _logger.info(
+                    "Question location area not found: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            try:
+                changed = self.question_repository.update_area_if_empty(
+                    question_id=question_id,
+                    area=location_name,
+                )
+            except Exception as exc:
+                failed += 1
+                failed_items.append({"question_id": str(question_id), "error": f"db_update_failed: {exc}"})
+                _logger.exception(
+                    "Question location area DB update failed: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            if changed:
+                updated += 1
+                _logger.info(
+                    "Question location area updated: task_id=%s question_id=%s area=%s",
+                    str(task_id),
+                    str(question_id),
+                    location_name,
+                )
+            else:
+                skipped += 1
+                _logger.info(
+                    "Question location area skipped update: task_id=%s question_id=%s reason=already_set_or_missing",
+                    str(task_id),
+                    str(question_id),
+                )
+
+        return {
+            "scanned": scanned,
+            "processed": processed,
+            "updated": updated,
+            "skipped": skipped,
+            "failed": failed,
+            "llm_failed": llm_failed,
+            "failed_items": failed_items,
+        }
+
+    def _run_coordinate_backfill_phase(
+        self,
+        task_id: UUID,
+        candidates: list[dict[str, object]],
+        scanned: int,
+    ) -> dict[str, object]:
+        processed = 0
+        updated = 0
+        skipped = 0
+        failed = 0
+        osm_failed = 0
+        failed_items: list[dict[str, object]] = []
+        _logger.info(
+            "Question location coordinate backfill started: task_id=%s scanned=%s",
+            str(task_id),
+            scanned,
+        )
+
+        for row in candidates:
+            question_id, area, invalid_item = self._normalize_coordinate_candidate(row)
+            if invalid_item is not None:
+                skipped += 1
+                failed += 1
+                failed_items.append(invalid_item)
+                continue
+            assert question_id is not None
+
+            processed += 1
+            _logger.info(
+                "Question location coordinate backfill processing: task_id=%s question_id=%s processed=%s/%s",
+                str(task_id),
+                str(question_id),
+                processed,
+                scanned,
+            )
+
+            try:
+                coordinates = self._extract_coordinates_osm_from_name(area)
+            except Exception as exc:
+                failed += 1
+                osm_failed += 1
+                failed_items.append({"question_id": str(question_id), "error": str(exc)})
+                _logger.exception(
+                    "Question location coordinate extraction failed: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            if coordinates is None:
+                failed += 1
+                osm_failed += 1
+                failed_items.append({"question_id": str(question_id), "error": "coordinates_not_found"})
+                _logger.info(
+                    "Question location coordinates not found: task_id=%s question_id=%s area=%s",
+                    str(task_id),
+                    str(question_id),
+                    area,
+                )
+                continue
+
+            latitude, longitude = coordinates
+            try:
+                changed = self.question_repository.update_coordinates(
+                    question_id=question_id,
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+            except Exception as exc:
+                failed += 1
+                failed_items.append({"question_id": str(question_id), "error": f"db_update_failed: {exc}"})
+                _logger.exception(
+                    "Question location coordinate DB update failed: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            if changed:
+                updated += 1
+                _logger.info(
+                    "Question location coordinates updated: task_id=%s question_id=%s latitude=%s longitude=%s",
+                    str(task_id),
+                    str(question_id),
+                    latitude,
+                    longitude,
+                )
+            else:
+                skipped += 1
+                _logger.info(
+                    "Question location coordinates skipped update: task_id=%s question_id=%s reason=already_set_or_missing",
+                    str(task_id),
+                    str(question_id),
+                )
+
+        return {
+            "scanned": scanned,
+            "processed": processed,
+            "updated": updated,
+            "skipped": skipped,
+            "failed": failed,
+            "osm_failed": osm_failed,
+            "failed_items": failed_items,
+        }
+
+    def _run_direct_coordinate_phase(
+        self,
+        task_id: UUID,
+        candidates: list[dict[str, object]],
+        scanned: int,
+    ) -> dict[str, object]:
+        processed = 0
+        updated = 0
+        skipped = 0
+        failed = 0
+        llm_failed = 0
+        failed_items: list[dict[str, object]] = []
+
+        for row in candidates:
+            question_id, area, content, invalid_item = self._normalize_direct_candidate(row)
+            if invalid_item is not None:
+                skipped += 1
+                failed += 1
+                failed_items.append(invalid_item)
+                continue
+            assert question_id is not None
+
+            processed += 1
+            _logger.info(
+                "Question location processing: task_id=%s question_id=%s processed=%s/%s source=%s",
+                str(task_id),
+                str(question_id),
+                processed,
+                scanned,
+                "area" if area else "content",
+            )
+
+            try:
+                coordinates = self._extract_coordinates_from_llm(area if area else content)
+            except Exception as exc:
+                failed += 1
+                llm_failed += 1
+                failed_items.append({"question_id": str(question_id), "error": str(exc)})
+                _logger.exception(
+                    "Question location extraction failed: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            if coordinates is None:
+                failed += 1
+                llm_failed += 1
+                failed_items.append({"question_id": str(question_id), "error": "coordinates_not_found"})
+                _logger.info(
+                    "Question location not found: task_id=%s question_id=%s source=%s",
+                    str(task_id),
+                    str(question_id),
+                    "area" if area else "content",
+                )
+                continue
+
+            latitude, longitude = coordinates
+            try:
+                changed = self.question_repository.update_coordinates(
+                    question_id=question_id,
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+            except Exception as exc:
+                failed += 1
+                failed_items.append({"question_id": str(question_id), "error": f"db_update_failed: {exc}"})
+                _logger.exception(
+                    "Question location DB update failed: task_id=%s question_id=%s",
+                    str(task_id),
+                    str(question_id),
+                )
+                continue
+
+            if changed:
+                updated += 1
+                _logger.info(
+                    "Question location updated: task_id=%s question_id=%s latitude=%s longitude=%s",
+                    str(task_id),
+                    str(question_id),
+                    latitude,
+                    longitude,
+                )
+            else:
+                skipped += 1
+                _logger.info(
+                    "Question location skipped update: task_id=%s question_id=%s reason=already_set_or_missing",
+                    str(task_id),
+                    str(question_id),
+                )
+
+        return {
+            "processed": processed,
+            "updated": updated,
+            "skipped": skipped,
+            "failed": failed,
+            "llm_failed": llm_failed,
+            "failed_items": failed_items,
+        }
+
+    def _normalize_area_candidate(
+        self, row: dict[str, object]
+    ) -> tuple[UUID | None, str, dict[str, object] | None]:
+        question_id_raw = row.get("id")
+        if not isinstance(question_id_raw, UUID):
+            _logger.error(
+                "Question location area skipped due to invalid id type: question_id=%s",
+                str(question_id_raw),
+            )
+            return None, "", {"question_id": str(question_id_raw), "error": "invalid question id type"}
+
+        content_value = row.get("content")
+        content = content_value.strip() if isinstance(content_value, str) else ""
+        if not content:
+            _logger.error(
+                "Question location area failed: question_id=%s reason=empty_content",
+                str(question_id_raw),
+            )
+            return question_id_raw, "", {"question_id": str(question_id_raw), "error": "content is empty"}
+
+        return question_id_raw, content, None
+
+    def _normalize_coordinate_candidate(
+        self, row: dict[str, object]
+    ) -> tuple[UUID | None, str, dict[str, object] | None]:
+        question_id_raw = row.get("id")
+        if not isinstance(question_id_raw, UUID):
+            _logger.error(
+                "Question location coordinates skipped due to invalid id type: question_id=%s",
+                str(question_id_raw),
+            )
+            return None, "", {"question_id": str(question_id_raw), "error": "invalid question id type"}
+
+        area_value = row.get("area")
+        area = area_value.strip() if isinstance(area_value, str) else ""
+        if not area:
+            _logger.error(
+                "Question location coordinates failed: question_id=%s reason=empty_area",
+                str(question_id_raw),
+            )
+            return question_id_raw, "", {"question_id": str(question_id_raw), "error": "area is empty"}
+
+        return question_id_raw, area, None
+
+    def _normalize_direct_candidate(
+        self, row: dict[str, object]
+    ) -> tuple[UUID | None, str, str, dict[str, object] | None]:
+        question_id_raw = row.get("id")
+        if not isinstance(question_id_raw, UUID):
+            _logger.error(
+                "Question location skipped due to invalid id type: question_id=%s",
+                str(question_id_raw),
+            )
+            return None, "", "", {"question_id": str(question_id_raw), "error": "invalid question id type"}
+
+        area_value = row.get("area")
+        content_value = row.get("content")
+        area = area_value.strip() if isinstance(area_value, str) else ""
+        content = content_value.strip() if isinstance(content_value, str) else ""
+        if not area and not content:
+            _logger.error(
+                "Question location failed: question_id=%s reason=empty_input",
+                str(question_id_raw),
+            )
+            return question_id_raw, area, content, {"question_id": str(question_id_raw), "error": "area and content are both empty"}
+
+        return question_id_raw, area, content, None
+
+    def _int_stat(self, stats: dict[str, object], key: str) -> int:
+        value = stats.get(key, 0)
+        return int(value) if isinstance(value, (int, float)) else 0
+
+    def _failed_items(self, stats: dict[str, object]) -> list[dict[str, object]]:
+        value = stats.get("failed_items", [])
+        return value if isinstance(value, list) else []
+
+    def _extract_coordinates_osm_from_name(self, location_name: str) -> tuple[float, float] | None:
+        base_url = settings.question_location_analysis_osm_base_url.rstrip("/")
+        timeout = settings.question_location_analysis_osm_timeout_seconds
+        self._wait_for_nominatim_slot()
+        params = {
+            "q": location_name[:2000],
+            "format": "json",
+            "limit": 1,
+            "addressdetails": 1,
+        }
+        headers = {
+            "User-Agent": "MOPPA-LocationAnalysis/1.0 (backend-service)",
+        }
+        try:
+            resp = requests.get(
+                f"{base_url}/search",
+                params=params,
+                headers=headers,
+                timeout=timeout,
+            )
+            if resp.status_code == 429:
+                retry_after_text = resp.headers.get("Retry-After", "1")
+                retry_after = self._to_float(retry_after_text)
+                time.sleep(max(retry_after or 1.0, 1.0))
+                self._wait_for_nominatim_slot()
+                resp = requests.get(
+                    f"{base_url}/search",
+                    params=params,
+                    headers=headers,
+                    timeout=timeout,
+                )
+            resp.raise_for_status()
+            results = resp.json()
+        except Exception as exc:
+            _logger.warning("OSM Nominatim request failed: location_name=%s error=%s", location_name[:200], exc)
+            return None
+
+        if not results or not isinstance(results, list):
+            _logger.info("OSM Nominatim returned no results for: %s", location_name[:200])
+            return None
+
+        first = results[0]
+        lat = self._to_float(first.get("lat"))
+        lon = self._to_float(first.get("lon"))
+        if lat is None or lon is None:
+            _logger.info("OSM Nominatim returned invalid coords for: %s", location_name[:200])
+            return None
+        if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+            _logger.warning("OSM Nominatim returned out-of-range coords: lat=%s lon=%s", lat, lon)
+            return None
+
+        _logger.debug(
+            "OSM resolved: location_name=%s lat=%s lon=%s display=%s",
+            location_name[:100],
+            lat,
+            lon,
+            first.get("display_name", "")[:100],
+        )
+        return lat, lon
+
+    def _wait_for_nominatim_slot(self) -> None:
+        now = time.monotonic()
+        wait_seconds = self._nominatim_next_allowed_at - now
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        self._nominatim_next_allowed_at = time.monotonic() + 1.1
+
+    def _extract_coordinates_from_llm(self, text: str) -> tuple[float, float] | None:
         prompt = self._build_prompt(text)
         response = self.client.chat.completions.create(
             model=settings.auto_review_model,
@@ -297,6 +715,57 @@ class QuestionLocationAnalysisService:
         if response.choices:
             content = response.choices[0].message.content or ""
         return self._parse_coordinates(content)
+
+    def _extract_location_name_from_content(self, content: str) -> str | None:
+        prompt = (
+            "请从以下文本中识别出最明确、最核心的地理位置名称（如城市、区县、乡镇、街道、景点等）。\n"
+            "只返回地点名称，不要返回经纬度，不要返回解释，只返回一个 JSON 对象。\n"
+            '输出格式：{"location_name": string, "confidence": string}。\n'
+            "如果无法确定地点，返回 {\"location_name\": \"\", \"confidence\": \"low\"}。\n\n"
+            f"文本：{content[:2000]}\n"
+        )
+        try:
+            response = self.client.chat.completions.create(
+                model=settings.auto_review_model,
+                temperature=0,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是地址提取助手。只从用户文本中提取最核心的地点名称，"
+                            "返回纯 JSON 对象，禁止 Markdown、代码块、前后缀。"
+                            "只返回 location_name 和 confidence 两个字段。"
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            raw_content = ""
+            if response.choices:
+                raw_content = response.choices[0].message.content or ""
+            parsed = self._parse_json_content(raw_content)
+            if not isinstance(parsed, dict):
+                return None
+            payload = cast(dict[object, object], parsed)
+            p: dict[str, object] = {str(k): v for k, v in payload.items()}
+            location_name = p.get("location_name", "")
+            confidence = str(p.get("confidence", "low"))
+            if not isinstance(location_name, str) or not location_name.strip():
+                _logger.info("LLM returned empty location_name for: %s", content[:100])
+                return None
+            if confidence == "low":
+                _logger.info("LLM returned low confidence for: %s", content[:100])
+                return None
+            return location_name.strip()[:200]
+        except Exception as exc:
+            _logger.warning("Failed to extract location name from content: %s", exc)
+            return None
+
+    def _extract_coordinates(
+        self, area: str, content: str
+    ) -> tuple[tuple[float, float] | None, str | None]:
+        coords = self._extract_coordinates_from_llm(area if area else content)
+        return coords, None
 
     def _build_prompt(self, input_text: str) -> str:
         cleaned = input_text[:2000]
@@ -375,6 +844,9 @@ class QuestionLocationAnalysisService:
                 except ValueError:
                     continue
         return None
+
+    def _has_text(self, value: object) -> bool:
+        return isinstance(value, str) and bool(value.strip())
 
     def _to_task_response(self, task: TaskExecutionEntity) -> S1TaskResponseModel:
         return S1TaskResponseModel(
