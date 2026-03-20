@@ -164,7 +164,7 @@ def load_settings() -> Settings:
         auto_question_enabled=env_bool("AUTO_QUESTION_ENABLED", False),
         auto_question_cron=normalize_cron(os.getenv("AUTO_QUESTION_CRON", "0 * * * *"), "0 * * * *"),
         auto_question_generate_url=os.getenv("AUTO_QUESTION_GENERATE_URL", ""),
-        auto_question_batch_size=min(max(env_int("AUTO_QUESTION_BATCH_SIZE", 10), 1), 10),
+        auto_question_batch_size=max(env_int("AUTO_QUESTION_BATCH_SIZE", 1), 1),
         auto_question_timeout_seconds=max(env_int("AUTO_QUESTION_TIMEOUT_SECONDS", 30), 1),
         auto_question_event_scope=normalize_event_scope(os.getenv("AUTO_QUESTION_EVENT_SCOPE", "today"), "today"),
         auto_question_retry_count=max(env_int("AUTO_QUESTION_RETRY_COUNT", 2), 0),
