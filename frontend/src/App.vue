@@ -817,9 +817,6 @@ const hasManageEvents = computed(() => pagedManageEvents.value.length > 0)
 const allEventsOnPageSelected = computed(() =>
   pagedManageEvents.value.length > 0 && pagedManageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
 )
-const selectedManageEvents = computed(() =>
-  manageEvents.value.filter((item) => selectedManageEventIds.value.includes(item.id)),
-)
 
 const localFilteredManageQuestions = computed(() => {
   const keyword = questionManageSearchKeyword.value.trim().toLowerCase()
