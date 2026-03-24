@@ -16,6 +16,7 @@ from app.services.s1_auto_review_service import S1AutoReviewService
 from app.services.auto_question_service import AutoQuestionService
 from app.services.question_location_analysis_service import QuestionLocationAnalysisService
 from app.services.s1_ingest_service import S1IngestService
+from app.services.tavily_ingest_service import TavilyIngestService
 
 
 router = APIRouter(prefix="/s1", tags=["s1-ingest"], dependencies=[Depends(require_admin_user)])
@@ -49,6 +50,12 @@ def auto_question_now(db: Session = Depends(get_db)) -> S1TaskResponseModel:
 def question_location_analysis_now(db: Session = Depends(get_db)) -> S1TaskResponseModel:
     service = QuestionLocationAnalysisService(db)
     return service.run_location_analysis_job(force_run=True)
+
+
+@router.post("/jobs/tavily-ingest-now", summary="Trigger Tavily ingest job now")
+def tavily_ingest_now(db: Session = Depends(get_db)) -> S1TaskResponseModel:
+    service = TavilyIngestService(db)
+    return service.run_ingest_job(force_run=True)
 
 
 @router.get("/jobs/{task_id}", summary="Get S1 job detail")

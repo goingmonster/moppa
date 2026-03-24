@@ -8,7 +8,7 @@ from app.repositories.event_repository import EventRepository
 
 class EventService:
     def __init__(self, db: Session) -> None:
-        self.repository = EventRepository(db)
+        self.repository: EventRepository = EventRepository(db)
 
     def create(self, payload: EventCreateModel) -> str:
         return self.repository.create(payload)
@@ -19,6 +19,7 @@ class EventService:
     def search_paginated(
         self,
         keyword: str,
+        source_system: str,
         filter_status: str,
         event_time_from: datetime | None,
         event_time_to: datetime | None,
@@ -27,6 +28,7 @@ class EventService:
     ) -> tuple[list[EventEntity], int]:
         return self.repository.search_paginated(
             keyword,
+            source_system,
             filter_status,
             event_time_from,
             event_time_to,

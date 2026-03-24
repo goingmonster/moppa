@@ -617,6 +617,7 @@ const eventManagePage = ref(1)
 const eventManagePageSize = ref(10)
 const eventManageJumpPage = ref('1')
 const eventManageSearchKeyword = ref('')
+const eventManageSourceSystem = ref('')
 const eventManageFilterStatus = ref('')
 const eventManageTimeFrom = ref('')
 const eventManageTimeTo = ref('')
@@ -690,6 +691,7 @@ const selectedManageTaskIds = ref<string[]>([])
 const createTaskDialogOpen = ref(false)
 const taskDetailDialogOpen = ref(false)
 const triggerPullDialogOpen = ref(false)
+const tavilyIngestProcessing = ref(false)
 const autoReviewProcessing = ref(false)
 const autoQuestionProcessing = ref(false)
 const locationAnalysisProcessing = ref(false)
@@ -774,10 +776,14 @@ const homeEventTotalPages = computed(() => Math.max(1, Math.ceil(homeEventTotal.
 const homeHasEvents = computed(() => previewEvents.value.length > 0)
 const localFilteredManageEvents = computed(() => {
   const keyword = eventManageSearchKeyword.value.trim().toLowerCase()
+  const sourceSystem = eventManageSourceSystem.value.trim()
   const status = eventManageFilterStatus.value.trim()
   const fromMs = parseLocalDateTimeToMs(eventManageTimeFrom.value)
   const toMs = parseLocalDateTimeToMs(eventManageTimeTo.value)
   return manageEvents.value.filter((item) => {
+    if (sourceSystem && item.theater !== sourceSystem) {
+      return false
+    }
     if (status === 'reviewed') {
       if (!['passed', 'filtered'].includes(item.filterStatus)) {
         return false
@@ -785,18 +791,18 @@ const localFilteredManageEvents = computed(() => {
     } else if (status && item.filterStatus !== status) {
       return false
     }
-    if (!keyword) {
-      return true
-    }
-    const haystack = `${item.title}\n${item.summary}\n${item.theater}`.toLowerCase()
-    if (keyword && !haystack.includes(keyword)) {
-      return false
-    }
     const eventMs = Date.parse(item.timestamp)
     if (fromMs !== null && Number.isFinite(eventMs) && eventMs < fromMs) {
       return false
     }
     if (toMs !== null && Number.isFinite(eventMs) && eventMs > toMs) {
+      return false
+    }
+    if (!keyword) {
+      return true
+    }
+    const haystack = `${item.title}\n${item.summary}\n${item.theater}`.toLowerCase()
+    if (!haystack.includes(keyword)) {
       return false
     }
     return true
@@ -1741,6 +1747,28 @@ async function triggerAutoReviewNow(): Promise<void> {
     backendStatus.value = '自动评审触发失败：请检查后端接口或参数格式'
   } finally {
     autoReviewProcessing.value = false
+  }
+}
+
+async function triggerTavilyIngestNow(): Promise<void> {
+  if (!backendOnline.value) {
+    backendStatus.value = '后端离线：无法触发 Tavily 专题采集'
+    return
+  }
+
+  tavilyIngestProcessing.value = true
+  try {
+    const result = await sendJson<S1TaskResponse>('/s1/jobs/tavily-ingest-now', 'POST', {})
+    backendStatus.value = `Tavily 专题采集已触发：${result.task_id}`
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = 'Tavily 专题采集触发失败：请检查后端接口或参数格式'
+  } finally {
+    tavilyIngestProcessing.value = false
   }
 }
 
@@ -3623,18 +3651,28 @@ async function fetchManageEvents(page: number): Promise<void> {
   eventManageSearchLoading.value = true
 
   try {
-    const keyword = encodeURIComponent(eventManageSearchKeyword.value.trim())
-    const status = encodeURIComponent(eventManageFilterStatus.value.trim())
-    const fromIso = encodeURIComponent(toIsoFromLocalDateTime(eventManageTimeFrom.value))
-    const toIso = encodeURIComponent(toIsoFromLocalDateTime(eventManageTimeTo.value))
-    const timeQuery = [
-      fromIso ? `event_time_from=${fromIso}` : '',
-      toIso ? `event_time_to=${toIso}` : '',
-    ]
-      .filter((item) => item.length > 0)
-      .join('&')
+    const query = new URLSearchParams()
+    query.set('keyword', eventManageSearchKeyword.value.trim())
+    const sourceSystem = eventManageSourceSystem.value.trim()
+    const status = eventManageFilterStatus.value.trim()
+    const fromIso = toIsoFromLocalDateTime(eventManageTimeFrom.value)
+    const toIso = toIsoFromLocalDateTime(eventManageTimeTo.value)
+    if (sourceSystem) {
+      query.set('source_system', sourceSystem)
+    }
+    if (status) {
+      query.set('filter_status', status)
+    }
+    if (fromIso) {
+      query.set('event_time_from', fromIso)
+    }
+    if (toIso) {
+      query.set('event_time_to', toIso)
+    }
+    query.set('page', String(page))
+    query.set('page_size', String(eventManagePageSize.value))
     const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-      `/events/search?keyword=${keyword}&filter_status=${status}${timeQuery ? `&${timeQuery}` : ''}&page=${page}&page_size=${eventManagePageSize.value}`,
+      `/events/search?${query.toString()}`,
     )
     if (requestSeq !== eventManageSearchSeq.value) {
       return
@@ -4316,6 +4354,16 @@ watch(eventManageFilterStatus, () => {
   void fetchManageEvents(1)
 })
 
+watch(eventManageSourceSystem, () => {
+  eventManagePage.value = 1
+  eventManageJumpPage.value = '1'
+  selectedManageEventIds.value = []
+  if (!backendOnline.value || currentView.value !== 'events') {
+    return
+  }
+  void fetchManageEvents(1)
+})
+
 watch([eventManageTimeFrom, eventManageTimeTo], () => {
   eventManagePage.value = 1
   eventManageJumpPage.value = '1'
@@ -4592,6 +4640,7 @@ watch(backendStatus, (status, prev) => {
       :all-events-on-page-selected="allEventsOnPageSelected"
       :event-review-processing="eventReviewProcessing"
       :event-manage-search-keyword="eventManageSearchKeyword"
+      :event-manage-source-system="eventManageSourceSystem"
       :event-manage-filter-status="eventManageFilterStatus"
       :event-manage-time-from="eventManageTimeFrom"
       :event-manage-time-to="eventManageTimeTo"
@@ -4607,11 +4656,13 @@ watch(backendStatus, (status, prev) => {
       :event-manage-page-size="eventManagePageSize"
       :event-manage-page-size-options="eventManagePageSizeOptions"
       :event-manage-jump-page="eventManageJumpPage"
+      :source-system-options="sourceSystemOptions"
       @open-create-event="createEventDialogOpen = true; void fetchSourceSystemOptions()"
       @toggle-select-all="toggleSelectAllEventsOnPage"
       @review-events="reviewSelectedEvents"
       @delete-selected-batch="deleteSelectedEventsBatch"
       @update:search-keyword="eventManageSearchKeyword = $event"
+      @update:source-system="eventManageSourceSystem = $event"
       @update:filter-status="eventManageFilterStatus = $event"
       @update:time-from="eventManageTimeFrom = $event"
       @update:time-to="eventManageTimeTo = $event"
@@ -4734,6 +4785,7 @@ watch(backendStatus, (status, prev) => {
 
     <ManageTasksPanel
       v-if="currentView === 'tasks'"
+      :tavily-ingest-processing="tavilyIngestProcessing"
       :auto-review-processing="autoReviewProcessing"
       :auto-question-processing="autoQuestionProcessing"
       :location-analysis-processing="locationAnalysisProcessing"
@@ -4746,6 +4798,7 @@ watch(backendStatus, (status, prev) => {
       :task-manage-page-size-options="eventManagePageSizeOptions"
       :task-manage-jump-page="taskManageJumpPage"
       @open-trigger-pull="triggerPullDialogOpen = true; void fetchSourceSystemOptions()"
+      @trigger-tavily-ingest="triggerTavilyIngestNow"
       @trigger-auto-review="triggerAutoReviewNow"
       @trigger-auto-question="triggerAutoQuestionNow"
       @trigger-location-analysis="triggerLocationAnalysisNow"

@@ -9,6 +9,7 @@ from app.services.auto_question_service import AutoQuestionService
 from app.services.question_location_analysis_service import QuestionLocationAnalysisService
 from app.services.s1_auto_review_service import S1AutoReviewService
 from app.services.s1_ingest_service import S1IngestService
+from app.services.tavily_ingest_service import TavilyIngestService
 
 
 _scheduler: Any = None
@@ -49,6 +50,12 @@ def _run_question_location_analysis_job() -> None:
         _ = service.run_location_analysis_job()
 
 
+def _run_tavily_ingest_job() -> None:
+    with SessionLocal() as db:
+        service = TavilyIngestService(db)
+        _ = service.run_ingest_job()
+
+
 def start_s1_scheduler() -> None:
     global _scheduler
     if not settings.scheduler_enabled:
@@ -76,6 +83,18 @@ def start_s1_scheduler() -> None:
             )
         except Exception:
             _logger.exception("Failed to register auto review scheduler job")
+
+    if settings.tavily_ingest_enabled:
+        try:
+            tavily_trigger = cron_trigger_class.from_crontab(settings.tavily_ingest_cron)
+            scheduler.add_job(
+                _run_tavily_ingest_job,
+                trigger=tavily_trigger,
+                id="tavily_ingest",
+                replace_existing=True,
+            )
+        except Exception:
+            _logger.exception("Failed to register Tavily ingest scheduler job")
 
     if settings.auto_question_enabled:
         try:

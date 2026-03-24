@@ -1,7 +1,9 @@
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 import re
+from typing import cast
 from urllib.parse import quote_plus
 
 
@@ -45,6 +47,18 @@ class Settings:
     source_overlap_minutes: int
     s1_pull_event_scope: str
     scheduler_enabled: bool
+    tavily_ingest_enabled: bool
+    tavily_ingest_cron: str
+    tavily_keys: list[str]
+    tavily_topics: list[str]
+    tavily_max_results: int
+    tavily_search_depth: str
+    tavily_news_time_range: str
+    tavily_openai_model: str
+    tavily_openai_base_url: str
+    tavily_openai_api_key: str
+    tavily_openai_timeout_seconds: int
+    tavily_openai_batch_size: int
     auto_review_enabled: bool
     auto_review_cron: str
     auto_review_model: str
@@ -127,6 +141,30 @@ def env_csv(key: str, default: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def env_list(key: str, default: list[str]) -> list[str]:
+    value = os.getenv(key)
+    if value is None:
+        return list(default)
+
+    text = value.strip()
+    if not text:
+        return list(default)
+
+    if text.startswith("["):
+        try:
+            parsed_obj = cast(object, json.loads(text))
+        except json.JSONDecodeError:
+            return list(default)
+        if isinstance(parsed_obj, list):
+            parsed = cast(list[object], parsed_obj)
+            normalized = [str(item).strip() for item in parsed if str(item).strip()]
+            if normalized:
+                return normalized
+        return list(default)
+
+    return [item.strip() for item in text.split(",") if item.strip()] or list(default)
+
+
 def load_settings() -> Settings:
     project_root = Path(__file__).resolve().parents[2]
     load_dotenv_file(project_root / ".env")
@@ -155,6 +193,27 @@ def load_settings() -> Settings:
         source_overlap_minutes=env_int("SOURCE_OVERLAP_MINUTES", 10),
         s1_pull_event_scope=normalize_event_scope(os.getenv("S1_PULL_EVENT_SCOPE", "today"), "today"),
         scheduler_enabled=env_bool("SCHEDULER_ENABLED", True),
+        tavily_ingest_enabled=env_bool("TAVILY_INGEST_ENABLED", False),
+        tavily_ingest_cron=normalize_cron(os.getenv("TAVILY_INGEST_CRON", "0 */12 * * *"), "0 */12 * * *"),
+        tavily_keys=env_list("TAVILY_KEYS", []),
+        tavily_topics=env_list(
+            "TAVILY_TOPICS",
+            [
+                "大国博弈与战略竞争",
+                "俄乌战争与欧洲安全",
+                "全球政治与选举",
+                "亚太军事与安全",
+                "中东战争与危机",
+            ],
+        ),
+        tavily_max_results=max(1, min(env_int("TAVILY_MAX_RESULTS", 20), 20)),
+        tavily_search_depth=os.getenv("TAVILY_SEARCH_DEPTH", "basic").strip() or "basic",
+        tavily_news_time_range=os.getenv("TAVILY_NEWS_TIME_RANGE", "day").strip() or "day",
+        tavily_openai_model=os.getenv("TAVILY_OPENAI_MODEL", "").strip(),
+        tavily_openai_base_url=os.getenv("TAVILY_OPENAI_BASE_URL", "").strip(),
+        tavily_openai_api_key=os.getenv("TAVILY_OPENAI_API_KEY", "").strip(),
+        tavily_openai_timeout_seconds=max(env_int("TAVILY_OPENAI_TIMEOUT_SECONDS", 120), 1),
+        tavily_openai_batch_size=max(env_int("TAVILY_OPENAI_BATCH_SIZE", 20), 1),
         auto_review_enabled=env_bool("AUTO_REVIEW_ENABLED", False),
         auto_review_cron=os.getenv("AUTO_REVIEW_CRON", "0 * * * *"),
         auto_review_model=os.getenv("AUTO_REVIEW_MODEL", "GLM-4.6-FP8"),

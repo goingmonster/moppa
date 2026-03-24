@@ -18,6 +18,7 @@ defineProps<{
   allEventsOnPageSelected: boolean
   eventReviewProcessing: boolean
   eventManageSearchKeyword: string
+  eventManageSourceSystem: string
   eventManageFilterStatus: string
   eventManageTimeFrom: string
   eventManageTimeTo: string
@@ -33,6 +34,7 @@ defineProps<{
   eventManagePageSize: number
   eventManagePageSizeOptions: number[]
   eventManageJumpPage: string
+  sourceSystemOptions: string[]
 }>()
 
 const emit = defineEmits<{
@@ -41,6 +43,7 @@ const emit = defineEmits<{
   (e: 'review-events', value: 'passed' | 'filtered'): void
   (e: 'delete-selected-batch'): void
   (e: 'update:search-keyword', value: string): void
+  (e: 'update:source-system', value: string): void
   (e: 'update:filter-status', value: string): void
   (e: 'update:time-from', value: string): void
   (e: 'update:time-to', value: string): void
@@ -109,6 +112,10 @@ function eventFilterBadgeTone(status: string): string {
           placeholder="搜索事件标题/内容"
           @input="emit('update:search-keyword', ($event.target as HTMLInputElement).value)"
         />
+        <select :value="eventManageSourceSystem" @change="emit('update:source-system', ($event.target as HTMLSelectElement).value)">
+          <option value="">全部数据源</option>
+          <option v-for="sourceSystem in sourceSystemOptions" :key="`event-source-${sourceSystem}`" :value="sourceSystem">{{ sourceSystem }}</option>
+        </select>
         <select :value="eventManageFilterStatus" @change="emit('update:filter-status', ($event.target as HTMLSelectElement).value)">
           <option value="">全部状态</option>
           <option value="pending">pending</option>
@@ -153,7 +160,7 @@ function eventFilterBadgeTone(status: string): string {
               <span :class="['badge', eventFilterBadgeTone(eventItem.filterStatus)]">{{ eventItem.filterStatus }}</span>
             </div>
           </div>
-          <p class="item-meta">{{ eventItem.theater }}</p>
+          <p class="item-meta">来源系统：{{ eventItem.theater }}</p>
           <small class="item-subtle">{{ eventItem.summary }}</small>
           <div v-if="eventItem.tags.length > 0" class="tag-group">
             <span v-for="tag in eventItem.tags" :key="`manage-tag-${eventItem.id}-${tag}`" class="badge">{{ tag }}</span>

@@ -74,6 +74,7 @@ def list_events(
 @router.get("/search", summary="Search events by title/content")
 def search_events(
     keyword: str = Query(default=""),
+    source_system: str = Query(default=""),
     filter_status: str = Query(default=""),
     event_time_from: str | None = Query(default=None),
     event_time_to: str | None = Query(default=None),
@@ -87,6 +88,7 @@ def search_events(
     parsed_event_time_to = _parse_optional_datetime(event_time_to, "event_time_to")
     rows, total = service.search_paginated(
         keyword=keyword,
+        source_system=source_system,
         filter_status=filter_status,
         event_time_from=parsed_event_time_from,
         event_time_to=parsed_event_time_to,

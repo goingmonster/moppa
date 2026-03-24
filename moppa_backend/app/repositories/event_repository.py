@@ -10,7 +10,7 @@ from app.models.event_model import EventCreateModel, EventUpdateModel
 
 class EventRepository:
     def __init__(self, db: Session) -> None:
-        self.db = db
+        self.db: Session = db
 
     def create(self, payload: EventCreateModel) -> str:
         entity = EventEntity(
@@ -103,6 +103,7 @@ class EventRepository:
     def search_paginated(
         self,
         keyword: str,
+        source_system: str,
         filter_status: str,
         event_time_from: datetime | None,
         event_time_to: datetime | None,
@@ -123,6 +124,11 @@ class EventRepository:
             )
             base_query = base_query.where(condition)
             count_query = count_query.where(condition)
+
+        normalized_source_system = source_system.strip()
+        if normalized_source_system:
+            base_query = base_query.where(EventEntity.source_system == normalized_source_system)
+            count_query = count_query.where(EventEntity.source_system == normalized_source_system)
 
         status = filter_status.strip()
         if status:
@@ -172,6 +178,7 @@ class EventRepository:
         event_time: datetime,
         url: str | None,
         trace_id: UUID,
+        metadata: dict[str, object] | None = None,
         version: str = "v1.0",
     ) -> tuple[EventEntity, bool]:
         existing = self.db.scalar(
@@ -188,6 +195,7 @@ class EventRepository:
             credibility_level=credibility_level,
             event_time=event_time,
             url=url,
+            metadata_=metadata or {},
             trace_id=trace_id,
             filter_status="pending",
         )

@@ -9,6 +9,7 @@ interface TaskItem {
 }
 
 defineProps<{
+  tavilyIngestProcessing: boolean
   autoReviewProcessing: boolean
   autoQuestionProcessing: boolean
   locationAnalysisProcessing: boolean
@@ -24,6 +25,7 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'open-trigger-pull'): void
+  (e: 'trigger-tavily-ingest'): void
   (e: 'trigger-auto-review'): void
   (e: 'trigger-auto-question'): void
   (e: 'trigger-location-analysis'): void
@@ -64,6 +66,9 @@ function taskStatusBadgeTone(status: TaskItem['status']): string {
       </div>
       <div class="action-row manage-toolbar">
         <button class="action-btn" @click="emit('open-trigger-pull')">拉取烽火事件</button>
+        <button class="action-btn" :disabled="tavilyIngestProcessing" @click="emit('trigger-tavily-ingest')">
+          {{ tavilyIngestProcessing ? '采集中...' : 'Tavily专题采集' }}
+        </button>
         <button class="action-btn" :disabled="autoReviewProcessing" @click="emit('trigger-auto-review')">
           {{ autoReviewProcessing ? '评审中...' : '一键评审' }}
         </button>
