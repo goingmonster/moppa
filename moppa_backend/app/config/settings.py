@@ -66,6 +66,7 @@ class Settings:
     question_location_analysis_osm_base_url: str
     question_location_analysis_osm_timeout_seconds: int
     log_level: str
+    log_file_path: str
     auth_enabled: bool
     auth_access_token_expire_minutes: int
     auth_refresh_token_expire_days: int
@@ -181,6 +182,7 @@ def load_settings() -> Settings:
         question_location_analysis_osm_base_url=os.getenv("QUESTION_LOCATION_ANALYSIS_OSM_BASE_URL", "").strip(),
         question_location_analysis_osm_timeout_seconds=env_int("QUESTION_LOCATION_ANALYSIS_OSM_TIMEOUT_SECONDS", 10),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        log_file_path=os.getenv("LOG_FILE_PATH", "logs/backend.log").strip(),
         auth_enabled=env_bool("AUTH_ENABLED", False),
         auth_access_token_expire_minutes=env_int("AUTH_ACCESS_TOKEN_EXPIRE_MINUTES", 30),
         auth_refresh_token_expire_days=env_int("AUTH_REFRESH_TOKEN_EXPIRE_DAYS", 14),

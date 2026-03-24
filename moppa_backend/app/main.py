@@ -19,7 +19,7 @@ from app.jobs.s1_scheduler import start_s1_scheduler, stop_s1_scheduler
 from app.logging_config import configure_logging
 
 
-configure_logging(settings.log_level)
+configure_logging(settings.log_level, settings.log_file_path)
 
 
 def root() -> dict[str, str]:

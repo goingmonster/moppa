@@ -24,6 +24,8 @@ services:
         condition: service_healthy
     env_file:
       - ./moppa_backend/.env.example
+    volumes:
+      - ./moppa_backend/logs:/app/logs
     ports:
       - "${BACKEND_PUBLIC_PORT:-8000}:8000"
 
