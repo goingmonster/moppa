@@ -15,6 +15,7 @@ services:
       retries: 20
 
   backend:
+    image: moppa-backend:latest
     build:
       context: ./moppa_backend
       dockerfile: Dockerfile
@@ -27,6 +28,7 @@ services:
       - "${BACKEND_PUBLIC_PORT:-8000}:8000"
 
   frontend:
+    image: moppa-frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile
