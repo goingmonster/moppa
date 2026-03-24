@@ -1,3 +1,5 @@
+from collections.abc import Callable
+from http.client import RemoteDisconnected
 import json
 import logging
 import math
@@ -11,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import EventEntity, QuestionTemplateEntity, TaskExecutionEntity
+from app.db.session import SessionLocal
 from app.models.question_model import QuestionCreateModel
 from app.models.s1_ingest_model import S1TaskResponseModel
 from app.repositories.event_repository import EventRepository
@@ -22,6 +25,8 @@ _logger = logging.getLogger(__name__)
 
 
 class AutoQuestionService:
+    _session_factory: Callable[[], Session] = SessionLocal
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.event_repository = EventRepository(db)
@@ -285,7 +290,15 @@ class AutoQuestionService:
                 return self._to_task_response(failed or task)
             except Exception:
                 _logger.exception("Auto question mark_failed failed: task_id=%s", str(task.id))
+                failed = self._mark_failed_with_fresh_session(task.id, str(exc))
+                if failed is not None:
+                    return self._to_task_response(failed)
                 return self._to_task_response(task)
+            finally:
+                try:
+                    self.db.close()
+                except Exception:
+                    _logger.exception("Auto question session close failed: task_id=%s", str(task.id))
 
     def _validate_runtime_config(self) -> None:
         if not settings.auto_question_generate_url.strip():
@@ -432,7 +445,10 @@ class AutoQuestionService:
                 saved += 1
             except Exception:
                 _logger.exception("Auto question save failed for one generated question")
-                self.db.rollback()
+                try:
+                    self.db.rollback()
+                except Exception:
+                    _logger.exception("Auto question rollback failed while saving generated question")
 
         return saved
 
@@ -639,6 +655,10 @@ class AutoQuestionService:
             raise RuntimeError(
                 f"Auto question API HTTP error: status={exc.code} body={error_body[:500]}"
             ) from exc
+        except RemoteDisconnected as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            _logger.error("Auto question API call remote disconnected: elapsed_ms=%s", elapsed_ms)
+            raise RuntimeError("Auto question API remote disconnected") from exc
         except URLError as exc:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             _logger.error(
@@ -655,6 +675,20 @@ class AutoQuestionService:
                 settings.auto_question_timeout_seconds,
             )
             raise RuntimeError("Auto question API request timed out") from exc
+
+    def _mark_failed_with_fresh_session(
+        self, task_id: UUID, error_message: str
+    ) -> TaskExecutionEntity | None:
+        try:
+            with self._session_factory() as db:
+                return TaskExecutionRepository(db).mark_failed(
+                    task_id,
+                    error_message=error_message,
+                    max_attempts=3,
+                )
+        except Exception:
+            _logger.exception("Auto question mark_failed fallback failed: task_id=%s", str(task_id))
+            return None
 
     def _to_task_response(self, task: TaskExecutionEntity) -> S1TaskResponseModel:
         return S1TaskResponseModel(
