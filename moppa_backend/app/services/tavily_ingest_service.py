@@ -69,7 +69,9 @@ class TavilyIngestService:
                 "topics": list(settings.tavily_topics),
                 "topic_runs": [],
                 "fetched": 0,
+                "reviewed": 0,
                 "generated": 0,
+                "rejected": 0,
                 "accepted": 0,
                 "duplicate": 0,
                 "failed_topics": 0,
@@ -96,7 +98,9 @@ class TavilyIngestService:
                     "topic": topic,
                     "status": "completed",
                     "fetched": 0,
+                    "reviewed": 0,
                     "generated": 0,
+                    "rejected": 0,
                     "accepted": 0,
                     "duplicate": 0,
                     "fetch_duration_seconds": 0.0,
@@ -128,23 +132,35 @@ class TavilyIngestService:
                     )
 
                     extract_started_at = perf_counter()
-                    events = self.extraction_service.build_events(topic=topic, results=search_results)
+                    reviewed_events = self.extraction_service.review_events(topic=topic, results=search_results)
                     extract_duration_seconds = self._round_seconds(perf_counter() - extract_started_at)
                     topic_result["extract_duration_seconds"] = extract_duration_seconds
                     metrics["extract_duration_seconds"] = self._float_value(metrics, "extract_duration_seconds") + extract_duration_seconds
-                    topic_result["generated"] = len(events)
-                    result["generated"] = self._int_value(result, "generated") + len(events)
+                    topic_result["reviewed"] = len(reviewed_events)
+                    result["reviewed"] = self._int_value(result, "reviewed") + len(reviewed_events)
+                    accepted_reviews = [item for item in reviewed_events if item.should_ingest and item.event is not None]
+                    rejected_reviews = [item for item in reviewed_events if not item.should_ingest]
+                    topic_result["generated"] = len(accepted_reviews)
+                    topic_result["rejected"] = len(rejected_reviews)
+                    topic_result["rejected_reasons"] = [item.reason for item in rejected_reviews[:10]]
+                    result["generated"] = self._int_value(result, "generated") + len(accepted_reviews)
+                    result["rejected"] = self._int_value(result, "rejected") + len(rejected_reviews)
                     _logger.info(
-                        "Tavily ingest topic transformed: task_id=%s topic=%s generated=%s extract_duration_seconds=%s sample_titles=%s",
+                        "Tavily ingest topic transformed: task_id=%s topic=%s reviewed=%s generated=%s rejected=%s extract_duration_seconds=%s sample_titles=%s",
                         str(task.id),
                         topic,
-                        len(events),
+                        len(reviewed_events),
+                        len(accepted_reviews),
+                        len(rejected_reviews),
                         extract_duration_seconds,
-                        [item.title for item in events[:3]],
+                        [item.event.title for item in accepted_reviews[:3] if item.event is not None],
                     )
 
                     store_started_at = perf_counter()
-                    for event in events:
+                    for reviewed in accepted_reviews:
+                        event = reviewed.event
+                        if event is None:
+                            continue
                         entity, created = self.event_repository.ingest_event(
                             event_key=event.event_key,
                             title=event.title,
@@ -157,6 +173,8 @@ class TavilyIngestService:
                             metadata={
                                 "topic": topic,
                                 "origin": "tavily",
+                                "topic_match_score": reviewed.topic_match_score,
+                                "ingest_reason": reviewed.reason,
                             },
                         )
                         if created:
@@ -174,11 +192,12 @@ class TavilyIngestService:
                     topic_result["store_duration_seconds"] = store_duration_seconds
                     metrics["store_duration_seconds"] = self._float_value(metrics, "store_duration_seconds") + store_duration_seconds
                     _logger.info(
-                        "Tavily ingest topic stored: task_id=%s topic=%s accepted=%s duplicate=%s total_generated=%s store_duration_seconds=%s",
+                        "Tavily ingest topic stored: task_id=%s topic=%s accepted=%s duplicate=%s rejected=%s total_generated=%s store_duration_seconds=%s",
                         str(task.id),
                         topic,
                         self._int_value(topic_result, "accepted"),
                         self._int_value(topic_result, "duplicate"),
+                        self._int_value(topic_result, "rejected"),
                         self._int_value(topic_result, "generated"),
                         store_duration_seconds,
                     )
@@ -203,12 +222,14 @@ class TavilyIngestService:
                 )
                 metrics["total_duration_seconds"] = self._round_seconds(perf_counter() - task_started_at)
                 _logger.info(
-                    "Tavily ingest topic finished: task_id=%s topic=%s status=%s fetched=%s generated=%s accepted=%s duplicate=%s failed_topics=%s topic_duration_seconds=%s",
+                    "Tavily ingest topic finished: task_id=%s topic=%s status=%s fetched=%s reviewed=%s generated=%s rejected=%s accepted=%s duplicate=%s failed_topics=%s topic_duration_seconds=%s",
                     str(task.id),
                     topic,
                     str(topic_result.get("status") or "completed"),
                     self._int_value(topic_result, "fetched"),
+                    self._int_value(topic_result, "reviewed"),
                     self._int_value(topic_result, "generated"),
+                    self._int_value(topic_result, "rejected"),
                     self._int_value(topic_result, "accepted"),
                     self._int_value(topic_result, "duplicate"),
                     self._int_value(result, "failed_topics"),
@@ -221,10 +242,12 @@ class TavilyIngestService:
 
             metrics["total_duration_seconds"] = self._round_seconds(perf_counter() - task_started_at)
             _logger.info(
-                "Tavily ingest task completed: task_id=%s fetched=%s generated=%s accepted=%s duplicate=%s failed_topics=%s acceptance_rate=%s fetch_duration_seconds=%s extract_duration_seconds=%s store_duration_seconds=%s total_duration_seconds=%s",
+                "Tavily ingest task completed: task_id=%s fetched=%s reviewed=%s generated=%s rejected=%s accepted=%s duplicate=%s failed_topics=%s acceptance_rate=%s fetch_duration_seconds=%s extract_duration_seconds=%s store_duration_seconds=%s total_duration_seconds=%s",
                 str(task.id),
                 self._int_value(result, "fetched"),
+                self._int_value(result, "reviewed"),
                 self._int_value(result, "generated"),
+                self._int_value(result, "rejected"),
                 self._int_value(result, "accepted"),
                 self._int_value(result, "duplicate"),
                 self._int_value(result, "failed_topics"),
