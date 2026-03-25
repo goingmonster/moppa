@@ -303,6 +303,10 @@ function apiBaseUrl(): string {
   return (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || 'http://127.0.0.1:8000'
 }
 
+function basemapUrlTemplate(): string {
+  return (import.meta.env.VITE_BASEMAP_URL as string | undefined)?.trim() || ''
+}
+
 function toLocalDayStart(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
 }
@@ -632,6 +636,7 @@ async function init3DMap(): Promise<void> {
 
   const cesium = await loadCesium()
   const palette = getMapThemePalette()
+  const configuredBasemapUrl = basemapUrlTemplate()
 
   cesiumViewer = new cesium.Viewer(map3dRef.value, {
     baseLayer: false,
@@ -650,12 +655,16 @@ async function init3DMap(): Promise<void> {
     maximumRenderTimeChange: Number.POSITIVE_INFINITY,
   })
 
-  // Add OpenStreetMap as the base imagery layer
-  cesiumViewer.imageryLayers.addImageryProvider(
-    new cesium.OpenStreetMapImageryProvider({
-      url: 'https://tile.openstreetmap.org/',
-    }),
-  )
+  const imageryProvider = configuredBasemapUrl
+    ? new cesium.UrlTemplateImageryProvider({
+        url: configuredBasemapUrl,
+        tilingScheme: new cesium.WebMercatorTilingScheme(),
+      })
+    : new cesium.OpenStreetMapImageryProvider({
+        url: 'https://tile.openstreetmap.org/',
+      })
+
+  cesiumViewer.imageryLayers.addImageryProvider(imageryProvider)
 
   // Ensure globe and atmosphere are visible
   cesiumViewer.scene.skyAtmosphere!.show = true
@@ -667,7 +676,6 @@ async function init3DMap(): Promise<void> {
   cesiumViewer.scene.skyAtmosphere!.brightnessShift = -0.18
   cesiumViewer.scene.globe.showGroundAtmosphere = true
 
-  // Hover detection: show tooltip only when mouse is over a point
   cesiumHoverHandler = new cesium.ScreenSpaceEventHandler(cesiumViewer.scene.canvas)
   cesiumHoverHandler.setInputAction((movement: { endPosition: { x: number; y: number } }) => {
     updateTooltipPosition(movement.endPosition.x, movement.endPosition.y)
