@@ -58,37 +58,53 @@ class EventRepository:
             )
         )
 
-    def list_passed_today(self, day_start: datetime, day_end: datetime, limit: int, offset: int) -> list[EventEntity]:
+    def list_passed_today(
+        self,
+        day_start: datetime,
+        day_end: datetime,
+        limit: int,
+        offset: int,
+        source_systems: list[str] | None = None,
+    ) -> list[EventEntity]:
+        query = select(EventEntity).where(
+            EventEntity.deleted_at.is_(None),
+            EventEntity.filter_status == "passed",
+            EventEntity.event_time >= day_start,
+            EventEntity.event_time < day_end,
+        )
+        if source_systems:
+            query = query.where(EventEntity.source_system.in_(source_systems))
         return list(
             self.db.scalars(
-                select(EventEntity)
-                .where(
-                    EventEntity.deleted_at.is_(None),
-                    EventEntity.filter_status == "passed",
-                    EventEntity.event_time >= day_start,
-                    EventEntity.event_time < day_end,
-                )
+                query
                 .order_by(EventEntity.event_time.asc(), EventEntity.id.asc())
                 .offset(offset)
                 .limit(limit)
             )
         )
 
-    def list_passed(self, limit: int, offset: int) -> list[EventEntity]:
+    def list_passed(self, limit: int, offset: int, source_systems: list[str] | None = None) -> list[EventEntity]:
+        query = select(EventEntity).where(
+            EventEntity.deleted_at.is_(None),
+            EventEntity.filter_status == "passed",
+        )
+        if source_systems:
+            query = query.where(EventEntity.source_system.in_(source_systems))
         return list(
             self.db.scalars(
-                select(EventEntity)
-                .where(
-                    EventEntity.deleted_at.is_(None),
-                    EventEntity.filter_status == "passed",
-                )
+                query
                 .order_by(EventEntity.event_time.asc(), EventEntity.id.asc())
                 .offset(offset)
                 .limit(limit)
             )
         )
 
-    def count_passed(self, day_start: datetime | None = None, day_end: datetime | None = None) -> int:
+    def count_passed(
+        self,
+        day_start: datetime | None = None,
+        day_end: datetime | None = None,
+        source_systems: list[str] | None = None,
+    ) -> int:
         query = select(func.count()).select_from(EventEntity).where(
             EventEntity.deleted_at.is_(None),
             EventEntity.filter_status == "passed",
@@ -97,6 +113,8 @@ class EventRepository:
             query = query.where(EventEntity.event_time >= day_start)
         if day_end is not None:
             query = query.where(EventEntity.event_time < day_end)
+        if source_systems:
+            query = query.where(EventEntity.source_system.in_(source_systems))
         total = self.db.scalar(query)
         return int(total or 0)
 

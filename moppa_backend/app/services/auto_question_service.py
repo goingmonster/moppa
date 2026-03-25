@@ -75,7 +75,11 @@ class AutoQuestionService:
             range_start, range_end = self._resolve_event_time_range(now)
             batch_size = settings.auto_question_batch_size
             offset = 0
-            total_events = self.event_repository.count_passed(day_start=range_start, day_end=range_end)
+            total_events = self.event_repository.count_passed(
+                day_start=range_start,
+                day_end=range_end,
+                source_systems=settings.auto_question_source_systems,
+            )
             total_batches = math.ceil(total_events / batch_size) if total_events > 0 else 0
 
             _logger.info(
@@ -98,13 +102,18 @@ class AutoQuestionService:
 
             while True:
                 if range_start is None or range_end is None:
-                    events = self.event_repository.list_passed(limit=batch_size, offset=offset)
+                    events = self.event_repository.list_passed(
+                        limit=batch_size,
+                        offset=offset,
+                        source_systems=settings.auto_question_source_systems,
+                    )
                 else:
                     events = self.event_repository.list_passed_today(
                         day_start=range_start,
                         day_end=range_end,
                         limit=batch_size,
                         offset=offset,
+                        source_systems=settings.auto_question_source_systems,
                     )
                 if not events:
                     break

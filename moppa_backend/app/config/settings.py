@@ -72,6 +72,7 @@ class Settings:
     auto_question_batch_size: int
     auto_question_timeout_seconds: int
     auto_question_event_scope: str
+    auto_question_source_systems: list[str]
     auto_question_retry_count: int
     auto_question_retry_backoff_seconds: int
     question_location_analysis_enabled: bool
@@ -227,6 +228,7 @@ def load_settings() -> Settings:
         auto_question_batch_size=max(env_int("AUTO_QUESTION_BATCH_SIZE", 1), 1),
         auto_question_timeout_seconds=max(env_int("AUTO_QUESTION_TIMEOUT_SECONDS", 30), 1),
         auto_question_event_scope=normalize_event_scope(os.getenv("AUTO_QUESTION_EVENT_SCOPE", "today"), "today"),
+        auto_question_source_systems=env_list("AUTO_QUESTION_SOURCE_SYSTEMS", ["tavily"]),
         auto_question_retry_count=max(env_int("AUTO_QUESTION_RETRY_COUNT", 2), 0),
         auto_question_retry_backoff_seconds=max(env_int("AUTO_QUESTION_RETRY_BACKOFF_SECONDS", 2), 1),
         question_location_analysis_enabled=env_bool("QUESTION_LOCATION_ANALYSIS_ENABLED", False),

@@ -142,3 +142,46 @@ class AutoQuestionServiceTest(TestCase):
             max_attempts=3,
         )
         self.assertEqual(result.status, "failed")
+
+    def test_run_auto_question_job_only_reads_passed_configured_source_events(self) -> None:
+        service = self._build_service()
+        task = SimpleNamespace(id=uuid4(), status="running", result={})
+        completed_task = SimpleNamespace(id=task.id, status="completed", result={})
+        template = SimpleNamespace(
+            id=uuid4(),
+            event_domain="macro",
+            question_template="Will X happen?",
+            difficulty_level=1,
+            candidate_answer_type="single_choice",
+            event_type="news",
+        )
+
+        service.task_repository.get_by_idempotency_key.return_value = None
+        service.task_repository.create_pending.return_value = task
+        service.task_repository.mark_running.return_value = task
+        service.task_repository.mark_completed.return_value = completed_task
+        service.template_repository.list_all.return_value = [template]
+        service.event_repository.count_passed.return_value = 0
+        service.event_repository.list_passed_today.return_value = []
+
+        with patch("app.services.auto_question_service.settings") as mock_settings:
+            mock_settings.auto_question_generate_url = "http://example.invalid"
+            mock_settings.auto_question_event_scope = "today"
+            mock_settings.auto_question_batch_size = 10
+            mock_settings.auto_question_source_systems = ["tavily", "news_event_crawler"]
+            result = service.run_auto_question_job()
+
+        service.event_repository.count_passed.assert_called_once_with(
+            day_start=service.event_repository.count_passed.call_args.kwargs["day_start"],
+            day_end=service.event_repository.count_passed.call_args.kwargs["day_end"],
+            source_systems=["tavily", "news_event_crawler"],
+        )
+        service.event_repository.list_passed.assert_not_called()
+        service.event_repository.list_passed_today.assert_called_once_with(
+            day_start=service.event_repository.list_passed_today.call_args.kwargs["day_start"],
+            day_end=service.event_repository.list_passed_today.call_args.kwargs["day_end"],
+            limit=10,
+            offset=0,
+            source_systems=["tavily", "news_event_crawler"],
+        )
+        self.assertEqual(result.status, "completed")
