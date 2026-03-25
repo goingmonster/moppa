@@ -25,7 +25,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 If the backend container can resolve `nominatim.openstreetmap.org` but outbound HTTPS fails with `[Errno 101] Network is unreachable`, the host is usually fine and the container is hitting an unusable IPv6 path first.
 
-The repo's `docker-compose.yml` temporarily disables IPv6 for the `backend` service so `requests` can use the working IPv4 path. After redeploying, verify from the container with:
+The repo's `docker-compose.yml` temporarily disables IPv6 for the `backend` service so `requests` can use the working IPv4 path. If the host reaches the internet through `HTTP_PROXY` or `HTTPS_PROXY`, export those variables in the same shell before `docker compose up`, or place them in the project `.env`, so the backend container inherits them too. After redeploying, verify from the container with:
 
 ```bash
 docker compose exec backend python - <<'PY'
