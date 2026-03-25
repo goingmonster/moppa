@@ -613,24 +613,24 @@ const homeEventPage = ref(1)
 const homeEventPageSize = 3
 const homeEventTotal = ref(homeEvents.value.length)
 const homeEventJumpPage = ref('1')
-const eventManagePage = ref(1)
+const eventManagePage = ref(0)
 const eventManagePageSize = ref(10)
-const eventManageJumpPage = ref('1')
 const eventManageSearchKeyword = ref('')
 const eventManageSourceSystem = ref('')
 const eventManageFilterStatus = ref('')
 const eventManageTimeFrom = ref('')
 const eventManageTimeTo = ref('')
 const eventManageSearchLoading = ref(false)
-const eventManageSearchSeq = ref(0)
+const eventManageHasMore = ref(true)
+const eventManageReloadSeq = ref(0)
+let eventManageReloadPending = false
 let eventManageSearchTimer: number | undefined
 const manageEvents = ref<EventItem[]>([])
 const manageEventTotal = ref(0)
 const selectedManageEventIds = ref<string[]>([])
 const eventReviewProcessing = ref(false)
-const questionManagePage = ref(1)
+const questionManagePage = ref(0)
 const questionManagePageSize = ref(10)
-const questionManageJumpPage = ref('1')
 const questionManageSearchKeyword = ref('')
 const questionManageFilterEventDomain = ref('')
 const questionManageFilterEventType = ref('')
@@ -640,7 +640,9 @@ const questionManageFilterStatus = ref('')
 const questionManageFilterLevel = ref('')
 const questionManageDeletedMode = ref<'active_only' | 'with_deleted' | 'deleted_only'>('active_only')
 const questionManageSearchLoading = ref(false)
-const questionManageSearchSeq = ref(0)
+const questionManageHasMore = ref(true)
+const questionManageReloadSeq = ref(0)
+let questionManageReloadPending = false
 let questionManageSearchTimer: number | undefined
 const manageQuestions = ref<QuestionItem[]>([])
 const questionManageTotal = ref(questions.value.length)
@@ -780,7 +782,7 @@ const localFilteredManageEvents = computed(() => {
   const status = eventManageFilterStatus.value.trim()
   const fromMs = parseLocalDateTimeToMs(eventManageTimeFrom.value)
   const toMs = parseLocalDateTimeToMs(eventManageTimeTo.value)
-  return manageEvents.value.filter((item) => {
+  return sortByEventTimeDesc([...homeEvents.value]).filter((item) => {
     if (sourceSystem && item.theater !== sourceSystem) {
       return false
     }
@@ -808,20 +810,11 @@ const localFilteredManageEvents = computed(() => {
     return true
   })
 })
-const eventManageTotalPages = computed(() => {
-  const total = backendOnline.value ? manageEventTotal.value : localFilteredManageEvents.value.length
-  return Math.max(1, Math.ceil(total / eventManagePageSize.value))
-})
-const pagedManageEvents = computed(() => {
-  if (backendOnline.value) {
-    return manageEvents.value
-  }
-  const start = (eventManagePage.value - 1) * eventManagePageSize.value
-  return localFilteredManageEvents.value.slice(start, start + eventManagePageSize.value)
-})
-const hasManageEvents = computed(() => pagedManageEvents.value.length > 0)
-const allEventsOnPageSelected = computed(() =>
-  pagedManageEvents.value.length > 0 && pagedManageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
+const manageEventMatchingTotal = computed(() =>
+  backendOnline.value ? manageEventTotal.value : localFilteredManageEvents.value.length,
+)
+const allLoadedEventsSelected = computed(() =>
+  manageEvents.value.length > 0 && manageEvents.value.every((item) => selectedManageEventIds.value.includes(item.id)),
 )
 
 const localFilteredManageQuestions = computed(() => {
@@ -878,21 +871,9 @@ const questionManageFiltersApplied = computed(() =>
     || questionManageDeletedMode.value !== 'active_only',
   ),
 )
-const questionManageTotalPages = computed(() => {
-  const total = backendOnline.value ? questionManageTotal.value : localFilteredManageQuestions.value.length
-  return Math.max(1, Math.ceil(total / questionManagePageSize.value))
-})
-const pagedManageQuestions = computed(() => {
-  if (backendOnline.value) {
-    return manageQuestions.value
-  }
-  const start = (questionManagePage.value - 1) * questionManagePageSize.value
-  return localFilteredManageQuestions.value.slice(start, start + questionManagePageSize.value)
-})
-const hasManageQuestions = computed(() => pagedManageQuestions.value.length > 0)
-const allQuestionsOnPageSelected = computed(() =>
-  pagedManageQuestions.value.filter((item) => !item.deletedAt).length > 0
-  && pagedManageQuestions.value
+const allLoadedQuestionsSelected = computed(() =>
+  manageQuestions.value.filter((item) => !item.deletedAt).length > 0
+  && manageQuestions.value
     .filter((item) => !item.deletedAt)
     .every((item) => selectedManageQuestionIds.value.includes(item.id)),
 )
@@ -1385,35 +1366,15 @@ function toggleManageEventSelection(eventId: string): void {
 }
 
 function toggleSelectAllEventsOnPage(): void {
-  if (allEventsOnPageSelected.value) {
+  if (allLoadedEventsSelected.value) {
     selectedManageEventIds.value = selectedManageEventIds.value.filter(
-      (id) => !pagedManageEvents.value.some((item) => item.id === id),
+      (id) => !manageEvents.value.some((item) => item.id === id),
     )
     return
   }
 
-  const pageIds = pagedManageEvents.value.map((item) => item.id)
+  const pageIds = manageEvents.value.map((item) => item.id)
   selectedManageEventIds.value = Array.from(new Set([...selectedManageEventIds.value, ...pageIds]))
-}
-
-function setEventManagePageSize(size: number): void {
-  eventManagePageSize.value = size
-  eventManagePage.value = 1
-  eventManageJumpPage.value = '1'
-  if (backendOnline.value) {
-    void fetchManageEvents(1)
-  }
-}
-
-function goToEventManagePage(page: number): void {
-  if (page < 1 || page > eventManageTotalPages.value) {
-    return
-  }
-  eventManagePage.value = page
-  eventManageJumpPage.value = String(page)
-  if (backendOnline.value) {
-    void fetchManageEvents(page)
-  }
 }
 
 function goHomeEventPage(delta: number): void {
@@ -1443,16 +1404,8 @@ function jumpToHomeEventPageFromInput(): void {
   homeEventJumpPage.value = String(target)
 }
 
-function goManageEventPage(delta: number): void {
-  const next = eventManagePage.value + delta
-  if (next < 1 || next > eventManageTotalPages.value) {
-    return
-  }
-  goToEventManagePage(next)
-}
-
 function toggleManageQuestionSelection(questionId: string): void {
-  const target = pagedManageQuestions.value.find((item) => item.id === questionId)
+  const target = manageQuestions.value.find((item) => item.id === questionId)
   if (target?.deletedAt) {
     return
   }
@@ -1464,10 +1417,10 @@ function toggleManageQuestionSelection(questionId: string): void {
 }
 
 function toggleSelectAllQuestionsOnPage(): void {
-  const selectablePageIds = pagedManageQuestions.value
+  const selectablePageIds = manageQuestions.value
     .filter((item) => !item.deletedAt)
     .map((item) => item.id)
-  if (allQuestionsOnPageSelected.value) {
+  if (allLoadedQuestionsSelected.value) {
     selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter(
       (id) => !selectablePageIds.includes(id),
     )
@@ -1475,50 +1428,6 @@ function toggleSelectAllQuestionsOnPage(): void {
   }
 
   selectedManageQuestionIds.value = Array.from(new Set([...selectedManageQuestionIds.value, ...selectablePageIds]))
-}
-
-function setQuestionManagePageSize(size: number): void {
-  questionManagePageSize.value = size
-  questionManagePage.value = 1
-  questionManageJumpPage.value = '1'
-  if (backendOnline.value) {
-    void fetchManageQuestions(1)
-  }
-}
-
-function goManageQuestionPage(delta: number): void {
-  const next = questionManagePage.value + delta
-  if (next < 1 || next > questionManageTotalPages.value) {
-    return
-  }
-  goToQuestionManagePage(next)
-}
-
-function goToQuestionManagePage(page: number): void {
-  if (page < 1 || page > questionManageTotalPages.value) {
-    return
-  }
-  questionManagePage.value = page
-  questionManageJumpPage.value = String(page)
-  if (backendOnline.value) {
-    void fetchManageQuestions(page)
-  }
-}
-
-function jumpToEventPageFromInput(): void {
-  const page = Number(eventManageJumpPage.value)
-  if (!Number.isFinite(page)) {
-    return
-  }
-  goToEventManagePage(Math.min(Math.max(1, Math.trunc(page)), eventManageTotalPages.value))
-}
-
-function jumpToQuestionPageFromInput(): void {
-  const page = Number(questionManageJumpPage.value)
-  if (!Number.isFinite(page)) {
-    return
-  }
-  goToQuestionManagePage(Math.min(Math.max(1, Math.trunc(page)), questionManageTotalPages.value))
 }
 
 function resetQuestionManageFilters(): void {
@@ -2330,12 +2239,13 @@ async function deleteSelectedEventsBatch(): Promise<void> {
       backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟事件`
     } else {
       await sendJson('/events', 'DELETE', { ids })
-      await Promise.all([fetchHomeEvents(), fetchManageEvents(eventManagePage.value)])
+      await fetchHomeEvents()
+      requestManageEventsReload()
       backendStatus.value = `事件批量删除成功（${ids.length} 条）`
     }
     selectedManageEventIds.value = []
-    if (eventManagePage.value > eventManageTotalPages.value) {
-      eventManagePage.value = eventManageTotalPages.value
+    if (!backendOnline.value && currentView.value === 'events') {
+      requestManageEventsReload()
     }
   } catch {
     backendStatus.value = '事件批量删除失败：请检查后端接口或参数格式'
@@ -2371,10 +2281,14 @@ async function reviewSelectedEvents(targetStatus: 'passed' | 'filtered'): Promis
           }),
         ),
       )
-      await Promise.all([fetchManageEvents(eventManagePage.value), fetchHomeEvents()])
+      await fetchHomeEvents()
+      requestManageEventsReload()
       backendStatus.value = `事件审核完成：${ids.length} 条 -> ${targetStatus}`
     }
     selectedManageEventIds.value = selectedManageEventIds.value.filter((id) => !ids.includes(id))
+    if (!backendOnline.value && currentView.value === 'events') {
+      requestManageEventsReload()
+    }
   } catch {
     backendStatus.value = '事件审核失败：请检查后端接口或参数格式'
   } finally {
@@ -2418,15 +2332,16 @@ async function deleteQuestionsByIds(ids: string[], deleteReason: string): Promis
     backendStatus.value = `后端离线：已删除 ${ids.length} 条模拟问题`
   } else {
     await sendJson('/questions', 'DELETE', { ids, delete_reason: deleteReason })
-    await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
+    await hydrateFromBackend()
+    requestManageQuestionsReload()
     backendStatus.value = `问题删除成功（${ids.length} 条）`
   }
   if (ids.includes(selectedQuestionId.value)) {
     selectedQuestionId.value = questions.value[0]?.id ?? ''
   }
   selectedManageQuestionIds.value = selectedManageQuestionIds.value.filter((id) => !ids.includes(id))
-  if (questionManagePage.value > questionManageTotalPages.value) {
-    questionManagePage.value = questionManageTotalPages.value
+  if (!backendOnline.value && currentView.value === 'questions') {
+    requestManageQuestionsReload()
   }
 }
 
@@ -2545,7 +2460,8 @@ async function submitQuestionEdit(): Promise<void> {
       deadline: normalizedDeadline,
       status: questionEditForm.status,
     })
-    await Promise.all([hydrateFromBackend(), fetchManageQuestions(questionManagePage.value)])
+    await hydrateFromBackend()
+    requestManageQuestionsReload()
     backendStatus.value = '问题更新成功（后端）'
     questionEditDialogOpen.value = false
     questionEditEventSearch.value = ''
@@ -2606,6 +2522,9 @@ async function submitEventEdit(): Promise<void> {
         }
       }
       backendStatus.value = '后端离线：已更新模拟事件'
+      if (currentView.value === 'events') {
+        requestManageEventsReload()
+      }
       eventEditDialogOpen.value = false
       return
     }
@@ -2617,7 +2536,8 @@ async function submitEventEdit(): Promise<void> {
       credibility_level: credibilityFromSeverity(eventEditForm.severity),
       filter_status: eventEditForm.filterStatus,
     })
-    await Promise.all([fetchHomeEvents(), fetchManageEvents(eventManagePage.value)])
+    await fetchHomeEvents()
+    requestManageEventsReload()
     backendStatus.value = '事件更新成功（后端）'
     eventEditDialogOpen.value = false
   } catch {
@@ -3642,15 +3562,47 @@ async function fetchHomeEvents(page = 1): Promise<void> {
   }
 }
 
-async function fetchManageEvents(page: number): Promise<void> {
-  if (!backendOnline.value) {
+function resetManageEventsFeed(): void {
+  eventManageReloadSeq.value += 1
+  manageEvents.value = []
+  manageEventTotal.value = backendOnline.value ? 0 : localFilteredManageEvents.value.length
+  eventManagePage.value = 0
+  eventManageHasMore.value = true
+  selectedManageEventIds.value = []
+}
+
+function requestManageEventsReload(): void {
+  eventManageReloadPending = false
+  resetManageEventsFeed()
+  if (eventManageSearchLoading.value) {
+    eventManageReloadPending = true
     return
   }
-  const requestSeq = eventManageSearchSeq.value + 1
-  eventManageSearchSeq.value = requestSeq
-  eventManageSearchLoading.value = true
+  void loadManageEventsNextPage()
+}
 
+async function loadManageEventsNextPage(): Promise<void> {
+  if (eventManageSearchLoading.value || !eventManageHasMore.value) {
+    return
+  }
+
+  const requestSeq = eventManageReloadSeq.value
+  eventManageSearchLoading.value = true
   try {
+    const nextPage = eventManagePage.value + 1
+    if (!backendOnline.value) {
+      const start = manageEvents.value.length
+      const batch = localFilteredManageEvents.value.slice(start, start + eventManagePageSize.value)
+      if (requestSeq !== eventManageReloadSeq.value) {
+        return
+      }
+      manageEvents.value = [...manageEvents.value, ...batch]
+      manageEventTotal.value = localFilteredManageEvents.value.length
+      eventManagePage.value = nextPage
+      eventManageHasMore.value = manageEvents.value.length < localFilteredManageEvents.value.length && batch.length > 0
+      return
+    }
+
     const query = new URLSearchParams()
     query.set('keyword', eventManageSearchKeyword.value.trim())
     const sourceSystem = eventManageSourceSystem.value.trim()
@@ -3669,35 +3621,73 @@ async function fetchManageEvents(page: number): Promise<void> {
     if (toIso) {
       query.set('event_time_to', toIso)
     }
-    query.set('page', String(page))
+    query.set('page', String(nextPage))
     query.set('page_size', String(eventManagePageSize.value))
-    const eventPage = await fetchJson<BackendPage<BackendEventItem>>(
-      `/events/search?${query.toString()}`,
-    )
-    if (requestSeq !== eventManageSearchSeq.value) {
+    const eventPage = await fetchJson<BackendPage<BackendEventItem>>(`/events/search?${query.toString()}`)
+    if (requestSeq !== eventManageReloadSeq.value) {
       return
     }
 
-    manageEvents.value = sortByEventTimeDesc(eventPage.items.map(toEventItem))
+    const batch = sortByEventTimeDesc(eventPage.items.map(toEventItem))
+    manageEvents.value = [...manageEvents.value, ...batch]
     manageEventTotal.value = eventPage.total
-    eventManagePage.value = page
-    eventManageJumpPage.value = String(page)
+    eventManagePage.value = nextPage
+    eventManageHasMore.value = manageEvents.value.length < eventPage.total && batch.length > 0
+  } catch {
+    if (requestSeq === eventManageReloadSeq.value) {
+      backendStatus.value = '事件管理加载失败：请检查后端事件搜索接口'
+      eventManageHasMore.value = false
+    }
   } finally {
-    if (requestSeq === eventManageSearchSeq.value) {
-      eventManageSearchLoading.value = false
+    eventManageSearchLoading.value = false
+    if (eventManageReloadPending) {
+      eventManageReloadPending = false
+      void loadManageEventsNextPage()
     }
   }
 }
 
-async function fetchManageQuestions(page: number): Promise<void> {
-  if (!backendOnline.value) {
+function resetManageQuestionsFeed(): void {
+  questionManageReloadSeq.value += 1
+  manageQuestions.value = []
+  questionManageTotal.value = backendOnline.value ? 0 : localFilteredManageQuestions.value.length
+  questionManagePage.value = 0
+  questionManageHasMore.value = true
+  selectedManageQuestionIds.value = []
+}
+
+function requestManageQuestionsReload(): void {
+  questionManageReloadPending = false
+  resetManageQuestionsFeed()
+  if (questionManageSearchLoading.value) {
+    questionManageReloadPending = true
     return
   }
-  const requestSeq = questionManageSearchSeq.value + 1
-  questionManageSearchSeq.value = requestSeq
-  questionManageSearchLoading.value = true
+  void loadManageQuestionsNextPage()
+}
 
+async function loadManageQuestionsNextPage(): Promise<void> {
+  if (questionManageSearchLoading.value || !questionManageHasMore.value) {
+    return
+  }
+
+  const requestSeq = questionManageReloadSeq.value
+  questionManageSearchLoading.value = true
   try {
+    const nextPage = questionManagePage.value + 1
+    if (!backendOnline.value) {
+      const start = manageQuestions.value.length
+      const batch = localFilteredManageQuestions.value.slice(start, start + questionManagePageSize.value)
+      if (requestSeq !== questionManageReloadSeq.value) {
+        return
+      }
+      manageQuestions.value = [...manageQuestions.value, ...batch]
+      questionManageTotal.value = localFilteredManageQuestions.value.length
+      questionManagePage.value = nextPage
+      questionManageHasMore.value = manageQuestions.value.length < localFilteredManageQuestions.value.length && batch.length > 0
+      return
+    }
+
     const query = new URLSearchParams()
     query.set('keyword', questionManageSearchKeyword.value.trim())
     const eventDomain = questionManageFilterEventDomain.value.trim()
@@ -3725,20 +3715,33 @@ async function fetchManageQuestions(page: number): Promise<void> {
       query.set('created_to', createdTo)
     }
     query.set('deleted_mode', questionManageDeletedMode.value)
-    query.set('page', String(page))
+    query.set('page', String(nextPage))
     query.set('page_size', String(questionManagePageSize.value))
     const questionPage = await fetchJson<BackendPage<BackendQuestionItem>>(`/questions/search?${query.toString()}`)
-    if (requestSeq !== questionManageSearchSeq.value) {
+    if (requestSeq !== questionManageReloadSeq.value) {
       return
     }
 
-    manageQuestions.value = questionPage.items.map(toQuestionItem)
+    const batch = questionPage.items.map(toQuestionItem)
+    const batchEventIds = Array.from(new Set(batch.flatMap((item) => item.eventIds)))
+    await ensureQuestionEventOptionsByIds(batchEventIds, requestSeq)
+    if (requestSeq !== questionManageReloadSeq.value) {
+      return
+    }
+    manageQuestions.value = [...manageQuestions.value, ...batch]
     questionManageTotal.value = questionPage.total
-    questionManagePage.value = page
-    questionManageJumpPage.value = String(page)
+    questionManagePage.value = nextPage
+    questionManageHasMore.value = manageQuestions.value.length < questionPage.total && batch.length > 0
+  } catch {
+    if (requestSeq === questionManageReloadSeq.value) {
+      backendStatus.value = '问题管理加载失败：请检查后端问题搜索接口'
+      questionManageHasMore.value = false
+    }
   } finally {
-    if (requestSeq === questionManageSearchSeq.value) {
-      questionManageSearchLoading.value = false
+    questionManageSearchLoading.value = false
+    if (questionManageReloadPending) {
+      questionManageReloadPending = false
+      void loadManageQuestionsNextPage()
     }
   }
 }
@@ -3958,11 +3961,10 @@ async function createEvent(): Promise<void> {
       }
       homeEvents.value.unshift(newItem)
       if (currentView.value === 'events') {
-        manageEvents.value.unshift({ ...newItem })
+        requestManageEventsReload()
       }
       selectedEventId.value = localId
       homeEventTotal.value += 1
-      manageEventTotal.value += 1
       backendStatus.value = '后端离线：已在模拟数据中新增事件'
     } else {
       await sendJson<{ id: string }>('/events', 'POST', {
@@ -3975,8 +3977,8 @@ async function createEvent(): Promise<void> {
         event_time: new Date().toISOString(),
         trace_id: makeTraceId(),
       })
-      await Promise.all([fetchHomeEvents(), fetchManageEvents(1)])
-      eventManagePage.value = 1
+      await fetchHomeEvents()
+      requestManageEventsReload()
       backendStatus.value = '事件新增成功（后端）'
     }
 
@@ -4005,11 +4007,15 @@ async function deleteSelectedEvent(): Promise<void> {
       selectedEventId.value = homeEvents.value[0]?.id ?? ''
       selectedQuestionId.value = questions.value.find((item) => item.eventIds.includes(selectedEventId.value))?.id ?? ''
       backendStatus.value = '后端离线：已在模拟数据中删除事件及关联问题'
+      if (currentView.value === 'events') {
+        requestManageEventsReload()
+      }
       return
     }
 
     await sendJson('/events', 'DELETE', { ids: [currentId] })
-    await Promise.all([fetchHomeEvents(), fetchManageEvents(eventManagePage.value)])
+    await fetchHomeEvents()
+    requestManageEventsReload()
     backendStatus.value = '事件删除成功（后端）'
   } catch {
     backendStatus.value = '事件删除失败：请检查后端接口或参数格式'
@@ -4072,6 +4078,9 @@ async function createQuestion(): Promise<void> {
       })
       selectedQuestionId.value = localId
       backendStatus.value = '后端离线：已在模拟数据中新增问题'
+      if (currentView.value === 'questions') {
+        requestManageQuestionsReload()
+      }
       draftQuestion.title = ''
       draftQuestion.matchScore = ''
       draftQuestion.eventDomain = ''
@@ -4097,7 +4106,8 @@ async function createQuestion(): Promise<void> {
       deadline: normalizedDeadline,
       trace_id: makeTraceId(),
     })
-    await Promise.all([hydrateFromBackend(), fetchManageQuestions(1)])
+    await hydrateFromBackend()
+    requestManageQuestionsReload()
     backendStatus.value = '问题新增成功（后端）'
     draftQuestion.title = ''
     draftQuestion.matchScore = ''
@@ -4157,26 +4167,10 @@ async function hydrateFromBackend(): Promise<void> {
 
 function loadViewData(view: AppView): void {
   if (view === 'events') {
-    if (backendOnline.value) {
-      void fetchManageEvents(1)
-    } else {
-      manageEvents.value = [...homeEvents.value]
-      manageEventTotal.value = homeEvents.value.length
-      eventManagePage.value = 1
-      eventManageJumpPage.value = '1'
-      selectedManageEventIds.value = []
-    }
+    requestManageEventsReload()
   }
   if (view === 'questions') {
-    if (backendOnline.value) {
-      void fetchManageQuestions(1)
-    } else {
-      manageQuestions.value = []
-      questionManageTotal.value = localFilteredManageQuestions.value.length
-      questionManagePage.value = 1
-      questionManageJumpPage.value = '1'
-      selectedManageQuestionIds.value = []
-    }
+    requestManageQuestionsReload()
   }
   if (view === 'questionStream') {
     requestQuestionFeedReload()
@@ -4330,61 +4324,52 @@ watch(
 )
 
 watch(eventManageSearchKeyword, () => {
-  eventManagePage.value = 1
-  eventManageJumpPage.value = '1'
   selectedManageEventIds.value = []
-  if (!backendOnline.value || currentView.value !== 'events') {
+  if (currentView.value !== 'events') {
     return
   }
   if (eventManageSearchTimer !== undefined) {
     window.clearTimeout(eventManageSearchTimer)
   }
   eventManageSearchTimer = window.setTimeout(() => {
-    void fetchManageEvents(1)
+    requestManageEventsReload()
   }, 250)
 })
 
 watch(eventManageFilterStatus, () => {
-  eventManagePage.value = 1
-  eventManageJumpPage.value = '1'
   selectedManageEventIds.value = []
-  if (!backendOnline.value || currentView.value !== 'events') {
+  if (currentView.value !== 'events') {
     return
   }
-  void fetchManageEvents(1)
+  requestManageEventsReload()
 })
 
 watch(eventManageSourceSystem, () => {
-  eventManagePage.value = 1
-  eventManageJumpPage.value = '1'
   selectedManageEventIds.value = []
-  if (!backendOnline.value || currentView.value !== 'events') {
+  if (currentView.value !== 'events') {
     return
   }
-  void fetchManageEvents(1)
+  requestManageEventsReload()
 })
 
 watch([eventManageTimeFrom, eventManageTimeTo], () => {
-  eventManagePage.value = 1
-  eventManageJumpPage.value = '1'
-  if (!backendOnline.value || currentView.value !== 'events') {
+  selectedManageEventIds.value = []
+  if (currentView.value !== 'events') {
     return
   }
-  void fetchManageEvents(1)
+  requestManageEventsReload()
 })
 
 watch(questionManageSearchKeyword, () => {
-  questionManagePage.value = 1
-  questionManageJumpPage.value = '1'
   selectedManageQuestionIds.value = []
-  if (!backendOnline.value || currentView.value !== 'questions') {
+  if (currentView.value !== 'questions') {
     return
   }
   if (questionManageSearchTimer !== undefined) {
     window.clearTimeout(questionManageSearchTimer)
   }
   questionManageSearchTimer = window.setTimeout(() => {
-    void fetchManageQuestions(1)
+    requestManageQuestionsReload()
   }, 250)
 })
 
@@ -4399,13 +4384,11 @@ watch(
     questionManageDeletedMode,
   ],
   () => {
-    questionManagePage.value = 1
-    questionManageJumpPage.value = '1'
     selectedManageQuestionIds.value = []
-    if (!backendOnline.value || currentView.value !== 'questions') {
+    if (currentView.value !== 'questions') {
       return
     }
-    void fetchManageQuestions(1)
+    requestManageQuestionsReload()
   },
 )
 
@@ -4497,11 +4480,11 @@ watch(backendOnline, (online) => {
   if (!isAuthenticated.value) {
     return
   }
-  if (online && currentView.value === 'events') {
-    void fetchManageEvents(1)
+  if (currentView.value === 'events') {
+    requestManageEventsReload()
   }
-  if (online && currentView.value === 'questions') {
-    void fetchManageQuestions(1)
+  if (currentView.value === 'questions') {
+    requestManageQuestionsReload()
   }
   if (currentView.value === 'questionStream') {
     requestQuestionFeedReload()
@@ -4635,27 +4618,22 @@ watch(backendStatus, (status, prev) => {
 
     <ManageEventsPanel
       v-if="currentView === 'events'"
-      :event-manage-page="eventManagePage"
-      :event-manage-total-pages="eventManageTotalPages"
-      :all-events-on-page-selected="allEventsOnPageSelected"
+      :items="manageEvents"
+      :all-loaded-events-selected="allLoadedEventsSelected"
       :event-review-processing="eventReviewProcessing"
       :event-manage-search-keyword="eventManageSearchKeyword"
       :event-manage-source-system="eventManageSourceSystem"
       :event-manage-filter-status="eventManageFilterStatus"
       :event-manage-time-from="eventManageTimeFrom"
       :event-manage-time-to="eventManageTimeTo"
-      :event-manage-search-loading="eventManageSearchLoading"
+      :loading="eventManageSearchLoading"
       :backend-online="backendOnline"
-      :manage-event-total="manageEventTotal"
-      :local-filtered-manage-events-length="localFilteredManageEvents.length"
+      :matching-total="manageEventMatchingTotal"
+      :loaded-count="manageEvents.length"
+      :has-more="eventManageHasMore"
       :skeleton-rows="skeletonRows"
-      :has-manage-events="hasManageEvents"
-      :paged-manage-events="pagedManageEvents"
       :selected-event-id="selectedEventId"
       :selected-manage-event-ids="selectedManageEventIds"
-      :event-manage-page-size="eventManagePageSize"
-      :event-manage-page-size-options="eventManagePageSizeOptions"
-      :event-manage-jump-page="eventManageJumpPage"
       :source-system-options="sourceSystemOptions"
       @open-create-event="createEventDialogOpen = true; void fetchSourceSystemOptions()"
       @toggle-select-all="toggleSelectAllEventsOnPage"
@@ -4670,17 +4648,12 @@ watch(backendStatus, (status, prev) => {
       @open-manage-detail="openManageDetail"
       @toggle-selection="toggleManageEventSelection"
       @open-edit="openEventEdit"
-      @set-page-size="setEventManagePageSize"
-      @go-page="goManageEventPage"
-      @update:jump-page="eventManageJumpPage = $event"
-      @jump-to-page="jumpToEventPageFromInput"
+      @load-more="loadManageEventsNextPage"
     />
 
     <ManageQuestionsPanel
       v-if="currentView === 'questions'"
-      :question-manage-page="questionManagePage"
-      :question-manage-total-pages="questionManageTotalPages"
-      :all-questions-on-page-selected="allQuestionsOnPageSelected"
+      :all-loaded-manage-questions-selected="allLoadedQuestionsSelected"
       :question-manage-search-keyword="questionManageSearchKeyword"
       :question-manage-filter-event-domain="questionManageFilterEventDomain"
       :question-manage-filter-event-type="questionManageFilterEventType"
@@ -4690,18 +4663,14 @@ watch(backendStatus, (status, prev) => {
       :question-manage-filter-level="questionManageFilterLevel"
       :question-manage-deleted-mode="questionManageDeletedMode"
       :question-manage-filters-applied="questionManageFiltersApplied"
-      :question-manage-search-loading="questionManageSearchLoading"
+      :question-manage-loading="questionManageSearchLoading"
       :backend-online="backendOnline"
       :question-manage-total="questionManageTotal"
-      :local-filtered-manage-questions-length="localFilteredManageQuestions.length"
       :skeleton-rows="skeletonRows"
-      :has-manage-questions="hasManageQuestions"
-      :paged-manage-questions="pagedManageQuestions"
+      :loaded-manage-questions="manageQuestions"
       :selected-question-id="selectedQuestionId"
       :selected-manage-question-ids="selectedManageQuestionIds"
-      :question-manage-page-size="questionManagePageSize"
-      :question-manage-page-size-options="eventManagePageSizeOptions"
-      :question-manage-jump-page="questionManageJumpPage"
+      :question-manage-has-more="questionManageHasMore"
       :all-known-events="allKnownEvents"
       @open-create-question="openCreateQuestionDialog"
       @toggle-select-all="toggleSelectAllQuestionsOnPage"
@@ -4719,10 +4688,7 @@ watch(backendStatus, (status, prev) => {
       @open-manage-detail="openManageQuestionDetail"
       @toggle-selection="toggleManageQuestionSelection"
       @open-edit="openQuestionEdit"
-      @set-page-size="setQuestionManagePageSize"
-      @go-page="goManageQuestionPage"
-      @update:jump-page="questionManageJumpPage = $event"
-      @jump-to-page="jumpToQuestionPageFromInput"
+      @load-more="loadManageQuestionsNextPage"
     />
 
     <QuestionFeedPanel
