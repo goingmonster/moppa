@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { parseAnswerOptions } from '../utils/answerOptions'
 
 interface QuestionItem {
   id: string
@@ -130,6 +131,18 @@ function interactionCount(questionId: string): QuestionInteractionCount {
   return props.interactionCounts[questionId] ?? { predictionCount: 0, commentCount: 0 }
 }
 
+function answerPreview(answerSpace: string): string {
+  const options = parseAnswerOptions(answerSpace)
+  if (options.length === 0) {
+    return '未设置'
+  }
+  const preview = options.slice(0, 2).map((item) => `${item.key}. ${item.label}`).join(' / ')
+  if (options.length <= 2) {
+    return preview
+  }
+  return `${preview} 等 ${options.length} 项`
+}
+
 const participatedItems = computed(() =>
   props.items.filter((item) => {
     const summary = props.participation[item.id]
@@ -237,7 +250,7 @@ onBeforeUnmount(() => {
           <p class="item-meta"><strong>事件域：</strong>{{ question.eventDomain || '-' }} ｜ <strong>事件类型：</strong>{{ question.eventType || '-' }}</p>
           <p class="item-meta"><strong>区域：</strong>{{ question.area || '-' }} ｜ <strong>输入类型：</strong>{{ question.inputType || '-' }}</p>
           <p class="item-meta"><strong>匹配分：</strong>{{ question.matchScore ?? '-' }}</p>
-          <p class="item-meta"><strong>答案范围：</strong>{{ question.answerSpace || '未设置' }}</p>
+          <p class="item-meta"><strong>可选答案：</strong>{{ answerPreview(question.answerSpace) }}</p>
           <p class="item-meta"><strong>关联事件：</strong>{{ eventLabel(question.eventIds) }}</p>
           <div class="action-row stream-engagement-row">
             <span class="chip">预测 {{ interactionCount(question.id).predictionCount }}</span>

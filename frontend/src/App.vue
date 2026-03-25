@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { matchPredictionToAnswerOptionId, parseAnswerOptions } from './utils/answerOptions'
 import ManageDataSourcesPanel from './components/ManageDataSourcesPanel.vue'
 import ManageEventsPanel from './components/ManageEventsPanel.vue'
 import ManageFilterRulesPanel from './components/ManageFilterRulesPanel.vue'
@@ -676,7 +677,7 @@ const questionComments = ref<Record<string, QuestionCommentItem[]>>({})
 const questionInteractionLoading = ref(false)
 const predictionSubmitting = ref(false)
 const commentSubmitting = ref(false)
-const predictionForm = reactive({ predictionContent: '', confidence: '', reasoning: '' })
+const predictionForm = reactive({ predictionContent: '', selectedAnswerId: '', confidence: '', reasoning: '' })
 const commentDraft = ref('')
 const editingCommentId = ref('')
 const editingCommentContent = ref('')
@@ -984,6 +985,29 @@ const myCurrentPrediction = computed(() => {
   return activeQuestionPredictions.value.find((item) => item.userId === userId) ?? null
 })
 const canCurrentQuestionInteract = computed(() => canInteractWithQuestion(manageDetailQuestion.value))
+const currentQuestionAnswerOptions = computed(() =>
+  parseAnswerOptions(manageDetailQuestion.value?.answerSpace ?? ''),
+)
+const selectedAnswerOption = computed(() =>
+  currentQuestionAnswerOptions.value.find((item) => item.id === predictionForm.selectedAnswerId) ?? null,
+)
+const eventDetailQuestionPool = computed(() => {
+  const merged = new Map<string, QuestionItem>()
+  for (const item of questions.value) {
+    merged.set(item.id, item)
+  }
+  for (const item of manageQuestions.value) {
+    merged.set(item.id, item)
+  }
+  for (const item of questionFeedItems.value) {
+    merged.set(item.id, item)
+  }
+  return Array.from(merged.values())
+})
+
+function relatedQuestionsForEvent(eventId: string): QuestionItem[] {
+  return eventDetailQuestionPool.value.filter((item) => item.eventIds.includes(eventId)).slice(0, 6)
+}
 
 function canEditComment(comment: QuestionCommentItem): boolean {
   return authUser.value?.id === comment.userId
@@ -1114,6 +1138,19 @@ function eventFilterBadgeTone(status: string): string {
     return 'badge-info'
   }
   return 'badge-muted'
+}
+
+function statusTone(status: QuestionItem['status']): string {
+  if (status === 'closed') {
+    return 'badge-success'
+  }
+  if (status === 'expired') {
+    return 'badge-error'
+  }
+  if (status === 'pending_review' || status === 'published' || status === 'matched') {
+    return 'badge-info'
+  }
+  return 'badge-warning'
 }
 
 function formatDate(value: string): string {
@@ -3236,7 +3273,9 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
 
 function applyPredictionFormFromMine(questionId: string): void {
   const mine = (questionPredictions.value[questionId] ?? []).find((item) => item.userId === authUser.value?.id)
+  const options = currentQuestionAnswerOptions.value
   predictionForm.predictionContent = mine?.predictionContent ?? ''
+  predictionForm.selectedAnswerId = mine ? matchPredictionToAnswerOptionId(mine.predictionContent, options) : ''
   predictionForm.confidence = mine?.confidence !== null && mine?.confidence !== undefined ? String(mine.confidence) : ''
   predictionForm.reasoning = mine?.reasoning ?? ''
 }
@@ -3304,10 +3343,21 @@ async function submitMyPrediction(): Promise<void> {
     backendStatus.value = '仅已过期问题不可提交或修改预测'
     return
   }
-  const predictionContent = predictionForm.predictionContent.trim()
-  if (!predictionContent) {
-    backendStatus.value = '预测内容不能为空'
-    return
+  const answerOptions = currentQuestionAnswerOptions.value
+  let predictionContent = ''
+  if (answerOptions.length > 0) {
+    const selected = answerOptions.find((item) => item.id === predictionForm.selectedAnswerId)
+    if (!selected) {
+      backendStatus.value = '请先选择一个预测答案'
+      return
+    }
+    predictionContent = selected.label
+  } else {
+    predictionContent = predictionForm.predictionContent.trim()
+    if (!predictionContent) {
+      backendStatus.value = '预测内容不能为空'
+      return
+    }
   }
   let parsedConfidence: number | null = null
   const confidenceRaw = predictionForm.confidence == null ? '' : String(predictionForm.confidence).trim()
@@ -4226,6 +4276,7 @@ watch(
   (questionId) => {
     if (!questionId) {
       predictionForm.predictionContent = ''
+      predictionForm.selectedAnswerId = ''
       predictionForm.confidence = ''
       predictionForm.reasoning = ''
       commentDraft.value = ''
@@ -4236,12 +4287,26 @@ watch(
 )
 
 watch(myCurrentPrediction, (mine) => {
+  const options = currentQuestionAnswerOptions.value
   if (!mine) {
+    predictionForm.selectedAnswerId = ''
     return
   }
   predictionForm.predictionContent = mine.predictionContent
+  predictionForm.selectedAnswerId = matchPredictionToAnswerOptionId(mine.predictionContent, options)
   predictionForm.confidence = mine.confidence !== null && mine.confidence !== undefined ? String(mine.confidence) : ''
   predictionForm.reasoning = mine.reasoning ?? ''
+})
+
+watch(currentQuestionAnswerOptions, (options) => {
+  if (options.length === 0) {
+    predictionForm.selectedAnswerId = ''
+    return
+  }
+  if (options.some((item) => item.id === predictionForm.selectedAnswerId)) {
+    return
+  }
+  predictionForm.selectedAnswerId = matchPredictionToAnswerOptionId(predictionForm.predictionContent, options)
 })
 
 watch(questionDetailDialogOpen, (open) => {
@@ -5159,27 +5224,47 @@ watch(backendStatus, (status, prev) => {
 
     <div v-if="homeDetailDialogOpen && homeDetailEvent" class="dialog-backdrop" @click.self="homeDetailDialogOpen = false">
       <section class="dialog-panel event-detail-dialog">
-        <div class="panel-head">
-          <h2>事件详情（只读）</h2>
+        <div class="panel-head panel-head-split">
+          <h2>事件详情</h2>
           <button class="action-btn" @click="homeDetailDialogOpen = false">关闭</button>
         </div>
-        <div class="detail-grid detail-grid-2 detail-metric-grid">
-          <article class="detail-item"><small class="detail-item-label">ID</small><p class="detail-item-value">{{ homeDetailEvent.id }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">event_key</small><p class="detail-item-value">{{ homeDetailEvent.codename }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">标题</small><p class="detail-item-value">{{ homeDetailEvent.title }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">来源系统</small><p class="detail-item-value">{{ homeDetailEvent.theater }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">可信等级</small><p class="detail-item-value">{{ severityLabel[homeDetailEvent.severity] }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">filter_status</small><p class="detail-item-value">{{ homeDetailEvent.filterStatus }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">事件时间</small><p class="detail-item-value">{{ formatDate(homeDetailEvent.timestamp) }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">URL</small><p class="detail-item-value">{{ homeDetailEvent.url || '-' }}</p></article>
-        </div>
-        <section class="detail-block detail-summary-block">
-          <h3>事件内容</h3>
+        <article class="detail-block event-story-card">
+          <p class="event-story-kicker">{{ homeDetailEvent.theater }}</p>
+          <h3>{{ homeDetailEvent.title }}</h3>
           <p>{{ homeDetailEvent.summary }}</p>
+          <div class="action-row event-story-metrics">
+            <span class="badge badge-muted">ID：{{ homeDetailEvent.id }}</span>
+            <span class="badge badge-muted">event_key：{{ homeDetailEvent.codename }}</span>
+            <span :class="['badge', severityBadgeTone(homeDetailEvent.severity)]">可信等级：{{ severityLabel[homeDetailEvent.severity] }}</span>
+            <span :class="['badge', eventFilterBadgeTone(homeDetailEvent.filterStatus)]">{{ homeDetailEvent.filterStatus }}</span>
+            <span class="badge">事件时间：{{ formatDate(homeDetailEvent.timestamp) }}</span>
+          </div>
+          <a v-if="homeDetailEvent.url" class="event-story-link" :href="homeDetailEvent.url" target="_blank" rel="noopener noreferrer">
+            查看原始链接
+          </a>
+        </article>
+        <section class="detail-block detail-summary-block">
+          <h3>话题标签</h3>
           <div class="tag-group detail-tags">
             <span v-if="homeDetailEvent.tags.length === 0" class="badge badge-muted">无 tags</span>
             <span v-for="tag in homeDetailEvent.tags" :key="`event-home-tag-${homeDetailEvent.id}-${tag}`" class="badge">{{ tag }}</span>
           </div>
+        </section>
+        <section class="detail-block detail-related-block">
+          <h3>关联社区问题</h3>
+          <div v-if="relatedQuestionsForEvent(homeDetailEvent.id).length > 0" class="event-related-question-list">
+            <button
+              v-for="item in relatedQuestionsForEvent(homeDetailEvent.id)"
+              :key="`event-home-question-${homeDetailEvent.id}-${item.id}`"
+              class="event-related-question-card"
+              type="button"
+              @click="homeDetailDialogOpen = false; openManageQuestionDetail(item)"
+            >
+              <strong>{{ item.title }}</strong>
+              <span class="item-subtle">{{ item.level }} · {{ statusLabel[item.status] }} · 截止 {{ formatDate(item.deadline) }}</span>
+            </button>
+          </div>
+          <p v-else class="item-subtle">暂无与此事件关联的问题</p>
         </section>
       </section>
     </div>
@@ -5190,30 +5275,50 @@ watch(backendStatus, (status, prev) => {
       @click.self="eventDetailDialogOpen = false"
     >
       <section class="dialog-panel event-detail-dialog">
-        <div class="panel-head">
-          <h2>事件详情（只读）</h2>
+        <div class="panel-head panel-head-split">
+          <h2>事件详情</h2>
           <div class="action-row">
             <button v-if="isAdmin" class="action-btn" @click="openEventEdit(manageDetailEvent)">编辑</button>
             <button class="action-btn" @click="eventDetailDialogOpen = false">关闭</button>
           </div>
         </div>
-        <div class="detail-grid detail-grid-2 detail-metric-grid">
-          <article class="detail-item"><small class="detail-item-label">ID</small><p class="detail-item-value">{{ manageDetailEvent.id }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">event_key</small><p class="detail-item-value">{{ manageDetailEvent.codename }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">标题</small><p class="detail-item-value">{{ manageDetailEvent.title }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">来源系统</small><p class="detail-item-value">{{ manageDetailEvent.theater }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">可信等级</small><p class="detail-item-value">{{ severityLabel[manageDetailEvent.severity] }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">filter_status</small><p class="detail-item-value">{{ manageDetailEvent.filterStatus }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">事件时间</small><p class="detail-item-value">{{ formatDate(manageDetailEvent.timestamp) }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">URL</small><p class="detail-item-value">{{ manageDetailEvent.url || '-' }}</p></article>
-        </div>
-        <section class="detail-block detail-summary-block">
-          <h3>事件内容</h3>
+        <article class="detail-block event-story-card">
+          <p class="event-story-kicker">{{ manageDetailEvent.theater }}</p>
+          <h3>{{ manageDetailEvent.title }}</h3>
           <p>{{ manageDetailEvent.summary }}</p>
+          <div class="action-row event-story-metrics">
+            <span class="badge badge-muted">ID：{{ manageDetailEvent.id }}</span>
+            <span class="badge badge-muted">event_key：{{ manageDetailEvent.codename }}</span>
+            <span :class="['badge', severityBadgeTone(manageDetailEvent.severity)]">可信等级：{{ severityLabel[manageDetailEvent.severity] }}</span>
+            <span :class="['badge', eventFilterBadgeTone(manageDetailEvent.filterStatus)]">{{ manageDetailEvent.filterStatus }}</span>
+            <span class="badge">事件时间：{{ formatDate(manageDetailEvent.timestamp) }}</span>
+          </div>
+          <a v-if="manageDetailEvent.url" class="event-story-link" :href="manageDetailEvent.url" target="_blank" rel="noopener noreferrer">
+            查看原始链接
+          </a>
+        </article>
+        <section class="detail-block detail-summary-block">
+          <h3>话题标签</h3>
           <div class="tag-group detail-tags">
             <span v-if="manageDetailEvent.tags.length === 0" class="badge badge-muted">无 tags</span>
             <span v-for="tag in manageDetailEvent.tags" :key="`event-manage-tag-${manageDetailEvent.id}-${tag}`" class="badge">{{ tag }}</span>
           </div>
+        </section>
+        <section class="detail-block detail-related-block">
+          <h3>关联社区问题</h3>
+          <div v-if="relatedQuestionsForEvent(manageDetailEvent.id).length > 0" class="event-related-question-list">
+            <button
+              v-for="item in relatedQuestionsForEvent(manageDetailEvent.id)"
+              :key="`event-manage-question-${manageDetailEvent.id}-${item.id}`"
+              class="event-related-question-card"
+              type="button"
+              @click="eventDetailDialogOpen = false; openManageQuestionDetail(item)"
+            >
+              <strong>{{ item.title }}</strong>
+              <span class="item-subtle">{{ item.level }} · {{ statusLabel[item.status] }} · 截止 {{ formatDate(item.deadline) }}</span>
+            </button>
+          </div>
+          <p v-else class="item-subtle">暂无与此事件关联的问题</p>
         </section>
       </section>
     </div>
@@ -5280,8 +5385,8 @@ watch(backendStatus, (status, prev) => {
 
     <div v-if="questionDetailDialogOpen && manageDetailQuestion" class="dialog-backdrop" @click.self="questionDetailDialogOpen = false">
       <section class="dialog-panel question-detail-dialog">
-        <div class="panel-head">
-          <h2>问题详情（只读）</h2>
+        <div class="panel-head panel-head-split">
+          <h2>问题社区 · 详情</h2>
           <div class="action-row">
             <button
               v-if="isAdmin"
@@ -5293,26 +5398,38 @@ watch(backendStatus, (status, prev) => {
             <button class="action-btn" @click="questionDetailDialogOpen = false">关闭</button>
           </div>
         </div>
-        <div class="detail-grid detail-grid-2 detail-metric-grid">
-          <article class="detail-item"><small class="detail-item-label">ID</small><p class="detail-item-value">{{ manageDetailQuestion.id }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">等级</small><p class="detail-item-value">{{ manageDetailQuestion.level }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">状态</small><p class="detail-item-value">{{ statusLabel[manageDetailQuestion.status] }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">截止时间</small><p class="detail-item-value">{{ formatDate(manageDetailQuestion.deadline) }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">事件域</small><p class="detail-item-value">{{ manageDetailQuestion.eventDomain || '-' }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">事件类型</small><p class="detail-item-value">{{ manageDetailQuestion.eventType || '-' }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">区域</small><p class="detail-item-value">{{ manageDetailQuestion.area || '-' }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">输入类型</small><p class="detail-item-value">{{ manageDetailQuestion.inputType || '-' }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">删除时间</small><p class="detail-item-value">{{ manageDetailQuestion.deletedAt ? formatDate(manageDetailQuestion.deletedAt) : '-' }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">匹配分数</small><p class="detail-item-value">{{ manageDetailQuestion.matchScore ?? '-' }}</p></article>
-          <article class="detail-item"><small class="detail-item-label">答案范围</small><p class="detail-item-value">{{ manageDetailQuestion.answerSpace || '未填写' }}</p></article>
-        </div>
-        <section class="detail-block detail-summary-block">
-          <h3>问题标题</h3>
-          <p>{{ manageDetailQuestion.title }}</p>
-        </section>
-        <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.background">
-          <h3>背景信息</h3>
-          <p>{{ manageDetailQuestion.background }}</p>
+        <article class="detail-block question-story-card">
+          <div class="stream-head question-story-head">
+            <div class="stream-avatar">Q</div>
+            <div>
+              <strong>MOPPA Question Desk</strong>
+              <p class="item-subtle">发布于 {{ manageDetailQuestion.createdAt ? formatDate(manageDetailQuestion.createdAt) : '-' }}</p>
+            </div>
+          </div>
+          <h3>{{ manageDetailQuestion.title }}</h3>
+          <p v-if="manageDetailQuestion.background" class="question-story-summary">{{ manageDetailQuestion.background }}</p>
+          <div class="action-row question-story-tags">
+            <span class="badge badge-muted">ID：{{ manageDetailQuestion.id }}</span>
+            <span class="badge">{{ manageDetailQuestion.level }}</span>
+            <span :class="['badge', statusTone(manageDetailQuestion.status)]">{{ statusLabel[manageDetailQuestion.status] }}</span>
+            <span class="badge">截止：{{ formatDate(manageDetailQuestion.deadline) }}</span>
+            <span v-if="manageDetailQuestion.eventDomain" class="badge">事件域：{{ manageDetailQuestion.eventDomain }}</span>
+            <span v-if="manageDetailQuestion.eventType" class="badge">事件类型：{{ manageDetailQuestion.eventType }}</span>
+            <span v-if="manageDetailQuestion.area" class="badge">区域：{{ manageDetailQuestion.area }}</span>
+            <span v-if="manageDetailQuestion.inputType" class="badge">输入类型：{{ manageDetailQuestion.inputType }}</span>
+            <span v-if="manageDetailQuestion.matchScore !== null" class="badge">匹配分：{{ manageDetailQuestion.matchScore }}</span>
+            <span v-if="manageDetailQuestion.deletedAt" class="badge badge-muted">删除时间：{{ formatDate(manageDetailQuestion.deletedAt) }}</span>
+          </div>
+        </article>
+        <section class="detail-block question-answer-block">
+          <h3>候选答案（投票项）</h3>
+          <p v-if="currentQuestionAnswerOptions.length === 0" class="item-subtle">未解析到结构化选项，当前问题允许自由文本预测。</p>
+          <ul v-else class="question-answer-list">
+            <li v-for="option in currentQuestionAnswerOptions" :key="`question-answer-${manageDetailQuestion.id}-${option.id}`" class="question-answer-item">
+              <span class="question-answer-key">{{ option.key }}</span>
+              <span>{{ option.label }}</span>
+            </li>
+          </ul>
         </section>
         <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.hypothesis">
           <h3>假设</h3>
@@ -5370,7 +5487,28 @@ watch(backendStatus, (status, prev) => {
 
         <div v-if="questionComposerMode === 'prediction'" class="detail-block composer-drawer">
           <h3>发布预测</h3>
-          <div class="field-block">
+          <div v-if="currentQuestionAnswerOptions.length > 0" class="field-block">
+            <label>从候选答案中选择一个结果</label>
+            <div class="prediction-option-list">
+              <label
+                v-for="option in currentQuestionAnswerOptions"
+                :key="`prediction-option-${manageDetailQuestion.id}-${option.id}`"
+                class="prediction-option"
+              >
+                <input
+                  v-model="predictionForm.selectedAnswerId"
+                  type="radio"
+                  name="prediction-option"
+                  :value="option.id"
+                  :disabled="!canCurrentQuestionInteract || predictionSubmitting"
+                />
+                <span class="prediction-option-key">{{ option.key }}</span>
+                <span>{{ option.label }}</span>
+              </label>
+            </div>
+            <small v-if="selectedAnswerOption" class="item-subtle">当前选择：{{ selectedAnswerOption.label }}</small>
+          </div>
+          <div v-else class="field-block">
             <label>我的预测内容</label>
             <textarea
               v-model="predictionForm.predictionContent"
@@ -5442,13 +5580,21 @@ watch(backendStatus, (status, prev) => {
             </div>
             <p v-if="predictionPanelCollapsed" class="item-subtle">预测区已折叠</p>
             <p v-else-if="activeQuestionPredictions.length === 0" class="item-subtle">暂无社区预测</p>
-            <div v-else class="comment-list">
-              <p v-for="item in activeQuestionPredictions" :key="`prediction-${item.id}`">
-                <strong>{{ item.username }}</strong>
-                <span v-if="item.userId === authUser?.id">（我的预测）</span>
-                ：{{ item.predictionContent }}
-                <span v-if="item.confidence !== null">（置信度 {{ item.confidence }}）</span>
-              </p>
+            <div v-else class="community-card-list">
+              <article v-for="item in activeQuestionPredictions" :key="`prediction-${item.id}`" class="community-item-card">
+                <div class="community-item-head">
+                  <strong>{{ item.username }}</strong>
+                  <span class="item-subtle">{{ formatDate(item.createdAt) }}</span>
+                </div>
+                <p>
+                  {{ item.predictionContent }}
+                  <span v-if="item.userId === authUser?.id" class="badge badge-info">我的预测</span>
+                </p>
+                <div class="action-row">
+                  <span v-if="item.confidence !== null" class="chip">置信度 {{ item.confidence }}</span>
+                  <span v-if="item.reasoning" class="item-subtle">依据：{{ item.reasoning }}</span>
+                </div>
+              </article>
             </div>
           </section>
           <section class="subpanel">
@@ -5460,7 +5606,7 @@ watch(backendStatus, (status, prev) => {
             </div>
             <p v-if="commentPanelCollapsed" class="item-subtle">评论区已折叠</p>
             <p v-else-if="activeQuestionComments.length === 0" class="item-subtle">暂无评论</p>
-            <div v-else class="comment-list">
+            <div v-else class="community-card-list">
               <div v-for="comment in activeQuestionComments" :key="`comment-${comment.id}`" class="comment-item-row">
                 <template v-if="editingCommentId === comment.id">
                   <textarea
@@ -5477,7 +5623,11 @@ watch(backendStatus, (status, prev) => {
                   </div>
                 </template>
                 <template v-else>
-                  <p><strong>{{ comment.username }}</strong>：{{ comment.content }}</p>
+                  <div class="community-item-head">
+                    <strong>{{ comment.username }}</strong>
+                    <span class="item-subtle">{{ formatDate(comment.createdAt) }}</span>
+                  </div>
+                  <p>{{ comment.content }}</p>
                   <div class="action-row action-right">
                     <button
                       v-if="canEditComment(comment)"
