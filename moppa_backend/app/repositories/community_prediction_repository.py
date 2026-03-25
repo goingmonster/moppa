@@ -64,6 +64,14 @@ class CommunityPredictionRepository:
             )
         )
 
+    def get_by_question_user_including_deleted(self, question_id: UUID, user_id: UUID) -> CommunityPredictionEntity | None:
+        return self.db.scalar(
+            select(CommunityPredictionEntity).where(
+                CommunityPredictionEntity.question_id == question_id,
+                CommunityPredictionEntity.user_id == user_id,
+            ).order_by(CommunityPredictionEntity.created_at.desc())
+        )
+
     def get_by_id(self, prediction_id: UUID) -> CommunityPredictionEntity | None:
         entity = self.db.get(CommunityPredictionEntity, prediction_id)
         if entity is None or entity.deleted_at is not None:

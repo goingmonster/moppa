@@ -33,22 +33,38 @@ class CommunityPredictionService:
         if not prediction_content:
             raise ApiError(status_code=422, code="INVALID_PREDICTION_CONTENT", message="Prediction content cannot be empty")
         reasoning = payload.reasoning.strip() if payload.reasoning is not None else None
+
+        # 先查找未删除的预测
         existing = self.repository.get_by_question_user(question_uuid, user_id)
-        if existing is None:
-            return self.repository.create(
-                question_id=question_uuid,
-                user_id=user_id,
+        if existing is not None:
+            return self.repository.update(
+                existing,
                 prediction_content=prediction_content,
                 confidence=payload.confidence,
                 reasoning=reasoning,
-                trace_id=uuid4(),
             )
 
-        return self.repository.update(
-            existing,
+        # 再查找已删除的预测（用于恢复）
+        deleted = self.repository.get_by_question_user_including_deleted(question_uuid, user_id)
+        if deleted is not None:
+            from datetime import datetime, timezone
+            deleted.prediction_content = prediction_content
+            deleted.confidence = payload.confidence
+            deleted.reasoning = reasoning
+            deleted.deleted_at = None  # 恢复预测
+            deleted.updated_at = datetime.now(timezone.utc)
+            self.repository.db.commit()
+            self.repository.db.refresh(deleted)
+            return deleted
+
+        # 创建新预测
+        return self.repository.create(
+            question_id=question_uuid,
+            user_id=user_id,
             prediction_content=prediction_content,
             confidence=payload.confidence,
             reasoning=reasoning,
+            trace_id=uuid4(),
         )
 
     def update_mine(self, prediction_id: str, payload: CommunityPredictionUpdateModel, user_id: UUID) -> CommunityPredictionEntity:
