@@ -991,6 +991,97 @@ const currentQuestionAnswerOptions = computed(() =>
 const selectedAnswerOption = computed(() =>
   currentQuestionAnswerOptions.value.find((item) => item.id === predictionForm.selectedAnswerId) ?? null,
 )
+
+// 计算每个答案选项的投票分布
+const answerOptionDistribution = computed(() => {
+  const options = currentQuestionAnswerOptions.value
+  const predictions = activeQuestionPredictions.value
+  if (options.length === 0 || predictions.length === 0) {
+    return new Map<string, number>()
+  }
+
+  const distribution = new Map<string, number>()
+
+  // 统计每个选项的投票数
+  for (const option of options) {
+    const count = predictions.filter((p) =>
+      p.predictionContent.trim() === option.label ||
+      p.predictionContent.trim() === `${option.key}: ${option.label}` ||
+      p.predictionContent.trim() === option.key
+    ).length
+    distribution.set(option.id, count)
+  }
+
+  return distribution
+})
+
+// 计算每个选项的百分比
+const answerOptionPercentages = computed(() => {
+  const distribution = answerOptionDistribution.value
+  const total = activeQuestionPredictions.value.length
+
+  if (total === 0) {
+    return new Map<string, string>()
+  }
+
+  const percentages = new Map<string, string>()
+  for (const [optionId, count] of distribution.entries()) {
+    const percentage = Math.round((count / total) * 100)
+    percentages.set(optionId, `${percentage}%`)
+  }
+
+  return percentages
+})
+
+// 当前用户选择的选项
+const mySelectedAnswerOption = computed(() => {
+  const userId = authUser.value?.id
+  if (!userId) {
+    return null
+  }
+  const myPrediction = activeQuestionPredictions.value.find((item) => item.userId === userId)
+  if (!myPrediction) {
+    return null
+  }
+  return currentQuestionAnswerOptions.value.find((option) =>
+    myPrediction.predictionContent.trim() === option.label ||
+    myPrediction.predictionContent.trim() === `${option.key}: ${option.label}` ||
+    myPrediction.predictionContent.trim() === option.key
+  ) ?? null
+})
+
+// 点击选项快速预测/取消预测/修改预测
+async function handleAnswerOptionClick(optionId: string): Promise<void> {
+  const question = manageDetailQuestion.value
+  if (!question || !backendOnline.value || !isAuthenticated.value) {
+    return
+  }
+  if (!canInteractWithQuestion(question)) {
+    backendStatus.value = '仅已过期问题不可提交或修改预测'
+    return
+  }
+
+  const myOptionId = mySelectedAnswerOption.value?.id ?? ''
+
+  // 点击已选择的选项 = 取消预测
+  if (myOptionId === optionId) {
+    await cancelMyPrediction()
+    return
+  }
+
+  // 点击其他选项 = 修改预测
+  const selectedOption = currentQuestionAnswerOptions.value.find((item) => item.id === optionId)
+  if (!selectedOption) {
+    return
+  }
+
+  predictionForm.selectedAnswerId = optionId
+  predictionForm.predictionContent = selectedOption.label
+  predictionForm.confidence = ''
+  predictionForm.reasoning = ''
+
+  await submitMyPrediction()
+}
 const eventDetailQuestionPool = computed(() => {
   const merged = new Map<string, QuestionItem>()
   for (const item of questions.value) {
@@ -3470,6 +3561,37 @@ async function deleteComment(comment: QuestionCommentItem): Promise<void> {
   }
 }
 
+async function cancelMyPrediction(): Promise<void> {
+  const question = manageDetailQuestion.value
+  const myPrediction = myCurrentPrediction.value
+  if (!question || !backendOnline.value || !isAuthenticated.value) {
+    return
+  }
+  if (!myPrediction) {
+    return
+  }
+  if (myPrediction.userId !== authUser.value?.id && !isAdmin.value) {
+    backendStatus.value = '你无权取消此预测'
+    return
+  }
+
+  predictionSubmitting.value = true
+  try {
+    await sendJson(`/community-predictions/${myPrediction.id}`, 'DELETE', {})
+    await loadQuestionInteractions(question.id)
+    predictionForm.selectedAnswerId = ''
+    predictionForm.predictionContent = ''
+    predictionForm.confidence = ''
+    predictionForm.reasoning = ''
+    questionComposerMode.value = null
+    pushToast('预测已取消', 'success')
+  } catch {
+    backendStatus.value = '预测取消失败：仅本人或管理员可取消'
+  } finally {
+    predictionSubmitting.value = false
+  }
+}
+
 async function bootstrapAuthSession(): Promise<void> {
   authLoading.value = true
   try {
@@ -5233,11 +5355,11 @@ watch(backendStatus, (status, prev) => {
           <h3>{{ homeDetailEvent.title }}</h3>
           <p>{{ homeDetailEvent.summary }}</p>
           <div class="action-row event-story-metrics">
-            <span class="badge badge-muted">ID：{{ homeDetailEvent.id }}</span>
-            <span class="badge badge-muted">event_key：{{ homeDetailEvent.codename }}</span>
-            <span :class="['badge', severityBadgeTone(homeDetailEvent.severity)]">可信等级：{{ severityLabel[homeDetailEvent.severity] }}</span>
-            <span :class="['badge', eventFilterBadgeTone(homeDetailEvent.filterStatus)]">{{ homeDetailEvent.filterStatus }}</span>
-            <span class="badge">事件时间：{{ formatDate(homeDetailEvent.timestamp) }}</span>
+            <span :class="['badge', 'badge-core', severityBadgeTone(homeDetailEvent.severity)]">可信等级：{{ severityLabel[homeDetailEvent.severity] }}</span>
+            <span :class="['badge', 'badge-core', eventFilterBadgeTone(homeDetailEvent.filterStatus)]">{{ homeDetailEvent.filterStatus }}</span>
+            <span class="badge badge-normal">事件时间：{{ formatDate(homeDetailEvent.timestamp) }}</span>
+            <span class="badge badge-subtle">ID：{{ homeDetailEvent.id }}</span>
+            <span class="badge badge-subtle">event_key：{{ homeDetailEvent.codename }}</span>
           </div>
           <a v-if="homeDetailEvent.url" class="event-story-link" :href="homeDetailEvent.url" target="_blank" rel="noopener noreferrer">
             查看原始链接
@@ -5287,11 +5409,11 @@ watch(backendStatus, (status, prev) => {
           <h3>{{ manageDetailEvent.title }}</h3>
           <p>{{ manageDetailEvent.summary }}</p>
           <div class="action-row event-story-metrics">
-            <span class="badge badge-muted">ID：{{ manageDetailEvent.id }}</span>
-            <span class="badge badge-muted">event_key：{{ manageDetailEvent.codename }}</span>
-            <span :class="['badge', severityBadgeTone(manageDetailEvent.severity)]">可信等级：{{ severityLabel[manageDetailEvent.severity] }}</span>
-            <span :class="['badge', eventFilterBadgeTone(manageDetailEvent.filterStatus)]">{{ manageDetailEvent.filterStatus }}</span>
-            <span class="badge">事件时间：{{ formatDate(manageDetailEvent.timestamp) }}</span>
+            <span :class="['badge', 'badge-core', severityBadgeTone(manageDetailEvent.severity)]">可信等级：{{ severityLabel[manageDetailEvent.severity] }}</span>
+            <span :class="['badge', 'badge-core', eventFilterBadgeTone(manageDetailEvent.filterStatus)]">{{ manageDetailEvent.filterStatus }}</span>
+            <span class="badge badge-normal">事件时间：{{ formatDate(manageDetailEvent.timestamp) }}</span>
+            <span class="badge badge-subtle">ID：{{ manageDetailEvent.id }}</span>
+            <span class="badge badge-subtle">event_key：{{ manageDetailEvent.codename }}</span>
           </div>
           <a v-if="manageDetailEvent.url" class="event-story-link" :href="manageDetailEvent.url" target="_blank" rel="noopener noreferrer">
             查看原始链接
@@ -5409,27 +5531,40 @@ watch(backendStatus, (status, prev) => {
           <h3>{{ manageDetailQuestion.title }}</h3>
           <p v-if="manageDetailQuestion.background" class="question-story-summary">{{ manageDetailQuestion.background }}</p>
           <div class="action-row question-story-tags">
-            <span class="badge badge-muted">ID：{{ manageDetailQuestion.id }}</span>
-            <span class="badge">{{ manageDetailQuestion.level }}</span>
-            <span :class="['badge', statusTone(manageDetailQuestion.status)]">{{ statusLabel[manageDetailQuestion.status] }}</span>
-            <span class="badge">截止：{{ formatDate(manageDetailQuestion.deadline) }}</span>
-            <span v-if="manageDetailQuestion.eventDomain" class="badge">事件域：{{ manageDetailQuestion.eventDomain }}</span>
-            <span v-if="manageDetailQuestion.eventType" class="badge">事件类型：{{ manageDetailQuestion.eventType }}</span>
-            <span v-if="manageDetailQuestion.area" class="badge">区域：{{ manageDetailQuestion.area }}</span>
-            <span v-if="manageDetailQuestion.inputType" class="badge">输入类型：{{ manageDetailQuestion.inputType }}</span>
-            <span v-if="manageDetailQuestion.matchScore !== null" class="badge">匹配分：{{ manageDetailQuestion.matchScore }}</span>
-            <span v-if="manageDetailQuestion.deletedAt" class="badge badge-muted">删除时间：{{ formatDate(manageDetailQuestion.deletedAt) }}</span>
+            <span class="badge badge-core">{{ manageDetailQuestion.level }}</span>
+            <span :class="['badge', 'badge-core', statusTone(manageDetailQuestion.status)]">{{ statusLabel[manageDetailQuestion.status] }}</span>
+            <span class="badge badge-core">截止：{{ formatDate(manageDetailQuestion.deadline) }}</span>
+            <span v-if="manageDetailQuestion.eventDomain" class="badge badge-normal">事件域：{{ manageDetailQuestion.eventDomain }}</span>
+            <span v-if="manageDetailQuestion.eventType" class="badge badge-normal">事件类型：{{ manageDetailQuestion.eventType }}</span>
+            <span v-if="manageDetailQuestion.area" class="badge badge-normal">区域：{{ manageDetailQuestion.area }}</span>
+            <span v-if="manageDetailQuestion.inputType" class="badge badge-normal">输入类型：{{ manageDetailQuestion.inputType }}</span>
+            <span class="badge badge-subtle">ID：{{ manageDetailQuestion.id }}</span>
+            <span v-if="manageDetailQuestion.matchScore !== null" class="badge badge-subtle">匹配分：{{ manageDetailQuestion.matchScore }}</span>
+            <span v-if="manageDetailQuestion.deletedAt" class="badge badge-subtle">删除时间：{{ formatDate(manageDetailQuestion.deletedAt) }}</span>
           </div>
         </article>
         <section class="detail-block question-answer-block">
           <h3>候选答案（投票项）</h3>
           <p v-if="currentQuestionAnswerOptions.length === 0" class="item-subtle">未解析到结构化选项，当前问题允许自由文本预测。</p>
-          <ul v-else class="question-answer-list">
-            <li v-for="option in currentQuestionAnswerOptions" :key="`question-answer-${manageDetailQuestion.id}-${option.id}`" class="question-answer-item">
+          <div v-else class="question-answer-list">
+            <button
+              v-for="option in currentQuestionAnswerOptions"
+              :key="`question-answer-${manageDetailQuestion.id}-${option.id}`"
+              :class="['question-answer-item', { 'my-prediction': mySelectedAnswerOption?.id === option.id }]"
+              type="button"
+              :disabled="!canCurrentQuestionInteract || predictionSubmitting"
+              @click="void handleAnswerOptionClick(option.id)"
+            >
               <span class="question-answer-key">{{ option.key }}</span>
-              <span>{{ option.label }}</span>
-            </li>
-          </ul>
+              <span class="question-answer-label">{{ option.label }}</span>
+              <span v-if="answerOptionPercentages.has(option.id)" class="question-answer-percentage">
+                {{ answerOptionPercentages.get(option.id) }}
+              </span>
+              <span v-if="mySelectedAnswerOption?.id === option.id" class="question-answer-badge">
+                我的预测
+              </span>
+            </button>
+          </div>
         </section>
         <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.hypothesis">
           <h3>假设</h3>

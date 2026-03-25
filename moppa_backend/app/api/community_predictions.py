@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user
@@ -61,3 +61,14 @@ def update_my_prediction(
     service = CommunityPredictionService(db)
     entity = service.update_mine(prediction_id, payload, current_user.id)
     return to_prediction_item(entity, current_user.username)
+
+
+@router.delete("/{prediction_id}", summary="Delete my prediction")
+def delete_my_prediction(
+    prediction_id: str,
+    db: Session = Depends(get_db),
+    current_user: AppUserEntity = Depends(get_current_user),
+) -> dict:
+    service = CommunityPredictionService(db)
+    service.delete_for_user(prediction_id, current_user.id)
+    return {"message": "Prediction deleted"}

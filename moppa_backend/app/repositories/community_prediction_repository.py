@@ -106,3 +106,20 @@ class CommunityPredictionRepository:
         self.db.commit()
         self.db.refresh(entity)
         return entity
+
+    def delete_for_user(self, prediction_id: UUID, user_id: UUID) -> CommunityPredictionEntity:
+        entity = self.db.scalar(
+            select(CommunityPredictionEntity).where(
+                CommunityPredictionEntity.id == prediction_id,
+                CommunityPredictionEntity.user_id == user_id,
+                CommunityPredictionEntity.deleted_at.is_(None),
+            )
+        )
+        if entity is None:
+            from app.core import ApiError
+            raise ApiError(status_code=404, code="PREDICTION_NOT_FOUND", message="Prediction not found")
+        entity.deleted_at = datetime.now(timezone.utc)
+        entity.updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(entity)
+        return entity

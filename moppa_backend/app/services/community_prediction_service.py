@@ -98,3 +98,18 @@ class CommunityPredictionService:
     @classmethod
     def _parse_uuid_list(cls, raws: list[str], field_name: str) -> list[UUID]:
         return [cls._parse_uuid(raw, field_name) for raw in raws]
+
+    def delete_for_user(self, prediction_id: str, user_id: UUID) -> CommunityPredictionEntity:
+        prediction_uuid = self._parse_uuid(prediction_id, "prediction_id")
+        entity = self.repository.get_by_id(prediction_uuid)
+        if entity is None:
+            raise ApiError(status_code=404, code="PREDICTION_NOT_FOUND", message="Prediction not found")
+        if entity.user_id != user_id:
+            raise ApiError(status_code=403, code="FORBIDDEN", message="You can only delete your own prediction")
+
+        question = self.question_repository.get_by_id(str(entity.question_id))
+        if question is None:
+            raise ApiError(status_code=404, code="QUESTION_NOT_FOUND", message="Question not found")
+        self._validate_question_open(question.status)
+
+        return self.repository.delete_for_user(prediction_uuid, user_id)

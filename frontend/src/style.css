@@ -1213,6 +1213,28 @@ textarea {
   background: var(--state-muted-bg);
 }
 
+/* Badge 分层样式 */
+.badge-core {
+  padding: 0.28rem 0.7rem;
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.badge-normal {
+  padding: 0.14rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.badge-subtle {
+  padding: 0.08rem 0.45rem;
+  font-size: 0.76rem;
+  color: var(--text-subtle);
+  border-color: color-mix(in srgb, var(--line-soft) 60%, transparent);
+  background: var(--state-muted-bg);
+  font-family: 'SF Mono', 'JetBrains Mono', 'Menlo', 'Monaco', monospace;
+}
+
 .tag-group {
   display: flex;
   gap: 0.3rem;
@@ -1633,7 +1655,7 @@ select:focus-visible {
 .question-story-tags {
   justify-content: flex-start;
   flex-wrap: wrap;
-  gap: 0.38rem;
+  gap: 0.55rem;
 }
 
 .event-story-link {
@@ -1679,9 +1701,6 @@ select:focus-visible {
 }
 
 .question-answer-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
   display: grid;
   gap: 0.45rem;
 }
@@ -1692,9 +1711,65 @@ select:focus-visible {
   background: var(--surface-3);
   padding: 0.52rem 0.6rem;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 0.5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.question-answer-item:hover {
+  border-color: var(--accent-strong);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+
+.question-answer-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.question-answer-item.my-prediction {
+  border-color: var(--state-success-border);
+  background: color-mix(in srgb, var(--state-success-bg) 40%, var(--surface-3));
+}
+
+.question-answer-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.question-answer-item:disabled:hover {
+  transform: none;
+  background: var(--surface-3);
+  border-color: var(--line-soft);
+}
+
+.question-answer-label {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.question-answer-percentage {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
+  white-space: nowrap;
+}
+
+.question-answer-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: var(--state-success-bg);
+  color: var(--state-success-fg);
+  border: 1px solid var(--state-success-border);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .question-answer-key,
