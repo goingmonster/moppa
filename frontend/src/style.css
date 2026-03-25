@@ -1700,6 +1700,26 @@ select:focus-visible {
   margin-bottom: 0.22rem;
 }
 
+.question-story-events {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--line-soft) 40%, transparent);
+  flex-wrap: wrap;
+}
+
+.question-story-events-label {
+  color: var(--text-subtle);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.question-story-events .tag-group {
+  justify-content: flex-start;
+}
+
 .question-answer-list {
   display: grid;
   gap: 0.45rem;

@@ -5542,6 +5542,19 @@ watch(backendStatus, (status, prev) => {
             <span v-if="manageDetailQuestion.matchScore !== null" class="badge badge-subtle">匹配分：{{ manageDetailQuestion.matchScore }}</span>
             <span v-if="manageDetailQuestion.deletedAt" class="badge badge-subtle">删除时间：{{ formatDate(manageDetailQuestion.deletedAt) }}</span>
           </div>
+          <div v-if="manageDetailQuestion.eventIds.length > 0" class="question-story-events">
+            <div class="tag-group">
+              <button
+                v-for="eventId in manageDetailQuestion.eventIds"
+                :key="`detail-event-${manageDetailQuestion.id}-${eventId}`"
+                type="button"
+                class="action-btn mini-btn linked-event-chip"
+                @click="void openQuestionLinkedEventDetail(eventId)"
+              >
+                {{ linkedEventDisplayLabel(eventId) }}
+              </button>
+            </div>
+          </div>
         </article>
         <section class="detail-block question-answer-block">
           <h3>候选答案（投票项）</h3>
@@ -5577,21 +5590,6 @@ watch(backendStatus, (status, prev) => {
         <section class="detail-block detail-summary-block" v-if="manageDetailQuestion.deleteReason">
           <h3>删除原因</h3>
           <p>{{ manageDetailQuestion.deleteReason }}</p>
-        </section>
-        <section class="detail-block detail-related-block">
-          <h3>关联事件</h3>
-          <div v-if="manageDetailQuestion.eventIds.length > 0" class="detail-related-events">
-            <button
-              v-for="eventId in manageDetailQuestion.eventIds"
-              :key="`detail-event-${manageDetailQuestion.id}-${eventId}`"
-              type="button"
-              class="action-btn mini-btn linked-event-chip"
-              @click="void openQuestionLinkedEventDetail(eventId)"
-            >
-              {{ linkedEventDisplayLabel(eventId) }}
-            </button>
-          </div>
-          <p v-else class="item-subtle">未关联事件</p>
         </section>
 
         <div class="field-block">
