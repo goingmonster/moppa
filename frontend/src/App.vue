@@ -1915,6 +1915,11 @@ async function fetchDataSources(page = 1): Promise<void> {
   dataSourceManageJumpPage.value = String(pageData.page)
 }
 
+function copyToClipboard(text: string): void {
+  window.navigator.clipboard.writeText(text)
+  backendStatus.value = '已复制到剪贴板'
+}
+
 async function fetchApiKeys(page = 1): Promise<void> {
   const pageData = await fetchJson<{ page: number; page_size: number; total: number; items: ApiKeyItem[] }>(
     `/api-keys?page=${page}&page_size=${apiKeyManagePageSize.value}`,
@@ -1964,7 +1969,7 @@ async function toggleApiKeyActive(item: ApiKeyItem): Promise<void> {
 
 async function deleteApiKey(id: string): Promise<void> {
   try {
-    await fetchJson(`/api-keys/${id}`, { method: 'DELETE' })
+    await sendJson(`/api-keys/${id}`, 'DELETE', {})
     await fetchApiKeys(apiKeyManagePage.value)
     backendStatus.value = 'API Key 已删除'
   } catch {
@@ -6546,7 +6551,7 @@ watch(backendStatus, (status, prev) => {
           <label>Token</label>
           <div class="action-row">
             <input :value="apiKeyCreatedToken" readonly style="flex:1" />
-            <button class="action-btn" @click="navigator.clipboard.writeText(apiKeyCreatedToken); backendStatus.value = '已复制到剪贴板'">复制</button>
+            <button class="action-btn" @click="copyToClipboard(apiKeyCreatedToken)">复制</button>
           </div>
         </div>
         <div class="action-row action-right">
