@@ -481,6 +481,17 @@ class QuestionRepository:
         rowcount = getattr(result, "rowcount", 0)
         return int(rowcount or 0) > 0
 
+    def list_expired(self, now: datetime) -> list[QuestionEntity]:
+        return list(
+            self.db.scalars(
+                select(QuestionEntity).where(
+                    QuestionEntity.deleted_at.is_(None),
+                    QuestionEntity.deadline < now,
+                    QuestionEntity.status.not_in(["expired", "closed", "draft"]),
+                )
+            )
+        )
+
     def update_area_if_empty(self, question_id: UUID, area: str) -> bool:
         now = datetime.now(timezone.utc)
         result = self.db.execute(

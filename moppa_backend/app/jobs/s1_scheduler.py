@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.models.s1_ingest_model import S1PullNowRequestModel
 from app.repositories.task_config_repository import TaskConfigRepository
 from app.services.auto_question_service import AutoQuestionService
+from app.services.question_expiry_service import QuestionExpiryService
 from app.services.question_location_analysis_service import QuestionLocationAnalysisService
 from app.services.s1_auto_review_service import S1AutoReviewService
 from app.services.s1_ingest_service import S1IngestService
@@ -54,6 +55,12 @@ def _run_tavily_ingest_job() -> None:
     with SessionLocal() as db:
         service = TavilyIngestService(db)
         _ = service.run_ingest_job()
+
+
+def _run_question_expiry_job() -> None:
+    with SessionLocal() as db:
+        service = QuestionExpiryService(db)
+        _ = service.run_expiry_check_job()
 
 
 def start_s1_scheduler() -> None:
@@ -119,6 +126,18 @@ def start_s1_scheduler() -> None:
             )
         except Exception:
             _logger.exception("Failed to register question location analysis scheduler job")
+
+    if settings.question_expiry_enabled:
+        try:
+            expiry_trigger = cron_trigger_class.from_crontab(settings.question_expiry_cron)
+            scheduler.add_job(
+                _run_question_expiry_job,
+                trigger=expiry_trigger,
+                id="question_expiry",
+                replace_existing=True,
+            )
+        except Exception:
+            _logger.exception("Failed to register question expiry scheduler job")
 
     scheduler.start()
     _scheduler = scheduler

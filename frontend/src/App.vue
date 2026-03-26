@@ -698,6 +698,7 @@ const tavilyIngestProcessing = ref(false)
 const autoReviewProcessing = ref(false)
 const autoQuestionProcessing = ref(false)
 const locationAnalysisProcessing = ref(false)
+const expiryProcessing = ref(false)
 const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
 const taskDetailRefreshing = ref(false)
@@ -1850,6 +1851,28 @@ async function triggerLocationAnalysisNow(): Promise<void> {
     backendStatus.value = '位置分析触发失败：请检查后端接口或参数格式'
   } finally {
     locationAnalysisProcessing.value = false
+  }
+}
+
+async function triggerExpiryCheckNow(): Promise<void> {
+  if (!backendOnline.value) {
+    backendStatus.value = '后端离线：无法触发问题过期检查'
+    return
+  }
+
+  expiryProcessing.value = true
+  try {
+    const result = await sendJson<S1TaskResponse>('/s1/jobs/question-expiry-now', 'POST', {})
+    backendStatus.value = `问题过期检查已触发：${result.task_id}`
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = '问题过期检查触发失败：请检查后端接口或参数格式'
+  } finally {
+    expiryProcessing.value = false
   }
 }
 
@@ -4942,6 +4965,7 @@ watch(backendStatus, (status, prev) => {
       :auto-review-processing="autoReviewProcessing"
       :auto-question-processing="autoQuestionProcessing"
       :location-analysis-processing="locationAnalysisProcessing"
+      :expiry-processing="expiryProcessing"
       :all-tasks-on-page-selected="allTasksOnPageSelected"
       :has-tasks="hasTasks"
       :tasks="tasks"
@@ -4955,6 +4979,7 @@ watch(backendStatus, (status, prev) => {
       @trigger-auto-review="triggerAutoReviewNow"
       @trigger-auto-question="triggerAutoQuestionNow"
       @trigger-location-analysis="triggerLocationAnalysisNow"
+      @trigger-expiry-check="triggerExpiryCheckNow"
       @open-create-task="createTaskDialogOpen = true"
       @toggle-select-all="toggleSelectAllTasksOnPage"
       @delete-selected-batch="deleteSelectedTasksBatch"
