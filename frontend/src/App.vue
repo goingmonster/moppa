@@ -299,6 +299,8 @@ interface AgentPredictionItem {
   confidence: number | null
   evidence: { url: string; content: string }[]
   questionText: string
+  isCorrect: boolean | null
+  score: number | null
   status: string
   createdAt: string
 }
@@ -316,6 +318,8 @@ interface BackendAgentPredictionItem {
   confidence: number | null
   evidence: { url: string; content: string }[]
   question_text: string
+  is_correct: boolean | null
+  score: number | null
   status: string
   created_at: string
 }
@@ -3130,6 +3134,8 @@ function toAgentPredictionItem(item: BackendAgentPredictionItem): AgentPredictio
     confidence: item.confidence,
     evidence: item.evidence,
     questionText: item.question_text,
+    isCorrect: item.is_correct,
+    score: item.score,
     status: item.status,
     createdAt: item.created_at,
   }
@@ -6038,6 +6044,9 @@ watch(backendStatus, (status, prev) => {
                 <p>{{ item.predictionContent }}</p>
                 <div class="action-row">
                   <span v-if="item.confidence !== null" class="chip">置信度 {{ item.confidence }}</span>
+                  <span v-if="item.isCorrect === true" class="chip badge-success">✓ 正确</span>
+                  <span v-else-if="item.isCorrect === false" class="chip badge-error">✗ 错误</span>
+                  <span v-if="item.score !== null" class="chip">得分 {{ item.score }}</span>
                 </div>
                 <p v-if="item.reasoning" class="item-subtle">依据：{{ item.reasoning }}</p>
                 <div v-if="item.evidence && item.evidence.length > 0" class="evidence-list">

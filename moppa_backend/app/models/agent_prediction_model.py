@@ -29,5 +29,7 @@ class AgentPredictionItemModel(BaseModel):
     confidence: int | None
     evidence: list[EvidenceItem]
     question_text: str
+    is_correct: bool | None = None
+    score: float | None = None
     status: str
     created_at: str

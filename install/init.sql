@@ -571,6 +571,8 @@ CREATE TABLE IF NOT EXISTS agent_prediction (
     confidence INTEGER CHECK (confidence BETWEEN 0 AND 100),
     evidence JSONB NOT NULL DEFAULT '[]'::jsonb,
     question_text TEXT NOT NULL,
+    is_correct BOOLEAN,
+    score NUMERIC(5,2) CHECK (score IS NULL OR score BETWEEN 0 AND 100),
     status VARCHAR(20) NOT NULL DEFAULT 'completed',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

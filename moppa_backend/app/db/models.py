@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Integer, String, Text, func, text
+from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -230,6 +230,8 @@ class AgentPredictionEntity(Base):
     confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence: Mapped[list[dict[str, str]]] = mapped_column("evidence", JSONB, server_default=text("'[]'::jsonb"))
     question_text: Mapped[str] = mapped_column(Text)
+    is_correct: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    score: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(20), server_default=text("'completed'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
