@@ -2302,3 +2302,57 @@ select:focus-visible {
     height: 300px;
   }
 }
+
+.dropdown-group {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-group > .action-btn::after {
+  content: ' ▾';
+  font-size: 0.7em;
+  margin-left: 0.2em;
+  opacity: 0.6;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 180px;
+  background: var(--surface-1, #fff);
+  border: 1px solid var(--line-soft, #e0e0e0);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 0.3rem 0;
+  list-style: none;
+  margin: 0;
+}
+
+.dropdown-menu li {
+  list-style: none;
+}
+
+.dropdown-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.85rem;
+  border: none;
+  background: none;
+  color: var(--text, #222);
+  cursor: pointer;
+  font-size: 0.85rem;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.dropdown-menu button:hover {
+  background: var(--surface-chip, #f0f0f0);
+}
+
+.dropdown-menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

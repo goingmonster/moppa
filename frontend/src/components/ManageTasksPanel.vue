@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+
 interface TaskItem {
   id: string
   taskType: string
@@ -42,6 +44,25 @@ const emit = defineEmits<{
   (e: 'jump-to-page'): void
 }>()
 
+const activeDropdown = ref<string | null>(null)
+
+function toggleDropdown(name: string, event: Event): void {
+  event.stopPropagation()
+  activeDropdown.value = activeDropdown.value === name ? null : name
+}
+
+function closeDropdowns(): void {
+  activeDropdown.value = null
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeDropdowns)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeDropdowns)
+})
+
 function taskStatusBadgeTone(status: TaskItem['status']): string {
   if (status === 'completed') {
     return 'badge-success'
@@ -67,22 +88,34 @@ function taskStatusBadgeTone(status: TaskItem['status']): string {
         <span>最新执行优先</span>
       </div>
       <div class="action-row manage-toolbar">
-        <button class="action-btn" @click="emit('open-trigger-pull')">拉取烽火事件</button>
-        <button class="action-btn" :disabled="tavilyIngestProcessing" @click="emit('trigger-tavily-ingest')">
-          {{ tavilyIngestProcessing ? '采集中...' : 'Tavily专题采集' }}
-        </button>
-        <button class="action-btn" :disabled="autoReviewProcessing" @click="emit('trigger-auto-review')">
-          {{ autoReviewProcessing ? '评审中...' : '一键评审' }}
-        </button>
-        <button class="action-btn" :disabled="autoQuestionProcessing" @click="emit('trigger-auto-question')">
-          {{ autoQuestionProcessing ? '提问中...' : '自动提问' }}
-        </button>
-        <button class="action-btn" :disabled="locationAnalysisProcessing" @click="emit('trigger-location-analysis')">
-          {{ locationAnalysisProcessing ? '分析中...' : '分析位置' }}
-        </button>
-        <button class="action-btn" :disabled="expiryProcessing" @click="emit('trigger-expiry-check')">
-          {{ expiryProcessing ? '检查中...' : '问题过期检查' }}
-        </button>
+        <div class="dropdown-group">
+          <button class="action-btn" @click="toggleDropdown('ingest', $event)">数据采集</button>
+          <ul v-if="activeDropdown === 'ingest'" class="dropdown-menu">
+            <li><button @click="emit('open-trigger-pull'); closeDropdowns()">拉取烽火事件</button></li>
+            <li><button :disabled="tavilyIngestProcessing" @click="emit('trigger-tavily-ingest'); closeDropdowns()">
+              {{ tavilyIngestProcessing ? '采集中...' : 'Tavily专题采集' }}
+            </button></li>
+          </ul>
+        </div>
+
+        <div class="dropdown-group">
+          <button class="action-btn" @click="toggleDropdown('process', $event)">自动处理</button>
+          <ul v-if="activeDropdown === 'process'" class="dropdown-menu">
+            <li><button :disabled="autoReviewProcessing" @click="emit('trigger-auto-review'); closeDropdowns()">
+              {{ autoReviewProcessing ? '评审中...' : '一键评审' }}
+            </button></li>
+            <li><button :disabled="autoQuestionProcessing" @click="emit('trigger-auto-question'); closeDropdowns()">
+              {{ autoQuestionProcessing ? '提问中...' : '自动提问' }}
+            </button></li>
+            <li><button :disabled="locationAnalysisProcessing" @click="emit('trigger-location-analysis'); closeDropdowns()">
+              {{ locationAnalysisProcessing ? '分析中...' : '分析位置' }}
+            </button></li>
+            <li><button :disabled="expiryProcessing" @click="emit('trigger-expiry-check'); closeDropdowns()">
+              {{ expiryProcessing ? '检查中...' : '问题过期检查' }}
+            </button></li>
+          </ul>
+        </div>
+
         <button class="action-btn" @click="emit('open-create-task')">新增任务</button>
         <button class="action-btn" @click="emit('toggle-select-all')">{{ allTasksOnPageSelected ? '取消全选本页' : '全选本页' }}</button>
         <button class="action-btn danger" @click="emit('delete-selected-batch')">批量删除</button>
