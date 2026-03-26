@@ -5,6 +5,7 @@ from app.api.auth import router as auth_router
 from app.api.agent_predictions import router as agent_predictions_router
 from app.api.api_keys import router as api_keys_router
 from app.api.event_filter_rules import router as event_filter_rules_router
+from app.api.model_endpoints import router as model_endpoints_router
 from app.api.events import router as events_router
 from app.api.data_sources import router as data_sources_router
 from app.api.health import router as health_router
@@ -48,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_predictions_router)
     app.include_router(data_sources_router)
     app.include_router(event_filter_rules_router)
+    app.include_router(model_endpoints_router)
     app.include_router(health_router)
     app.include_router(questions_router)
     app.include_router(community_predictions_router)

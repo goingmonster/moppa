@@ -236,3 +236,24 @@ class AgentPredictionEntity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ModelEndpointEntity(Base):
+    __tablename__ = "model_endpoint"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    name: Mapped[str] = mapped_column(String(100))
+    identifier: Mapped[str] = mapped_column(String(100))
+    provider: Mapped[str] = mapped_column(String(20))
+    endpoint_url: Mapped[str] = mapped_column(Text)
+    api_key_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_name: Mapped[str] = mapped_column(String(120))
+    model_version: Mapped[str] = mapped_column(String(40), server_default=text("'v1.0'"))
+    max_tokens: Mapped[int] = mapped_column(Integer, server_default=text("4096"))
+    temperature: Mapped[float] = mapped_column(Numeric(3, 2), server_default=text("0.7"))
+    timeout_seconds: Mapped[int] = mapped_column(Integer, server_default=text("120"))
+    is_available: Mapped[bool] = mapped_column(Boolean, server_default=text("TRUE"))
+    status: Mapped[str] = mapped_column(String(20), server_default=text("'active'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

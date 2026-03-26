@@ -14,7 +14,7 @@ import TopbarPanel from './components/TopbarPanel.vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
 type QuestionStatus = 'draft' | 'pending_review' | 'published' | 'expired' | 'matched' | 'closed'
-type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules' | 'apiKeys'
+type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules' | 'apiKeys' | 'modelEndpoints'
 type ToastKind = 'success' | 'error' | 'info'
 type ThemeId = 'olive' | 'blue' | 'sunset'
 
@@ -322,6 +322,24 @@ interface BackendAgentPredictionItem {
   score: number | null
   status: string
   created_at: string
+}
+
+interface ModelEndpointItem {
+  id: string
+  name: string
+  identifier: string
+  provider: string
+  endpoint_url: string
+  api_key_ref: string | null
+  model_name: string
+  model_version: string
+  max_tokens: number
+  temperature: number
+  timeout_seconds: number
+  is_available: boolean
+  status: string
+  created_at: string
+  updated_at: string
 }
 
 interface QuestionCommentItem {
@@ -841,6 +859,28 @@ const apiKeyEditName = ref('')
 const apiKeyEditUserType = ref('agent')
 const apiKeyEditPurpose = ref('')
 
+const modelEndpointList = ref<ModelEndpointItem[]>([])
+const modelEndpointManagePage = ref(1)
+const modelEndpointManageTotal = ref(0)
+const modelEndpointManagePageSize = ref(20)
+const modelEndpointManageJumpPage = ref('1')
+const modelEndpointFormDialogOpen = ref(false)
+const modelEndpointFormIsEdit = ref(false)
+const modelEndpointFormId = ref('')
+const meFormName = ref('')
+const meFormIdentifier = ref('')
+const meFormProvider = ref('openai')
+const meFormEndpointUrl = ref('')
+const meFormApiKeyRef = ref('')
+const meFormModelName = ref('')
+const meFormModelVersion = ref('v1.0')
+const meFormMaxTokens = ref('4096')
+const meFormTemperature = ref('0.7')
+const meFormTimeoutSeconds = ref('120')
+const meFormIsAvailable = ref(true)
+const meFormStatus = ref('active')
+const meApiKeyVisible = ref(false)
+
 const selectedTemplateDetail = computed(() => selectedTemplate.value)
 const isAuthenticated = computed(() => Boolean(authUser.value))
 const isAdmin = computed(() => authUser.value?.role === 'admin')
@@ -1350,11 +1390,6 @@ function selectEvent(id: string): void {
   if (firstQuestion) {
     selectedQuestionId.value = firstQuestion.id
   }
-}
-
-function openHomeDetail(eventItem: EventItem): void {
-  homeDetailEvent.value = eventItem
-  homeDetailDialogOpen.value = true
 }
 
 function openManageDetail(eventItem: EventItem): void {
@@ -2067,6 +2102,117 @@ function jumpToApiKeyPage(): void {
   const page = parseInt(apiKeyManageJumpPage.value, 10)
   if (!isNaN(page) && page >= 1) {
     fetchApiKeys(page)
+  }
+}
+
+async function fetchModelEndpoints(page = 1): Promise<void> {
+  const pageData = await fetchJson<{ page: number; page_size: number; total: number; items: ModelEndpointItem[] }>(
+    `/model-endpoints?page=${page}&page_size=${modelEndpointManagePageSize.value}`,
+  )
+  modelEndpointList.value = pageData.items
+  modelEndpointManageTotal.value = pageData.total
+  modelEndpointManagePage.value = pageData.page
+  modelEndpointManageJumpPage.value = String(pageData.page)
+}
+
+function openModelEndpointCreateDialog(): void {
+  modelEndpointFormIsEdit.value = false
+  modelEndpointFormId.value = ''
+  meFormName.value = ''
+  meFormIdentifier.value = ''
+  meFormProvider.value = 'openai'
+  meFormEndpointUrl.value = ''
+  meFormApiKeyRef.value = ''
+  meFormModelName.value = ''
+  meFormModelVersion.value = 'v1.0'
+  meFormMaxTokens.value = '4096'
+  meFormTemperature.value = '0.7'
+  meFormTimeoutSeconds.value = '120'
+  meFormIsAvailable.value = true
+  meFormStatus.value = 'active'
+  meApiKeyVisible.value = false
+  modelEndpointFormDialogOpen.value = true
+}
+
+function openModelEndpointEditDialog(item: ModelEndpointItem): void {
+  modelEndpointFormIsEdit.value = true
+  modelEndpointFormId.value = item.id
+  meFormName.value = item.name
+  meFormIdentifier.value = item.identifier
+  meFormProvider.value = item.provider
+  meFormEndpointUrl.value = item.endpoint_url
+  meFormApiKeyRef.value = item.api_key_ref ?? ''
+  meFormModelName.value = item.model_name
+  meFormModelVersion.value = item.model_version
+  meFormMaxTokens.value = String(item.max_tokens)
+  meFormTemperature.value = String(item.temperature)
+  meFormTimeoutSeconds.value = String(item.timeout_seconds)
+  meFormIsAvailable.value = item.is_available
+  meFormStatus.value = item.status
+  meApiKeyVisible.value = false
+  modelEndpointFormDialogOpen.value = true
+}
+
+async function submitModelEndpoint(): Promise<void> {
+  if (!meFormName.value.trim() || !meFormIdentifier.value.trim() || !meFormEndpointUrl.value.trim() || !meFormModelName.value.trim()) {
+    backendStatus.value = '请填写必填字段（名称、标识符、接口地址、模型名称）'
+    return
+  }
+  const body: Record<string, unknown> = {
+    name: meFormName.value.trim(),
+    identifier: meFormIdentifier.value.trim(),
+    provider: meFormProvider.value,
+    endpoint_url: meFormEndpointUrl.value.trim(),
+    api_key_ref: meFormApiKeyRef.value.trim() || null,
+    model_name: meFormModelName.value.trim(),
+    model_version: meFormModelVersion.value.trim(),
+    max_tokens: parseInt(meFormMaxTokens.value, 10) || 4096,
+    temperature: parseFloat(meFormTemperature.value) || 0.7,
+    timeout_seconds: parseInt(meFormTimeoutSeconds.value, 10) || 120,
+    is_available: meFormIsAvailable.value,
+    status: meFormStatus.value,
+  }
+  try {
+    if (modelEndpointFormIsEdit.value) {
+      await sendJson(`/model-endpoints/${modelEndpointFormId.value}`, 'PATCH', body)
+      backendStatus.value = '模型端点更新成功'
+    } else {
+      await sendJson('/model-endpoints', 'POST', body)
+      backendStatus.value = '模型端点创建成功'
+    }
+    modelEndpointFormDialogOpen.value = false
+    await fetchModelEndpoints(modelEndpointManagePage.value)
+  } catch {
+    backendStatus.value = '操作失败'
+  }
+}
+
+async function deleteModelEndpoints(ids: string[]): Promise<void> {
+  try {
+    await sendJson('/model-endpoints', 'DELETE', { ids })
+    backendStatus.value = `已删除 ${ids.length} 个模型端点`
+    await fetchModelEndpoints(modelEndpointManagePage.value)
+  } catch {
+    backendStatus.value = '删除失败'
+  }
+}
+
+function setModelEndpointPageSize(value: number): void {
+  modelEndpointManagePageSize.value = value
+  fetchModelEndpoints(1)
+}
+
+function goModelEndpointPage(delta: number): void {
+  const next = modelEndpointManagePage.value + delta
+  if (next >= 1 && next <= Math.max(1, Math.ceil(modelEndpointManageTotal.value / modelEndpointManagePageSize.value))) {
+    fetchModelEndpoints(next)
+  }
+}
+
+function jumpToModelEndpointPage(): void {
+  const page = parseInt(modelEndpointManageJumpPage.value, 10)
+  if (!isNaN(page) && page >= 1) {
+    fetchModelEndpoints(page)
   }
 }
 
@@ -4634,6 +4780,16 @@ function loadViewData(view: AppView): void {
       apiKeyManageJumpPage.value = '1'
     }
   }
+  if (view === 'modelEndpoints') {
+    if (backendOnline.value) {
+      void fetchModelEndpoints(1)
+    } else {
+      modelEndpointList.value = []
+      modelEndpointManageTotal.value = 0
+      modelEndpointManagePage.value = 1
+      modelEndpointManageJumpPage.value = '1'
+    }
+  }
 }
 
 watch(
@@ -5294,6 +5450,50 @@ watch(backendStatus, (status, prev) => {
           <input :value="apiKeyManageJumpPage" class="jump-input" placeholder="页码" @input="apiKeyManageJumpPage = ($event.target as HTMLInputElement).value" />
           <button class="action-btn" @click="jumpToApiKeyPage">跳转</button>
           <button class="action-btn" @click="goApiKeyPage(1)">下一页</button>
+        </div>
+      </article>
+    </main>
+
+    <main v-if="currentView === 'modelEndpoints'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>模型配置</h2>
+        </div>
+        <div class="action-row manage-toolbar">
+          <button class="action-btn" @click="openModelEndpointCreateDialog()">新增模型端点</button>
+        </div>
+        <div v-if="modelEndpointList.length === 0" class="empty-state">暂无模型端点</div>
+        <ul v-else class="event-list">
+          <li v-for="item in modelEndpointList" :key="item.id" class="question-card">
+            <div class="row-between">
+              <strong>{{ item.name }}</strong>
+              <div class="tag-group">
+                <span class="badge">{{ item.provider }}</span>
+                <span :class="['badge', item.is_available ? 'badge-success' : 'badge-error']">{{ item.is_available ? '可用' : '不可用' }}</span>
+                <span :class="['badge', item.status === 'active' ? 'badge-success' : item.status === 'inactive' ? 'badge-warning' : 'badge-muted']">{{ item.status }}</span>
+              </div>
+            </div>
+            <p class="item-meta">标识符：{{ item.identifier }}</p>
+            <p class="item-meta">模型：{{ item.model_name }} ({{ item.model_version }})</p>
+            <p class="item-subtle">地址：{{ item.endpoint_url }}</p>
+            <small class="item-subtle">max_tokens={{ item.max_tokens }} | temperature={{ item.temperature }} | timeout={{ item.timeout_seconds }}s</small>
+            <div class="action-row" style="margin-top:0.5rem">
+              <button class="action-btn" @click="openModelEndpointEditDialog(item)">编辑</button>
+              <button class="action-btn danger" @click="deleteModelEndpoints([item.id])">删除</button>
+            </div>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <select :value="modelEndpointManagePageSize" @change="setModelEndpointPageSize(Number(($event.target as HTMLSelectElement).value))">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+          <button class="action-btn" @click="goModelEndpointPage(-1)">上一页</button>
+          <input :value="modelEndpointManageJumpPage" class="jump-input" placeholder="页码" @input="modelEndpointManageJumpPage = ($event.target as HTMLInputElement).value" />
+          <button class="action-btn" @click="jumpToModelEndpointPage">跳转</button>
+          <button class="action-btn" @click="goModelEndpointPage(1)">下一页</button>
         </div>
       </article>
     </main>
@@ -6668,6 +6868,80 @@ watch(backendStatus, (status, prev) => {
         </div>
         <div class="action-row action-right">
           <button class="action-btn" @click="apiKeyCreatedToken = ''">关闭</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="modelEndpointFormDialogOpen" class="dialog-backdrop" @click.self="modelEndpointFormDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>{{ modelEndpointFormIsEdit ? '编辑模型端点' : '新增模型端点' }}</h2>
+          <button class="action-btn" @click="modelEndpointFormDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>名称 *</label>
+          <input v-model="meFormName" placeholder="如：通义千问-Plus" />
+        </div>
+        <div class="field-block">
+          <label>标识符 *</label>
+          <input v-model="meFormIdentifier" :disabled="modelEndpointFormIsEdit" placeholder="如：qwen-plus" />
+        </div>
+        <div class="field-block">
+          <label>提供商</label>
+          <select v-model="meFormProvider" :disabled="modelEndpointFormIsEdit">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="custom">Custom</option>
+            <option value="internal">Internal</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>接口地址 *</label>
+          <input v-model="meFormEndpointUrl" placeholder="https://api.example.com/v1" />
+        </div>
+        <div class="field-block">
+          <label>API Key</label>
+          <div class="action-row">
+            <input :type="meApiKeyVisible ? 'text' : 'password'" v-model="meFormApiKeyRef" placeholder="sk-..." style="flex:1" />
+            <button class="action-btn" @click="meApiKeyVisible = !meApiKeyVisible">{{ meApiKeyVisible ? '隐藏' : '显示' }}</button>
+          </div>
+        </div>
+        <div class="field-block">
+          <label>模型名称 *</label>
+          <input v-model="meFormModelName" placeholder="如：qwen-plus" />
+        </div>
+        <div class="field-block">
+          <label>版本</label>
+          <input v-model="meFormModelVersion" placeholder="v1.0" />
+        </div>
+        <div class="field-block">
+          <label>最大Token数</label>
+          <input v-model="meFormMaxTokens" type="number" />
+        </div>
+        <div class="field-block">
+          <label>温度 (0-2)</label>
+          <input v-model="meFormTemperature" type="number" step="0.1" min="0" max="2" />
+        </div>
+        <div class="field-block">
+          <label>超时时间(秒)</label>
+          <input v-model="meFormTimeoutSeconds" type="number" />
+        </div>
+        <div class="field-block">
+          <label>状态</label>
+          <select v-model="meFormStatus">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
+            <option value="archived">archived</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label style="display:flex;align-items:center;gap:0.5rem">
+            <input type="checkbox" :checked="meFormIsAvailable" @change="meFormIsAvailable = ($event.target as HTMLInputElement).checked" />
+            可用
+          </label>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitModelEndpoint()">{{ modelEndpointFormIsEdit ? '保存' : '确定' }}</button>
         </div>
       </section>
     </div>

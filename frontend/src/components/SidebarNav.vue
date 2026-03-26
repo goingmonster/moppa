@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules' | 'apiKeys'
+type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules' | 'apiKeys' | 'modelEndpoints'
 
 defineProps<{
   currentView: AppView
@@ -34,6 +34,7 @@ const emit = defineEmits<{
         <button type="button" :class="['level-btn', { active: currentView === 'dataSources' }]" :aria-pressed="currentView === 'dataSources'" @click="emit('update:view', 'dataSources')">数据源管理</button>
         <button type="button" :class="['level-btn', { active: currentView === 'filterRules' }]" :aria-pressed="currentView === 'filterRules'" @click="emit('update:view', 'filterRules')">过滤规则管理</button>
         <button type="button" :class="['level-btn', { active: currentView === 'apiKeys' }]" :aria-pressed="currentView === 'apiKeys'" @click="emit('update:view', 'apiKeys')">身份认证</button>
+        <button type="button" :class="['level-btn', { active: currentView === 'modelEndpoints' }]" :aria-pressed="currentView === 'modelEndpoints'" @click="emit('update:view', 'modelEndpoints')">模型配置</button>
       </div>
     </nav>
   </aside>
