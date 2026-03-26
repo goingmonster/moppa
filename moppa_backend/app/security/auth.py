@@ -2,12 +2,15 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.config import settings
+
+_logger = logging.getLogger(__name__)
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -132,3 +135,27 @@ def is_integration_api_token(token: str) -> bool:
     if not configured:
         return False
     return hmac.compare_digest(token, configured)
+
+
+def is_valid_api_key(token: str, db) -> bool:
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    try:
+        from app.db.models import ApiKeyEntity
+        from sqlalchemy import select
+
+        entity = db.scalar(
+            select(ApiKeyEntity).where(
+                ApiKeyEntity.token_hash == token_hash,
+                ApiKeyEntity.is_active.is_(True),
+                ApiKeyEntity.deleted_at.is_(None),
+            )
+        )
+        if entity is None:
+            _logger.warning("is_valid_api_key: no matching active API key found for token_hash=%s", token_hash[:16])
+            return False
+        entity.last_used_at = datetime.now(timezone.utc)
+        db.commit()
+        return True
+    except Exception:
+        _logger.exception("is_valid_api_key: unexpected error")
+        return False

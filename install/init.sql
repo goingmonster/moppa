@@ -183,6 +183,30 @@ CREATE TABLE IF NOT EXISTS auth_refresh_token (
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_token_user_id ON auth_refresh_token(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_refresh_token_expires_at ON auth_refresh_token(expires_at);
 
+-- API Key 管理表（永久有效的令牌，与 INTEGRATION_API_TOKEN 同等权限）
+CREATE TABLE IF NOT EXISTS api_key (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    token TEXT NOT NULL,
+    token_hash VARCHAR(128) NOT NULL UNIQUE,
+    token_prefix VARCHAR(12) NOT NULL,
+    user_type VARCHAR(20) NOT NULL CHECK (user_type IN ('agent', 'user', 'other')),
+    purpose VARCHAR(50),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    last_used_at TIMESTAMPTZ,
+    created_by UUID REFERENCES app_user(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_api_key_name_active
+ON api_key (name)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_api_key_token_hash ON api_key(token_hash)
+WHERE deleted_at IS NULL AND is_active = TRUE;
+
 -- 数据源注册表（S0）
 CREATE TABLE IF NOT EXISTS data_source (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -652,6 +676,10 @@ CREATE INDEX IF NOT EXISTS idx_quality_metric_name_window ON quality_metric(metr
 -- 触发器：为可变更表自动同步 updated_at
 DROP TRIGGER IF EXISTS trg_app_user_updated_at ON app_user;
 CREATE TRIGGER trg_app_user_updated_at BEFORE UPDATE ON app_user
+FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_api_key_updated_at ON api_key;
+CREATE TRIGGER trg_api_key_updated_at BEFORE UPDATE ON api_key
 FOR EACH ROW EXECUTE PROCEDURE set_updated_at();
 
 DROP TRIGGER IF EXISTS trg_data_source_updated_at ON data_source;

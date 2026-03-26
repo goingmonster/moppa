@@ -9,7 +9,7 @@ from app.core import ApiError
 from app.db.models import AppUserEntity
 from app.db.session import get_db
 from app.repositories.auth_repository import AuthRepository
-from app.security.auth import decode_access_token, is_integration_api_token
+from app.security.auth import decode_access_token, is_integration_api_token, is_valid_api_key
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -56,6 +56,9 @@ def get_current_user(
 
     token = _extract_bearer_token(authorization)
     if is_integration_api_token(token):
+        return _resolve_system_admin_user(db, preferred_username="integration-admin")
+
+    if is_valid_api_key(token, db):
         return _resolve_system_admin_user(db, preferred_username="integration-admin")
 
     try:

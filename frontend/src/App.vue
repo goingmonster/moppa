@@ -14,7 +14,7 @@ import TopbarPanel from './components/TopbarPanel.vue'
 
 type Level = 'L1' | 'L2' | 'L3' | 'L4'
 type QuestionStatus = 'draft' | 'pending_review' | 'published' | 'expired' | 'matched' | 'closed'
-type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules'
+type AppView = 'home' | 'events' | 'questions' | 'questionStream' | 'templates' | 'tasks' | 'dataSources' | 'filterRules' | 'apiKeys'
 type ToastKind = 'success' | 'error' | 'info'
 type ThemeId = 'olive' | 'blue' | 'sunset'
 
@@ -771,6 +771,35 @@ const editFilterRuleForm = reactive({
   status: 'active' as FilterRuleItem['status'],
   version: 'v1.0',
 })
+
+interface ApiKeyItem {
+  id: string
+  name: string
+  token: string
+  user_type: string
+  purpose: string | null
+  is_active: boolean
+  last_used_at: string | null
+  created_by: string | null
+  created_at: string
+}
+
+const apiKeyList = ref<ApiKeyItem[]>([])
+const apiKeyManagePage = ref(1)
+const apiKeyManageTotal = ref(0)
+const apiKeyManagePageSize = ref(20)
+const apiKeyManageJumpPage = ref('1')
+const apiKeyCreateDialogOpen = ref(false)
+const apiKeyCreatedToken = ref('')
+const apiKeyCreatedName = ref('')
+const apiKeyFormName = ref('')
+const apiKeyFormUserType = ref('agent')
+const apiKeyFormPurpose = ref('')
+const apiKeyEditDialogOpen = ref(false)
+const apiKeyEditId = ref('')
+const apiKeyEditName = ref('')
+const apiKeyEditUserType = ref('agent')
+const apiKeyEditPurpose = ref('')
 
 const selectedTemplateDetail = computed(() => selectedTemplate.value)
 const isAuthenticated = computed(() => Boolean(authUser.value))
@@ -1884,6 +1913,109 @@ async function fetchDataSources(page = 1): Promise<void> {
   dataSourceManageTotal.value = pageData.total
   dataSourceManagePage.value = pageData.page
   dataSourceManageJumpPage.value = String(pageData.page)
+}
+
+async function fetchApiKeys(page = 1): Promise<void> {
+  const pageData = await fetchJson<{ page: number; page_size: number; total: number; items: ApiKeyItem[] }>(
+    `/api-keys?page=${page}&page_size=${apiKeyManagePageSize.value}`,
+  )
+  apiKeyList.value = pageData.items
+  apiKeyManageTotal.value = pageData.total
+  apiKeyManagePage.value = pageData.page
+  apiKeyManageJumpPage.value = String(pageData.page)
+}
+
+function openApiKeyCreateDialog(): void {
+  apiKeyFormName.value = ''
+  apiKeyFormUserType.value = 'agent'
+  apiKeyFormPurpose.value = ''
+  apiKeyCreateDialogOpen.value = true
+}
+
+async function createApiKey(): Promise<void> {
+  if (!apiKeyFormName.value.trim()) {
+    backendStatus.value = '请输入用户名称'
+    return
+  }
+  try {
+    const result = await sendJson<{ id: string; name: string; token: string; user_type: string; purpose: string | null }>(
+      '/api-keys', 'POST',
+      { name: apiKeyFormName.value.trim(), user_type: apiKeyFormUserType.value, purpose: apiKeyFormPurpose.value.trim() || null },
+    )
+    apiKeyCreatedToken.value = result.token
+    apiKeyCreatedName.value = result.name
+    apiKeyCreateDialogOpen.value = false
+    backendStatus.value = `API Key 创建成功：${result.name}`
+    await fetchApiKeys(1)
+  } catch {
+    backendStatus.value = 'API Key 创建失败'
+  }
+}
+
+async function toggleApiKeyActive(item: ApiKeyItem): Promise<void> {
+  try {
+    await sendJson(`/api-keys/${item.id}`, 'PATCH', { is_active: !item.is_active })
+    await fetchApiKeys(apiKeyManagePage.value)
+    backendStatus.value = `${item.name} 已${item.is_active ? '禁用' : '启用'}`
+  } catch {
+    backendStatus.value = '操作失败'
+  }
+}
+
+async function deleteApiKey(id: string): Promise<void> {
+  try {
+    await fetchJson(`/api-keys/${id}`, { method: 'DELETE' })
+    await fetchApiKeys(apiKeyManagePage.value)
+    backendStatus.value = 'API Key 已删除'
+  } catch {
+    backendStatus.value = '删除失败'
+  }
+}
+
+function openApiKeyEditDialog(item: ApiKeyItem): void {
+  apiKeyEditId.value = item.id
+  apiKeyEditName.value = item.name
+  apiKeyEditUserType.value = item.user_type
+  apiKeyEditPurpose.value = item.purpose ?? ''
+  apiKeyEditDialogOpen.value = true
+}
+
+async function submitApiKeyEdit(): Promise<void> {
+  if (!apiKeyEditName.value.trim()) {
+    backendStatus.value = '请输入用户名称'
+    return
+  }
+  try {
+    await sendJson(`/api-keys/${apiKeyEditId.value}`, 'PATCH', {
+      name: apiKeyEditName.value.trim(),
+      user_type: apiKeyEditUserType.value,
+      purpose: apiKeyEditPurpose.value.trim() || null,
+    })
+    apiKeyEditDialogOpen.value = false
+    backendStatus.value = 'API Key 更新成功'
+    await fetchApiKeys(apiKeyManagePage.value)
+  } catch {
+    backendStatus.value = 'API Key 更新失败'
+  }
+}
+
+function setApiKeyManagePageSize(value: number): void {
+  apiKeyManagePageSize.value = value
+  fetchApiKeys(1)
+}
+
+function goApiKeyPage(delta: number): void {
+  const next = apiKeyManagePage.value + delta
+  if (next >= 1 && next <= Math.max(1, Math.ceil(apiKeyManageTotal.value / apiKeyManagePageSize.value))) {
+    fetchApiKeys(next)
+  }
+}
+
+function jumpToApiKeyPage(): void {
+  const page = parseInt(apiKeyManageJumpPage.value, 10)
+  if (!isNaN(page) && page >= 1) {
+    fetchApiKeys(page)
+  }
 }
 
 function openDataSourceDetail(item: DataSourceItem): void {
@@ -4414,6 +4546,16 @@ function loadViewData(view: AppView): void {
       selectedManageFilterRuleIds.value = []
     }
   }
+  if (view === 'apiKeys') {
+    if (backendOnline.value) {
+      void fetchApiKeys(1)
+    } else {
+      apiKeyList.value = []
+      apiKeyManageTotal.value = 0
+      apiKeyManagePage.value = 1
+      apiKeyManageJumpPage.value = '1'
+    }
+  }
 }
 
 watch(
@@ -5032,6 +5174,51 @@ watch(backendStatus, (status, prev) => {
       @update:jump-page="filterRuleManageJumpPage = $event"
       @jump-to-page="jumpToFilterRulePageFromInput"
     />
+
+    <main v-if="currentView === 'apiKeys'" class="manage-grid">
+      <article class="panel list-panel">
+        <div class="panel-head">
+          <h2>身份认证 - API Key 管理</h2>
+        </div>
+        <div class="action-row manage-toolbar">
+          <button class="action-btn" @click="openApiKeyCreateDialog">新增 API Key</button>
+        </div>
+        <div v-if="apiKeyList.length === 0" class="empty-state">暂无 API Key</div>
+        <ul v-else class="event-list">
+          <li v-for="item in apiKeyList" :key="item.id" class="question-card">
+            <div class="row-between">
+              <strong>{{ item.name }}</strong>
+              <div class="tag-group">
+                <span class="badge">{{ item.user_type }}</span>
+                <span v-if="item.purpose" class="badge">{{ item.purpose }}</span>
+                <span :class="['badge', item.is_active ? 'badge-success' : 'badge-error']">{{ item.is_active ? '启用' : '禁用' }}</span>
+              </div>
+            </div>
+            <p class="item-meta" style="word-break:break-all"><strong>Token：</strong>{{ item.token }}</p>
+            <small class="item-subtle">
+              创建时间：{{ item.created_at }} | 最后使用：{{ item.last_used_at ?? '从未使用' }}
+            </small>
+            <div class="action-row" style="margin-top:0.5rem">
+              <button class="action-btn" @click="openApiKeyEditDialog(item)">编辑</button>
+              <button class="action-btn" @click="toggleApiKeyActive(item)">{{ item.is_active ? '禁用' : '启用' }}</button>
+              <button class="action-btn danger" @click="deleteApiKey(item.id)">删除</button>
+            </div>
+          </li>
+        </ul>
+        <div class="action-row pagination-row pagination-center">
+          <span>每页</span>
+          <select :value="apiKeyManagePageSize" @change="setApiKeyManagePageSize(Number(($event.target as HTMLSelectElement).value))">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+          <button class="action-btn" @click="goApiKeyPage(-1)">上一页</button>
+          <input :value="apiKeyManageJumpPage" class="jump-input" placeholder="页码" @input="apiKeyManageJumpPage = ($event.target as HTMLInputElement).value" />
+          <button class="action-btn" @click="jumpToApiKeyPage">跳转</button>
+          <button class="action-btn" @click="goApiKeyPage(1)">下一页</button>
+        </div>
+      </article>
+    </main>
       </div>
 
     </div>
@@ -6277,6 +6464,93 @@ watch(backendStatus, (status, prev) => {
           <button class="action-btn" :disabled="authLoading" @click="submitAuth">
             {{ authLoading ? '处理中...' : authMode === 'login' ? '登录' : '注册并登录' }}
           </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="apiKeyCreateDialogOpen" class="dialog-backdrop" @click.self="apiKeyCreateDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>新增 API Key</h2>
+          <button class="action-btn" @click="apiKeyCreateDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>用户名称 <small>(不允许重复)</small></label>
+          <input v-model="apiKeyFormName" placeholder="输入名称" />
+        </div>
+        <div class="field-block">
+          <label>使用者类型</label>
+          <select v-model="apiKeyFormUserType">
+            <option value="agent">Agent</option>
+            <option value="user">User</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>用途 <small>(可选)</small></label>
+          <select v-model="apiKeyFormPurpose">
+            <option value="">不设置</option>
+            <option value="模型问答">模型问答</option>
+            <option value="接口调用">接口调用</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="createApiKey">确定</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="apiKeyEditDialogOpen" class="dialog-backdrop" @click.self="apiKeyEditDialogOpen = false">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>编辑 API Key</h2>
+          <button class="action-btn" @click="apiKeyEditDialogOpen = false">关闭</button>
+        </div>
+        <div class="field-block">
+          <label>用户名称 <small>(不允许重复)</small></label>
+          <input v-model="apiKeyEditName" placeholder="输入名称" />
+        </div>
+        <div class="field-block">
+          <label>使用者类型</label>
+          <select v-model="apiKeyEditUserType">
+            <option value="agent">Agent</option>
+            <option value="user">User</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label>用途 <small>(可选)</small></label>
+          <select v-model="apiKeyEditPurpose">
+            <option value="">不设置</option>
+            <option value="模型问答">模型问答</option>
+            <option value="接口调用">接口调用</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="submitApiKeyEdit">保存</button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="apiKeyCreatedToken" class="dialog-backdrop" @click.self="apiKeyCreatedToken = ''">
+      <section class="dialog-panel">
+        <div class="panel-head">
+          <h2>API Key 创建成功</h2>
+        </div>
+        <div class="field-block">
+          <p><strong>{{ apiKeyCreatedName }}</strong> 的 API Key 已生成，请立即复制保存。关闭后可随时在列表中查看。</p>
+        </div>
+        <div class="field-block">
+          <label>Token</label>
+          <div class="action-row">
+            <input :value="apiKeyCreatedToken" readonly style="flex:1" />
+            <button class="action-btn" @click="navigator.clipboard.writeText(apiKeyCreatedToken); backendStatus.value = '已复制到剪贴板'">复制</button>
+          </div>
+        </div>
+        <div class="action-row action-right">
+          <button class="action-btn" @click="apiKeyCreatedToken = ''">关闭</button>
         </div>
       </section>
     </div>
