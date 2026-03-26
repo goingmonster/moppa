@@ -1,3 +1,4 @@
+import hashlib
 from uuid import UUID
 
 from fastapi import Depends, Header
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core import ApiError
-from app.db.models import AppUserEntity
+from app.db.models import ApiKeyEntity, AppUserEntity
 from app.db.session import get_db
 from app.repositories.auth_repository import AuthRepository
 from app.security.auth import decode_access_token, is_integration_api_token, is_valid_api_key
@@ -83,3 +84,26 @@ def require_admin_user(current_user: AppUserEntity = Depends(get_current_user)) 
     if current_user.role != "admin":
         raise ApiError(status_code=403, code="FORBIDDEN", message="Admin role required")
     return current_user
+
+
+def get_current_api_key(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> ApiKeyEntity:
+    if not settings.auth_enabled:
+        raise ApiError(status_code=401, code="AUTH_REQUIRED", message="API Key authentication is enabled")
+    token = _extract_bearer_token(authorization)
+    if is_integration_api_token(token):
+        raise ApiError(status_code=401, code="API_KEY_REQUIRED", message="This endpoint requires an API Key, not the integration token")
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    from sqlalchemy import select as sa_select
+    entity = db.scalar(
+        sa_select(ApiKeyEntity).where(
+            ApiKeyEntity.token_hash == token_hash,
+            ApiKeyEntity.is_active.is_(True),
+            ApiKeyEntity.deleted_at.is_(None),
+        )
+    )
+    if entity is None:
+        raise ApiError(status_code=401, code="INVALID_API_KEY", message="Invalid or inactive API Key")
+    return entity

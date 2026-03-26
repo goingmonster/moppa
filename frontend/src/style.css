@@ -2356,3 +2356,21 @@ select:focus-visible {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.evidence-list {
+  margin-top: 0.4rem;
+  padding-left: 0.5rem;
+}
+
+.evidence-link {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--accent, #3b82f6);
+  text-decoration: none;
+  padding: 0.15rem 0;
+  word-break: break-all;
+}
+
+.evidence-link:hover {
+  text-decoration: underline;
+}

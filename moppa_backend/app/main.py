@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.agent_predictions import router as agent_predictions_router
 from app.api.api_keys import router as api_keys_router
 from app.api.event_filter_rules import router as event_filter_rules_router
 from app.api.events import router as events_router
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(events_router)
     app.include_router(auth_router)
     app.include_router(api_keys_router)
+    app.include_router(agent_predictions_router)
     app.include_router(data_sources_router)
     app.include_router(event_filter_rules_router)
     app.include_router(health_router)

@@ -216,3 +216,21 @@ class ApiKeyEntity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentPredictionEntity(Base):
+    __tablename__ = "agent_prediction"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    question_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    api_key_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    model_name: Mapped[str] = mapped_column(String(120))
+    prediction_content: Mapped[str] = mapped_column(Text)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evidence: Mapped[list[dict[str, str]]] = mapped_column("evidence", JSONB, server_default=text("'[]'::jsonb"))
+    question_text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), server_default=text("'completed'"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -286,6 +286,40 @@ interface BackendCommunityPredictionItem {
   updated_at: string
 }
 
+interface AgentPredictionItem {
+  id: string
+  questionId: string
+  apiKeyId: string
+  agentName: string
+  userType: string
+  purpose: string | null
+  modelName: string
+  predictionContent: string
+  reasoning: string | null
+  confidence: number | null
+  evidence: { url: string; content: string }[]
+  questionText: string
+  status: string
+  createdAt: string
+}
+
+interface BackendAgentPredictionItem {
+  id: string
+  question_id: string
+  api_key_id: string
+  agent_name: string
+  user_type: string
+  purpose: string | null
+  model_name: string
+  prediction_content: string
+  reasoning: string | null
+  confidence: number | null
+  evidence: { url: string; content: string }[]
+  question_text: string
+  status: string
+  created_at: string
+}
+
 interface QuestionCommentItem {
   id: string
   questionId: string
@@ -673,6 +707,7 @@ const pendingDeleteQuestionIds = ref<string[]>([])
 const pendingDeleteCloseQuestionEdit = ref(false)
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const questionPredictions = ref<Record<string, CommunityPredictionItem[]>>({})
+const questionAgentPredictions = ref<Record<string, AgentPredictionItem[]>>({})
 const questionComments = ref<Record<string, QuestionCommentItem[]>>({})
 const questionInteractionLoading = ref(false)
 const predictionSubmitting = ref(false)
@@ -684,6 +719,7 @@ const editingCommentContent = ref('')
 const commentActionLoading = ref(false)
 const questionComposerMode = ref<'prediction' | 'comment' | null>(null)
 const predictionPanelCollapsed = ref(false)
+const agentPredictionPanelCollapsed = ref(false)
 const commentPanelCollapsed = ref(false)
 const tasks = ref<TaskItem[]>([])
 const taskManagePage = ref(1)
@@ -999,6 +1035,13 @@ const activeQuestionPredictions = computed(() => {
     return []
   }
   return questionPredictions.value[questionId] ?? []
+})
+const activeQuestionAgentPredictions = computed(() => {
+  const questionId = manageDetailQuestion.value?.id
+  if (!questionId) {
+    return []
+  }
+  return questionAgentPredictions.value[questionId] ?? []
 })
 const activeQuestionComments = computed(() => {
   const questionId = manageDetailQuestion.value?.id
@@ -3073,6 +3116,25 @@ function toCommunityPredictionItem(item: BackendCommunityPredictionItem): Commun
   }
 }
 
+function toAgentPredictionItem(item: BackendAgentPredictionItem): AgentPredictionItem {
+  return {
+    id: item.id,
+    questionId: item.question_id,
+    apiKeyId: item.api_key_id,
+    agentName: item.agent_name,
+    userType: item.user_type,
+    purpose: item.purpose,
+    modelName: item.model_name,
+    predictionContent: item.prediction_content,
+    reasoning: item.reasoning,
+    confidence: item.confidence,
+    evidence: item.evidence,
+    questionText: item.question_text,
+    status: item.status,
+    createdAt: item.created_at,
+  }
+}
+
 function toQuestionCommentItem(item: BackendQuestionCommentItem): QuestionCommentItem {
   return {
     id: item.id,
@@ -3537,15 +3599,20 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
   }
   questionInteractionLoading.value = true
   try {
-    const [predictionResult, commentResult] = await Promise.all([
+    const [predictionResult, commentResult, agentPredictionResult] = await Promise.all([
       fetchJson<{ items: BackendCommunityPredictionItem[] }>(
         `/community-predictions?question_id=${encodeURIComponent(questionId)}`,
       ),
       fetchJson<{ items: BackendQuestionCommentItem[] }>(`/question-comments?question_id=${encodeURIComponent(questionId)}`),
+      fetchJson<BackendAgentPredictionItem[]>(`/agent-predictions/question/${encodeURIComponent(questionId)}`).catch((): BackendAgentPredictionItem[] => []),
     ])
     questionPredictions.value = {
       ...questionPredictions.value,
       [questionId]: predictionResult.items.map(toCommunityPredictionItem),
+    }
+    questionAgentPredictions.value = {
+      ...questionAgentPredictions.value,
+      [questionId]: agentPredictionResult.map(toAgentPredictionItem),
     }
     questionComments.value = {
       ...questionComments.value,
@@ -5944,6 +6011,42 @@ watch(backendStatus, (status, prev) => {
                   <span v-if="item.confidence !== null" class="chip">置信度 {{ item.confidence }}</span>
                   <span v-if="item.reasoning" class="item-subtle">依据：{{ item.reasoning }}</span>
                 </div>
+              </article>
+            </div>
+          </section>
+          <section class="subpanel">
+            <div class="discussion-panel-head">
+              <h3>模型预测</h3>
+              <button class="action-btn mini-btn" @click="agentPredictionPanelCollapsed = !agentPredictionPanelCollapsed">
+                {{ agentPredictionPanelCollapsed ? '展开' : '折叠' }}
+              </button>
+            </div>
+            <p v-if="agentPredictionPanelCollapsed" class="item-subtle">模型预测区已折叠</p>
+            <p v-else-if="activeQuestionAgentPredictions.length === 0" class="item-subtle">暂无模型预测</p>
+            <div v-else class="community-card-list">
+              <article v-for="item in activeQuestionAgentPredictions" :key="`agent-prediction-${item.id}`" class="community-item-card">
+                <div class="community-item-head">
+                  <strong>{{ item.agentName }}</strong>
+                  <div class="tag-group">
+                    <span class="badge">{{ item.modelName }}</span>
+                    <span v-if="item.userType === 'agent'" class="badge badge-info">Agent</span>
+                    <span v-else-if="item.userType === 'user'" class="badge">User</span>
+                    <span v-else class="badge badge-muted">Other</span>
+                    <span v-if="item.purpose" class="badge">{{ item.purpose }}</span>
+                  </div>
+                </div>
+                <p>{{ item.predictionContent }}</p>
+                <div class="action-row">
+                  <span v-if="item.confidence !== null" class="chip">置信度 {{ item.confidence }}</span>
+                </div>
+                <p v-if="item.reasoning" class="item-subtle">依据：{{ item.reasoning }}</p>
+                <div v-if="item.evidence && item.evidence.length > 0" class="evidence-list">
+                  <p class="item-subtle" style="margin-bottom:0.25rem">证据：</p>
+                  <a v-for="(ev, idx) in item.evidence" :key="`ev-${idx}`" :href="ev.url" target="_blank" rel="noopener" class="evidence-link">
+                    {{ ev.content || ev.url }}
+                  </a>
+                </div>
+                <small class="item-subtle">{{ formatDate(item.createdAt) }}</small>
               </article>
             </div>
           </section>
