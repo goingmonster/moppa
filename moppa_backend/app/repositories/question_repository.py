@@ -481,6 +481,27 @@ class QuestionRepository:
         rowcount = getattr(result, "rowcount", 0)
         return int(rowcount or 0) > 0
 
+    def list_published_by_date_range(
+        self, range_start: datetime | None, range_end: datetime | None, now: datetime
+    ) -> list[dict[str, object]]:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT q.id, q.level, q.content, q.background, q.answer_space,
+                       q.event_domain, q.event_type, q.area, q.deadline, q.created_at
+                FROM question q
+                WHERE q.deleted_at IS NULL
+                  AND q.status <> 'expired'
+                  AND (q.deadline IS NULL OR q.deadline >= :now)
+                  AND (:range_start IS NULL OR q.created_at >= :range_start)
+                  AND (:range_end IS NULL OR q.created_at < :range_end)
+                ORDER BY q.created_at ASC
+                """
+            ),
+            {"range_start": range_start, "range_end": range_end, "now": now},
+        ).mappings().all()
+        return [dict(row) for row in rows]
+
     def list_expired(self, now: datetime) -> list[QuestionEntity]:
         return list(
             self.db.scalars(

@@ -16,6 +16,7 @@ defineProps<{
   autoQuestionProcessing: boolean
   locationAnalysisProcessing: boolean
   expiryProcessing: boolean
+  modelPredictionProcessing: boolean
   allTasksOnPageSelected: boolean
   hasTasks: boolean
   tasks: TaskItem[]
@@ -33,6 +34,7 @@ const emit = defineEmits<{
   (e: 'trigger-auto-question'): void
   (e: 'trigger-location-analysis'): void
   (e: 'trigger-expiry-check'): void
+  (e: 'trigger-model-prediction'): void
   (e: 'open-create-task'): void
   (e: 'toggle-select-all'): void
   (e: 'delete-selected-batch'): void
@@ -112,6 +114,9 @@ function taskStatusBadgeTone(status: TaskItem['status']): string {
             </button></li>
             <li><button :disabled="expiryProcessing" @click="emit('trigger-expiry-check'); closeDropdowns()">
               {{ expiryProcessing ? '检查中...' : '问题过期检查' }}
+            </button></li>
+            <li><button :disabled="modelPredictionProcessing" @click="emit('trigger-model-prediction'); closeDropdowns()">
+              {{ modelPredictionProcessing ? '预测中...' : '模型预测' }}
             </button></li>
           </ul>
         </div>

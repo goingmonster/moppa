@@ -15,6 +15,7 @@ from app.api.question_comments import router as question_comments_router
 from app.api.question_templates import router as question_templates_router
 from app.api.s1_ingest import router as s1_ingest_router
 from app.api.task_configs import router as task_configs_router
+from app.api.predictions import router as predictions_router
 from app.api.tasks import router as tasks_router
 from app.config import settings
 from app.core import register_exception_handlers
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(data_sources_router)
     app.include_router(event_filter_rules_router)
     app.include_router(model_endpoints_router)
+    app.include_router(predictions_router)
     app.include_router(health_router)
     app.include_router(questions_router)
     app.include_router(community_predictions_router)

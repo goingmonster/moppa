@@ -324,6 +324,24 @@ interface BackendAgentPredictionItem {
   created_at: string
 }
 
+interface ModelPredictionItem {
+  id: string
+  questionId: string
+  modelName: string
+  predictionContent: string
+  tokenUsage: Record<string, unknown>
+  submissionTime: string
+}
+
+interface BackendModelPredictionItem {
+  id: string
+  question_id: string
+  model_name: string
+  prediction_content: string
+  token_usage: Record<string, unknown>
+  submission_time: string
+}
+
 interface ModelEndpointItem {
   id: string
   name: string
@@ -730,6 +748,7 @@ const pendingDeleteCloseQuestionEdit = ref(false)
 const manageDetailQuestion = ref<QuestionItem | null>(null)
 const questionPredictions = ref<Record<string, CommunityPredictionItem[]>>({})
 const questionAgentPredictions = ref<Record<string, AgentPredictionItem[]>>({})
+const questionModelPredictions = ref<Record<string, ModelPredictionItem[]>>({})
 const questionComments = ref<Record<string, QuestionCommentItem[]>>({})
 const questionInteractionLoading = ref(false)
 const predictionSubmitting = ref(false)
@@ -742,6 +761,7 @@ const commentActionLoading = ref(false)
 const questionComposerMode = ref<'prediction' | 'comment' | null>(null)
 const predictionPanelCollapsed = ref(false)
 const agentPredictionPanelCollapsed = ref(false)
+const modelPredictionPanelCollapsed = ref(false)
 const commentPanelCollapsed = ref(false)
 const tasks = ref<TaskItem[]>([])
 const taskManagePage = ref(1)
@@ -757,6 +777,7 @@ const autoReviewProcessing = ref(false)
 const autoQuestionProcessing = ref(false)
 const locationAnalysisProcessing = ref(false)
 const expiryProcessing = ref(false)
+const modelPredictionProcessing = ref(false)
 const selectedTask = ref<TaskItem | null>(null)
 const selectedTaskDetail = ref<S1JobDetail | null>(null)
 const taskDetailRefreshing = ref(false)
@@ -1087,6 +1108,13 @@ const activeQuestionAgentPredictions = computed(() => {
   }
   return questionAgentPredictions.value[questionId] ?? []
 })
+const activeQuestionModelPredictions = computed(() => {
+  const questionId = manageDetailQuestion.value?.id
+  if (!questionId) {
+    return []
+  }
+  return questionModelPredictions.value[questionId] ?? []
+})
 const activeQuestionComments = computed(() => {
   const questionId = manageDetailQuestion.value?.id
   if (!questionId) {
@@ -1396,6 +1424,12 @@ function openManageDetail(eventItem: EventItem): void {
   selectedEventId.value = eventItem.id
   manageDetailEvent.value = eventItem
   eventDetailDialogOpen.value = true
+}
+
+function openHomeDetail(eventItem: EventItem): void {
+  selectedEventId.value = eventItem.id
+  homeDetailEvent.value = eventItem
+  homeDetailDialogOpen.value = true
 }
 
 function openEventEdit(eventItem: EventItem): void {
@@ -1984,6 +2018,28 @@ async function triggerExpiryCheckNow(): Promise<void> {
     backendStatus.value = '问题过期检查触发失败：请检查后端接口或参数格式'
   } finally {
     expiryProcessing.value = false
+  }
+}
+
+async function triggerModelPredictionNow(): Promise<void> {
+  if (!backendOnline.value) {
+    backendStatus.value = '后端离线：无法触发模型预测'
+    return
+  }
+
+  modelPredictionProcessing.value = true
+  try {
+    const result = await sendJson<S1TaskResponse>('/jobs/model-prediction-now', 'POST', {})
+    backendStatus.value = `模型预测已触发：${result.task_id}`
+    await fetchTasks(1)
+    const matched = tasks.value.find((item) => item.id === result.task_id)
+    if (matched) {
+      openTaskDetail(matched)
+    }
+  } catch {
+    backendStatus.value = '模型预测触发失败：请检查后端接口或参数格式'
+  } finally {
+    modelPredictionProcessing.value = false
   }
 }
 
@@ -3287,6 +3343,17 @@ function toAgentPredictionItem(item: BackendAgentPredictionItem): AgentPredictio
   }
 }
 
+function toModelPredictionItem(item: BackendModelPredictionItem): ModelPredictionItem {
+  return {
+    id: item.id,
+    questionId: item.question_id,
+    modelName: item.model_name,
+    predictionContent: item.prediction_content,
+    tokenUsage: item.token_usage ?? {},
+    submissionTime: item.submission_time,
+  }
+}
+
 function toQuestionCommentItem(item: BackendQuestionCommentItem): QuestionCommentItem {
   return {
     id: item.id,
@@ -3751,12 +3818,13 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
   }
   questionInteractionLoading.value = true
   try {
-    const [predictionResult, commentResult, agentPredictionResult] = await Promise.all([
+    const [predictionResult, commentResult, agentPredictionResult, modelPredictionResult] = await Promise.all([
       fetchJson<{ items: BackendCommunityPredictionItem[] }>(
         `/community-predictions?question_id=${encodeURIComponent(questionId)}`,
       ),
       fetchJson<{ items: BackendQuestionCommentItem[] }>(`/question-comments?question_id=${encodeURIComponent(questionId)}`),
       fetchJson<BackendAgentPredictionItem[]>(`/agent-predictions/question/${encodeURIComponent(questionId)}`).catch((): BackendAgentPredictionItem[] => []),
+      fetchJson<BackendModelPredictionItem[]>(`/predictions/question/${encodeURIComponent(questionId)}`).catch((): BackendModelPredictionItem[] => []),
     ])
     questionPredictions.value = {
       ...questionPredictions.value,
@@ -3765,6 +3833,10 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
     questionAgentPredictions.value = {
       ...questionAgentPredictions.value,
       [questionId]: agentPredictionResult.map(toAgentPredictionItem),
+    }
+    questionModelPredictions.value = {
+      ...questionModelPredictions.value,
+      [questionId]: modelPredictionResult.map(toModelPredictionItem),
     }
     questionComments.value = {
       ...questionComments.value,
@@ -3786,7 +3858,7 @@ async function loadQuestionInteractions(questionId: string): Promise<void> {
     }
     applyPredictionFormFromMine(questionId)
   } catch {
-    backendStatus.value = '问题互动加载失败：请检查预测和评论接口'
+    backendStatus.value = '问题互动加载失败：请检查预测、模型预测和评论接口'
   } finally {
     questionInteractionLoading.value = false
   }
@@ -5342,6 +5414,7 @@ watch(backendStatus, (status, prev) => {
       :auto-question-processing="autoQuestionProcessing"
       :location-analysis-processing="locationAnalysisProcessing"
       :expiry-processing="expiryProcessing"
+      :model-prediction-processing="modelPredictionProcessing"
       :all-tasks-on-page-selected="allTasksOnPageSelected"
       :has-tasks="hasTasks"
       :tasks="tasks"
@@ -5356,6 +5429,7 @@ watch(backendStatus, (status, prev) => {
       @trigger-auto-question="triggerAutoQuestionNow"
       @trigger-location-analysis="triggerLocationAnalysisNow"
       @trigger-expiry-check="triggerExpiryCheckNow"
+      @trigger-model-prediction="triggerModelPredictionNow"
       @open-create-task="createTaskDialogOpen = true"
       @toggle-select-all="toggleSelectAllTasksOnPage"
       @delete-selected-batch="deleteSelectedTasksBatch"
@@ -6256,6 +6330,26 @@ watch(backendStatus, (status, prev) => {
                   </a>
                 </div>
                 <small class="item-subtle">{{ formatDate(item.createdAt) }}</small>
+              </article>
+            </div>
+          </section>
+          <section class="subpanel">
+            <div class="discussion-panel-head">
+              <h3>内部模型结果</h3>
+              <button class="action-btn mini-btn" @click="modelPredictionPanelCollapsed = !modelPredictionPanelCollapsed">
+                {{ modelPredictionPanelCollapsed ? '展开' : '折叠' }}
+              </button>
+            </div>
+            <p v-if="modelPredictionPanelCollapsed" class="item-subtle">内部模型结果区已折叠</p>
+            <p v-else-if="activeQuestionModelPredictions.length === 0" class="item-subtle">暂无内部模型结果</p>
+            <div v-else class="community-card-list">
+              <article v-for="item in activeQuestionModelPredictions" :key="`internal-model-${item.id}`" class="community-item-card">
+                <div class="community-item-head">
+                  <strong>{{ item.modelName }}</strong>
+                  <span class="item-subtle">{{ formatDate(item.submissionTime) }}</span>
+                </div>
+                <p>{{ item.predictionContent }}</p>
+                <p class="item-subtle">token_usage: {{ JSON.stringify(item.tokenUsage) }}</p>
               </article>
             </div>
           </section>

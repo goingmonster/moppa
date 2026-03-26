@@ -138,6 +138,23 @@ class ModelEndpointRepository:
         self.db.commit()
         return dict(row) if row else None
 
+    def list_active(self) -> list[dict[str, object]]:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT id, name, identifier, provider, endpoint_url, api_key_ref,
+                       model_name, model_version, max_tokens, temperature,
+                       timeout_seconds, is_available, status
+                FROM model_endpoint
+                WHERE deleted_at IS NULL
+                  AND is_available = TRUE
+                  AND status = 'active'
+                ORDER BY created_at ASC
+                """
+            )
+        ).mappings().all()
+        return [dict(row) for row in rows]
+
     def batch_soft_delete(self, ids: list[str]) -> int:
         now = datetime.now(timezone.utc)
         uuid_ids = [str(UUID(eid)) for eid in ids]

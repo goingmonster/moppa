@@ -80,6 +80,9 @@ class Settings:
     question_location_analysis_scope: str
     question_expiry_enabled: bool
     question_expiry_cron: str
+    model_prediction_enabled: bool
+    model_prediction_cron: str
+    model_prediction_event_scope: str
     question_location_analysis_osm_base_url: str
     question_location_analysis_osm_timeout_seconds: int
     log_level: str
@@ -248,6 +251,15 @@ def load_settings() -> Settings:
         question_expiry_cron=normalize_cron(
             os.getenv("QUESTION_EXPIRY_CRON", "0 * * * *"),
             "0 * * * *",
+        ),
+        model_prediction_enabled=env_bool("MODEL_PREDICTION_ENABLED", True),
+        model_prediction_cron=normalize_cron(
+            os.getenv("MODEL_PREDICTION_CRON", "0 3 * * *"),
+            "0 3 * * *",
+        ),
+        model_prediction_event_scope=normalize_event_scope(
+            os.getenv("MODEL_PREDICTION_EVENT_SCOPE", "today"),
+            "today",
         ),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
         log_file_path=os.getenv("LOG_FILE_PATH", "logs/backend.log").strip(),

@@ -6,6 +6,7 @@ from app.db.session import SessionLocal
 from app.models.s1_ingest_model import S1PullNowRequestModel
 from app.repositories.task_config_repository import TaskConfigRepository
 from app.services.auto_question_service import AutoQuestionService
+from app.services.model_prediction_service import ModelPredictionService
 from app.services.question_expiry_service import QuestionExpiryService
 from app.services.question_location_analysis_service import QuestionLocationAnalysisService
 from app.services.s1_auto_review_service import S1AutoReviewService
@@ -61,6 +62,12 @@ def _run_question_expiry_job() -> None:
     with SessionLocal() as db:
         service = QuestionExpiryService(db)
         _ = service.run_expiry_check_job()
+
+
+def _run_model_prediction_job() -> None:
+    with SessionLocal() as db:
+        service = ModelPredictionService(db)
+        _ = service.run_prediction_job()
 
 
 def start_s1_scheduler() -> None:
@@ -138,6 +145,18 @@ def start_s1_scheduler() -> None:
             )
         except Exception:
             _logger.exception("Failed to register question expiry scheduler job")
+
+    if settings.model_prediction_enabled:
+        try:
+            prediction_trigger = cron_trigger_class.from_crontab(settings.model_prediction_cron)
+            scheduler.add_job(
+                _run_model_prediction_job,
+                trigger=prediction_trigger,
+                id="model_prediction",
+                replace_existing=True,
+            )
+        except Exception:
+            _logger.exception("Failed to register model prediction scheduler job")
 
     scheduler.start()
     _scheduler = scheduler

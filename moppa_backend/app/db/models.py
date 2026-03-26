@@ -238,6 +238,28 @@ class AgentPredictionEntity(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PredictionEntity(Base):
+    __tablename__ = "prediction"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    version: Mapped[str] = mapped_column(String(20), server_default=text("'v1.0'"))
+    question_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    model_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    prediction_content: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    inference_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    token_usage: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    source_system: Mapped[str] = mapped_column(String(100), server_default=text("'moppa'"))
+    trace_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    task_execution_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), server_default=text("'pending'"))
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submission_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ModelEndpointEntity(Base):
     __tablename__ = "model_endpoint"
 
