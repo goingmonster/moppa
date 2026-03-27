@@ -21,6 +21,7 @@ class QuestionCreateModel(BaseModel):
     deadline: datetime
     status: str | None = None
     trace_id: UUID
+    created_at: datetime | None = None
 
 
 class QuestionCoordinatesModel(BaseModel):

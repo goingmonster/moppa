@@ -69,15 +69,15 @@ class EventRepository:
         query = select(EventEntity).where(
             EventEntity.deleted_at.is_(None),
             EventEntity.filter_status == "passed",
-            EventEntity.event_time >= day_start,
-            EventEntity.event_time < day_end,
+            EventEntity.created_at >= day_start,
+            EventEntity.created_at < day_end,
         )
         if source_systems:
             query = query.where(EventEntity.source_system.in_(source_systems))
         return list(
             self.db.scalars(
                 query
-                .order_by(EventEntity.event_time.asc(), EventEntity.id.asc())
+                .order_by(EventEntity.created_at.asc(), EventEntity.id.asc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -93,7 +93,7 @@ class EventRepository:
         return list(
             self.db.scalars(
                 query
-                .order_by(EventEntity.event_time.asc(), EventEntity.id.asc())
+                .order_by(EventEntity.created_at.asc(), EventEntity.id.asc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -110,9 +110,9 @@ class EventRepository:
             EventEntity.filter_status == "passed",
         )
         if day_start is not None:
-            query = query.where(EventEntity.event_time >= day_start)
+            query = query.where(EventEntity.created_at >= day_start)
         if day_end is not None:
-            query = query.where(EventEntity.event_time < day_end)
+            query = query.where(EventEntity.created_at < day_end)
         if source_systems:
             query = query.where(EventEntity.source_system.in_(source_systems))
         total = self.db.scalar(query)

@@ -383,10 +383,12 @@ class AutoQuestionService:
         event_by_url: dict[str, UUID] = {}
         event_by_source_id: dict[str, UUID] = {}
         event_by_event_key: dict[str, UUID] = {}
+        event_created_at_map: dict[UUID, datetime] = {}
         for event in batch_events:
             url = (event.url or "").strip()
             title = (event.title or "").strip()
             event_by_source_id[str(event.id)] = event.id
+            event_created_at_map[event.id] = event.created_at
             if event.event_key:
                 event_by_event_key[event.event_key.strip()] = event.id
             if url:
@@ -431,6 +433,7 @@ class AutoQuestionService:
                 event_by_url=event_by_url,
                 batch_events=batch_events,
             )
+            question_created_at = event_created_at_map.get(linked_event_ids[0]) if linked_event_ids else None
             payload = QuestionCreateModel(
                 event_id=linked_event_ids[0] if linked_event_ids else None,
                 event_ids=linked_event_ids,
@@ -448,6 +451,7 @@ class AutoQuestionService:
                 deadline=deadline,
                 status="matched",
                 trace_id=uuid4(),
+                created_at=question_created_at,
             )
             try:
                 _ = self.question_repository.create(payload)

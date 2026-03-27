@@ -31,6 +31,7 @@ class QuestionRepository:
             deadline=payload.deadline,
             trace_id=payload.trace_id,
             status=self._normalize_status(payload.status or "draft"),
+            created_at=payload.created_at,
         )
         self.db.add(entity)
         self.db.flush()
